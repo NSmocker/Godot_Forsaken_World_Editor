@@ -19,6 +19,7 @@ How to use:
 1. Create a Folder called ".resources" (yes with a Point, to stop Godot from crazy loading)
 2. Unpack your .pck Data with WinPCK and put it in ".resources"
 3. You can also put all your GFX files in "GFX_Import" and the GFX Files you want to batch import in "GFX_Load" 
-   (for batch import you still need "GFXEditor_Textures_out", "GFXEditor_Sfx_out" and "GFXEditor_Models_out") (bit complicate now but will be easier in Future) 
+   (for batch import you still need "GFXEditor_Textures_out", "GFXEditor_Sfx_out" and "GFXEditor_Models_out") (bit complicate now but will be easier in Future)
+4. pleas put "interfaces" "script" and "surfaces" in your Language Folder for XML view. (like on the Picture) 
    
 <img width="895" height="519" alt="Bildschirmfoto vom 2026-11-01 22-10-20" src="https://github.com/user-attachments/assets/6ee0b583-80fb-4f85-ad94-bb1756ebe38c" />
