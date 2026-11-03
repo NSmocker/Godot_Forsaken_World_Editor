@@ -83,6 +83,17 @@ namespace SilverEcho.ForsakenWorld.Editor
             return root;
         }
 
+        public static GameObject BuildHierarchyWithAnimations(
+            AssembledModel model,
+            IEnumerable<AssembledAnimation> animations,
+            string rootName = null)
+        {
+            var root = BuildHierarchy(model, rootName);
+            var clips = AssembledAnimationClipBuilder.CreateClips(animations ?? model.Animations);
+            AssembledAnimationClipBuilder.BindClipsToHierarchy(root, clips);
+            return root;
+        }
+
         public static Mesh BuildCombinedMesh(AssembledSkin skin)
         {
             if (skin == null)

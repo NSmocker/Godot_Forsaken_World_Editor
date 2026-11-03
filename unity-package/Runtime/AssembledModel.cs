@@ -11,6 +11,7 @@ namespace SilverEcho.ForsakenWorld
         public List<AssembledBone> HookBones { get; } = new List<AssembledBone>();
         public List<AssembledSkin> Skins { get; } = new List<AssembledSkin>();
         public List<AssembledActionReference> Actions { get; } = new List<AssembledActionReference>();
+        public List<AssembledAnimation> Animations { get; } = new List<AssembledAnimation>();
         public List<string> Warnings { get; } = new List<string>();
         public List<string> Errors { get; } = new List<string>();
         public bool IsValid => Errors.Count == 0 && Bones.Count > 0;
@@ -21,6 +22,7 @@ namespace SilverEcho.ForsakenWorld
         public string Name { get; internal set; } = string.Empty;
         public int ParentIndex { get; internal set; } = -1;
         public byte Flags { get; internal set; }
+        public int FirstJointIndex { get; internal set; } = -1;
         public float[] LocalPosition { get; internal set; }
         public float[] LocalRotation { get; internal set; }
         public float[] LocalScale { get; internal set; }

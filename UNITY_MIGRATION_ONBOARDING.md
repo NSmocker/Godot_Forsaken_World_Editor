@@ -29,9 +29,9 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
 | ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Binary `MOXB` ECM, model assembly, and animation/event integration are unsupported. |
-| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler` plus Editor `AssembledModelUnityBuilder` assemble skeletons/meshes (Unity LH, preserve on-disk winding; no Godot vert 1↔2 swap). Morph/Supple/Muscle, materials, AnimationClip, and playback remain. |
+| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder` assemble skeletons/meshes/AnimationClips (Unity LH, preserve on-disk winding; STCK sampling matches Godot reader/builder). Morph/Supple/Muscle, materials, and scene playback remain. |
 | Maps and AUI | Not ported. `.trn2` is indexed but not parsed/imported; AUI and localization readers/previews are not implemented. |
-| Verification | Standalone harness (Unity/NUnit stubs) passed 43 tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs. Not a Unity Test Runner run; AssetDatabase/UI remain unverified. Game assets were not committed. |
+| Verification | Standalone harness (Unity/NUnit stubs) passed 49 tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip missing track; 1224040 joint-track evals OK). Not a Unity Test Runner run; AssetDatabase/UI remain unverified. Game assets were not committed. |
 
 There is no Unity host project in this repository, and the Unity Editor was unavailable in the
 last verification environment. Do not claim that Unity integration has been tested. A host
@@ -120,14 +120,11 @@ from names or comments alone.
 
 ## Recommended next work
 
-1. Create AnimationClips from parsed STCK tracks (sample/evaluate keys and segments; do not
-   conflate that with the already-covered byte-level STCK parser tests). Wire clips into the
-   assembled model hierarchy.
-2. Material/texture binding for assembled skins; harden Editor preview instantiation beyond the
-   current assemble-preview details panel.
-3. Optional: support additional SMD/BON/SKI versions only when a concrete need and fixtures
+1. Material/texture binding for assembled skins; harden Editor preview instantiation / scene
+   playback beyond the assemble-preview details panel and AnimationClip import.
+2. Optional: support additional SMD/BON/SKI versions only when a concrete need and fixtures
    exist (current targets remain SMD v8, BON v6, SKI v9, STCK v1).
-4. After the model pipeline, resume GFX runtime/rendering, maps, and AUI according to `TODO.md`;
+3. After the model pipeline, resume GFX runtime/rendering, maps, and AUI according to `TODO.md`;
    these are substantial feature areas, not implied complete by the current browser.
 
 ## Progress reporting template

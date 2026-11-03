@@ -108,6 +108,7 @@ namespace SilverEcho.ForsakenWorld
                     Name = UniqueName(usedNames, CleanName(bone.Name, "Bone")),
                     ParentIndex = parent,
                     Flags = bone.Flags,
+                    FirstJointIndex = bone.FirstJointIndex,
                     LocalPosition = position,
                     LocalRotation = rotation,
                     LocalScale = scale,

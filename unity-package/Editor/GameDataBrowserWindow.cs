@@ -189,6 +189,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                             ImportSelectedAsset();
                     }
 
+                    using (new EditorGUI.DisabledScope(
+                        selectedAssembledModel == null ||
+                        !selectedAssembledModel.IsValid ||
+                        selectedAssembledModel.Animations.Count == 0))
+                    {
+                        if (GUILayout.Button("Import assembled AnimationClips"))
+                            ImportAssembledAnimationClips();
+                    }
+
                     if (selectedGfx != null)
                         DrawGfxDetails(selectedGfx);
                     else if (selectedEcm != null)
@@ -284,7 +293,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             foreach (var action in document.CombinedActions)
             {
                 EditorGUILayout.LabelField(
-                    action.Name + " ← " + string.Join(", ", action.BaseActionNames),
+                    action.Name + " from " + string.Join(", ", action.BaseActionNames),
                     EditorStyles.miniLabel);
             }
 
@@ -899,6 +908,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             EditorGUILayout.LabelField("Hooks: " + model.HookBones.Count);
             EditorGUILayout.LabelField("Skins: " + model.Skins.Count);
             EditorGUILayout.LabelField("Actions: " + model.Actions.Count);
+            EditorGUILayout.LabelField("Animations: " + model.Animations.Count);
             EditorGUILayout.LabelField(
                 "Status: " + (model.IsValid ? "OK" : "Has errors"),
                 EditorStyles.miniBoldLabel);
@@ -908,6 +918,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.LabelField(
                     skin.SourcePath + " (" + skin.Surfaces.Count + " surfaces, " +
                     skin.BindBones.Count + " bind bones)",
+                    EditorStyles.miniLabel);
+            }
+
+            foreach (var animation in model.Animations)
+            {
+                EditorGUILayout.LabelField(
+                    animation.Name + " (" + animation.Bones.Count + " bones, " +
+                    animation.LengthSeconds.ToString("0.###") + "s, " +
+                    animation.SampleFramesPerSecond + " fps) from " + animation.TrackSourcePath,
                     EditorStyles.miniLabel);
             }
 
@@ -953,7 +972,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     skinPaths.Add(skinRef.File.RelativePath);
                 }
 
-                return new ModelAssembler().Assemble(
+                var model = new ModelAssembler().Assemble(
                     smd,
                     file.RelativePath,
                     skeleton,
@@ -961,6 +980,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     skins,
                     skinPaths,
                     resolution);
+                AttachAssembledAnimations(model, resolution, decoder);
+                return model;
             }
             catch (System.Exception exception)
             {
@@ -971,6 +992,132 @@ namespace SilverEcho.ForsakenWorld.Editor
                 failed.Errors.Add("Assemble failed: " + exception.Message);
                 return failed;
             }
+        }
+
+        private static void AttachAssembledAnimations(
+            AssembledModel model,
+            ModelResourceResolution resolution,
+            GfxTextDecoder decoder)
+        {
+            if (model == null || resolution == null || resolution.ActionTracks.Count == 0)
+                return;
+
+            var sources = new System.Collections.Generic.List<ActionAnimationSource>();
+            foreach (var action in resolution.ActionTracks)
+            {
+                if (action == null)
+                    continue;
+
+                var source = new ActionAnimationSource
+                {
+                    ActionName = action.ActionName,
+                    StartFrame = action.StartFrame,
+                    EndFrame = action.EndFrame,
+                    TrackSourcePath = action.Track != null && action.Track.IsResolved
+                        ? action.Track.File.RelativePath
+                        : (action.Track != null ? action.Track.RequestedPath : string.Empty)
+                };
+
+                if (action.Track != null && action.Track.IsResolved)
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(action.Track.File.FullPath);
+                        source.Track = new StckParser().Parse(
+                            bytes,
+                            action.Track.File.RelativePath);
+                    }
+                    catch (System.Exception exception)
+                    {
+                        model.Warnings.Add(
+                            "Action " + action.ActionName + ": failed to parse STCK (" +
+                            action.Track.File.RelativePath + "): " + exception.Message);
+                    }
+                }
+
+                sources.Add(source);
+            }
+
+            new ModelAnimationAssembler().Build(model, sources);
+        }
+
+        private void ImportAssembledAnimationClips()
+        {
+            if (selectedAssembledModel == null ||
+                !selectedAssembledModel.IsValid ||
+                selectedAssembledModel.Animations.Count == 0 ||
+                selectedFile == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var clips = AssembledAnimationClipBuilder.CreateClips(
+                    selectedAssembledModel.Animations);
+                if (clips.Count == 0)
+                {
+                    status = "No AnimationClips were produced from the assembled model.";
+                    return;
+                }
+
+                var imported = 0;
+                var updated = 0;
+                foreach (var clip in clips)
+                {
+                    if (clip == null)
+                        continue;
+                    var outputPath = GetAnimationClipAssetPath(selectedFile, clip.name);
+                    var existing = AssetDatabase.LoadMainAssetAtPath(outputPath);
+                    if (existing != null)
+                    {
+                        if (!(existing is AnimationClip))
+                            throw new IOException(
+                                "An incompatible asset already exists at the output path: " +
+                                outputPath);
+                        EditorUtility.CopySerialized(clip, existing);
+                        EditorUtility.SetDirty(existing);
+                        DestroyImmediate(clip);
+                        updated++;
+                    }
+                    else
+                    {
+                        if (File.Exists(outputPath))
+                            throw new IOException(
+                                "A file already exists at the output path but is not a Unity asset: " +
+                                outputPath);
+                        EnsureAssetFolders(Path.GetDirectoryName(outputPath));
+                        AssetDatabase.CreateAsset(clip, outputPath);
+                        imported++;
+                    }
+                }
+
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                status = "AnimationClips imported=" + imported + " updated=" + updated +
+                    " under " + ImportRoot + "/Animations";
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is UnityException)
+            {
+                status = "AnimationClip import failed: " + exception.Message;
+                Debug.LogError(status);
+            }
+        }
+
+        private static string GetAnimationClipAssetPath(GameDataFile file, string clipName)
+        {
+            var relativePath = file.RelativePath.Replace('\\', '/');
+            var pathParts = relativePath.Split('/');
+            for (var i = 0; i < pathParts.Length; i++)
+                pathParts[i] = SanitizeAssetName(pathParts[i]);
+            var folder = ImportRoot + "/Animations/" +
+                Path.ChangeExtension(string.Join("/", pathParts), null).Replace('\\', '/');
+            return folder + "/" + SanitizeAssetName(clipName) + ".anim";
         }
 
         private static string GetAssetPath(GameDataFile file)

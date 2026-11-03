@@ -45,18 +45,23 @@ optional UTF-8 BOM before magic/version checks.
 `ModelResourceResolver` resolves SMD → BON/SKI/STCK references through `GameDataIndex` with
 explicit missing/ambiguous reporting. `ModelAssembler` builds an engine-agnostic assembled model
 (bones, hooks, bindposes as inverse Init matrices, surfaces with preserved on-disk winding for
-Unity LH). `AssembledModelUnityBuilder` creates a GameObject hierarchy with
-`SkinnedMeshRenderer`/`Mesh`. AnimationClip creation and material/texture binding remain later
-steps. The Game Data Browser shows an assemble-preview when an SMD is selected.
+Unity LH). `StckTrackEvaluator` samples STCK keys/segments (vector lerp + quaternion SLERP with
+Angelica epsilon 0.25, matching `angelica_model_reader.gd`). `ModelAnimationAssembler` maps SMD
+action name/start/end frames onto clips using skeleton FPS for FrameToTime and STCK FPS for the
+sample step. `AssembledModelUnityBuilder` / `AssembledAnimationClipBuilder` create a GameObject
+hierarchy with `SkinnedMeshRenderer`/`Mesh` and `AnimationClip` curves on `Skeleton/...` bone
+paths; the browser can preview assembled animations and import clips with GUID-preserving
+reimport. Material/texture binding and scene playback remain later steps.
 
 The repository does not currently contain a Unity host project. A host project is not needed
 to develop the parser or index, but one is required to run Unity EditMode tests or validate
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and 43 parser/asset/index/geometry/assembly
+standalone harness with temporary Unity API stubs, and 49 parser/asset/index/geometry/assembly/animation
 test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
 `assets/models . pck`, not committed): SMD v8 1403 OK / 2144 unsupported; BON v6 5721 OK / 2214
 unsupported; SKI v9 12751 OK / 7562 unsupported; STCK v1 51240 OK; assembly 1401 OK / 1 missing
-skeleton / 0 assembler bugs. This does not validate Unity compilation, the Test Runner, Editor UI,
-or AssetDatabase behavior.
+skeleton / 0 assembler bugs; SMD actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip missing
+track; 1224040 joint-track evals OK). This does not validate Unity compilation, the Test Runner,
+Editor UI, or AssetDatabase behavior.
