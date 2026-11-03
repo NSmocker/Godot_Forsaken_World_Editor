@@ -110,6 +110,8 @@ namespace SilverEcho.ForsakenWorld
             if (supportedVersions == null)
                 throw new ArgumentNullException(nameof(supportedVersions));
 
+            SkipOptionalUtf8Bom();
+
             for (var i = 0; i < expectedMagic.Length; i++)
             {
                 if (expectedMagic[i] > 0x7F)
@@ -130,6 +132,18 @@ namespace SilverEcho.ForsakenWorld
             if (!supportedVersions.Contains(version))
                 throw Error("unsupported version 0x" + version.ToString("X8"));
             return version;
+        }
+
+        private void SkipOptionalUtf8Bom()
+        {
+            if (Remaining < 3)
+                return;
+            if (data[position] == 0xEF &&
+                data[position + 1] == 0xBB &&
+                data[position + 2] == 0xBF)
+            {
+                position += 3;
+            }
         }
 
         private void Require(int count)

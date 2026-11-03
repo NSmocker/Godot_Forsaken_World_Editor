@@ -37,6 +37,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private BonDocument selectedBon;
         private SkiDocument selectedSki;
         private StckDocument selectedStck;
+        private AssembledModel selectedAssembledModel;
         private Task<GameDataIndex> scanTask;
         private int scannedDirectories;
         private int scannedFiles;
@@ -205,6 +206,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                             "Selected " + selectedFile.Extension.ToUpperInvariant() +
                             " file. A reader for this format has not been ported yet.",
                             MessageType.Info);
+
+                    if (selectedAssembledModel != null)
+                        DrawAssembledModelDetails(selectedAssembledModel);
                 }
 
                 EditorGUILayout.EndScrollView();
@@ -449,6 +453,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedBon = null;
             selectedSki = null;
             selectedStck = null;
+            selectedAssembledModel = null;
             visibleFiles = Array.Empty<GameDataFile>();
             scannedDirectories = 0;
             scannedFiles = 0;
@@ -540,6 +545,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 selectedBon = null;
                 selectedSki = null;
                 selectedStck = null;
+                selectedAssembledModel = null;
             }
         }
 
@@ -552,6 +558,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedBon = null;
             selectedSki = null;
             selectedStck = null;
+            selectedAssembledModel = null;
             status = "Selected " + file.RelativePath;
             if (file.Extension == "gfx")
             {
@@ -617,6 +624,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     selectedSmd = new SmdParser(GetGameDataDecoder())
                         .Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                    selectedAssembledModel = TryAssembleSelectedSmd(file, selectedSmd);
                 }
                 catch (InvalidOperationException exception)
                 {
@@ -879,6 +887,89 @@ namespace SilverEcho.ForsakenWorld.Editor
                 default:
                     throw new InvalidOperationException(
                         "No importer is available for ." + selectedFile.Extension + " files.");
+            }
+        }
+
+
+        private void DrawAssembledModelDetails(AssembledModel model)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Assemble preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Bones: " + model.Bones.Count);
+            EditorGUILayout.LabelField("Hooks: " + model.HookBones.Count);
+            EditorGUILayout.LabelField("Skins: " + model.Skins.Count);
+            EditorGUILayout.LabelField("Actions: " + model.Actions.Count);
+            EditorGUILayout.LabelField(
+                "Status: " + (model.IsValid ? "OK" : "Has errors"),
+                EditorStyles.miniBoldLabel);
+
+            foreach (var skin in model.Skins)
+            {
+                EditorGUILayout.LabelField(
+                    skin.SourcePath + " (" + skin.Surfaces.Count + " surfaces, " +
+                    skin.BindBones.Count + " bind bones)",
+                    EditorStyles.miniLabel);
+            }
+
+            foreach (var warning in model.Warnings)
+                EditorGUILayout.HelpBox(warning, MessageType.Warning);
+            foreach (var error in model.Errors)
+                EditorGUILayout.HelpBox(error, MessageType.Error);
+        }
+
+        private AssembledModel TryAssembleSelectedSmd(GameDataFile file, SmdDocument smd)
+        {
+            if (index == null || file == null || smd == null)
+                return null;
+
+            try
+            {
+                var resolution = new ModelResourceResolver(index).Resolve(smd, file.RelativePath);
+                if (resolution.Skeleton == null || !resolution.Skeleton.IsResolved)
+                {
+                    var incomplete = new AssembledModel
+                    {
+                        SourceSmdPath = file.RelativePath
+                    };
+                    incomplete.Errors.AddRange(resolution.Errors);
+                    incomplete.Warnings.AddRange(resolution.Warnings);
+                    return incomplete;
+                }
+
+                var decoder = GetGameDataDecoder();
+                var skeletonBytes = File.ReadAllBytes(resolution.Skeleton.File.FullPath);
+                var skeleton = new BonParser(decoder).Parse(
+                    skeletonBytes,
+                    resolution.Skeleton.File.RelativePath);
+
+                var skins = new System.Collections.Generic.List<SkiDocument>();
+                var skinPaths = new System.Collections.Generic.List<string>();
+                foreach (var skinRef in resolution.Skins)
+                {
+                    if (!skinRef.IsResolved)
+                        continue;
+                    var skinBytes = File.ReadAllBytes(skinRef.File.FullPath);
+                    skins.Add(new SkiParser(decoder).Parse(skinBytes, skinRef.File.RelativePath));
+                    skinPaths.Add(skinRef.File.RelativePath);
+                }
+
+                return new ModelAssembler().Assemble(
+                    smd,
+                    file.RelativePath,
+                    skeleton,
+                    resolution.Skeleton.File.RelativePath,
+                    skins,
+                    skinPaths,
+                    resolution);
+            }
+            catch (System.Exception exception)
+            {
+                var failed = new AssembledModel
+                {
+                    SourceSmdPath = file.RelativePath
+                };
+                failed.Errors.Add("Assemble failed: " + exception.Message);
+                return failed;
             }
         }
 

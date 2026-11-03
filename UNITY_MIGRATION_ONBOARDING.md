@@ -29,9 +29,9 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
 | ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Binary `MOXB` ECM, model assembly, and animation/event integration are unsupported. |
-| Models | SMD v8 manifest, BON v6 skeleton/joint/hook, SKI v9 material/skin/rigid mesh, and STCK v1 joint position/rotation track parsers, inspectors, and assets exist. Morph/Supple/Muscle meshes, coordinate/winding conversion, Unity mesh/material/AnimationClip construction, and animation playback remain. |
+| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler` plus Editor `AssembledModelUnityBuilder` assemble skeletons/meshes (Unity LH, preserve on-disk winding; no Godot vert 1↔2 swap). Morph/Supple/Muscle, materials, AnimationClip, and playback remain. |
 | Maps and AUI | Not ported. `.trn2` is indexed but not parsed/imported; AUI and localization readers/previews are not implemented. |
-| Verification | A standalone harness using temporary Unity/NUnit API stubs compiled the package code and passed 36 test cases on 2026-11-03. This is not a Unity Test Runner run. Real AssetDatabase/UI behavior and Unity EditMode tests remain unverified. |
+| Verification | Standalone harness (Unity/NUnit stubs) passed 43 tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs. Not a Unity Test Runner run; AssetDatabase/UI remain unverified. Game assets were not committed. |
 
 There is no Unity host project in this repository, and the Unity Editor was unavailable in the
 last verification environment. Do not claim that Unity integration has been tested. A host
@@ -120,14 +120,13 @@ from names or comments alone.
 
 ## Recommended next work
 
-1. Build a model assembly layer that resolves SMD → BON/SKI/STCK references using
-   `GameDataIndex`, reports missing/ambiguous resources, and produces Unity meshes, skeletons,
-   materials, and animations only after the underlying parsers are covered.
-2. Add Unity Mesh/SkinnedMeshRenderer conversion from the parsed SKI data. Preserve source
-   indices in the parser; decide and test the coordinate-system and winding conversion in the
-   Unity assembly layer against the Godot model builder.
-3. Create AnimationClips from parsed STCK tracks (sample/evaluate keys and segments; do not
-   conflate that with the already-covered byte-level STCK parser tests).
+1. Create AnimationClips from parsed STCK tracks (sample/evaluate keys and segments; do not
+   conflate that with the already-covered byte-level STCK parser tests). Wire clips into the
+   assembled model hierarchy.
+2. Material/texture binding for assembled skins; harden Editor preview instantiation beyond the
+   current assemble-preview details panel.
+3. Optional: support additional SMD/BON/SKI versions only when a concrete need and fixtures
+   exist (current targets remain SMD v8, BON v6, SKI v9, STCK v1).
 4. After the model pipeline, resume GFX runtime/rendering, maps, and AUI according to `TODO.md`;
    these are substantial feature areas, not implied complete by the current browser.
 

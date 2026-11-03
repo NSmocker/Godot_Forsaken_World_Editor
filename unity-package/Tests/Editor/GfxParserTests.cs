@@ -162,5 +162,21 @@ namespace SilverEcho.ForsakenWorld.Tests
                     new System.Collections.Generic.HashSet<uint> { 2 }));
             StringAssert.Contains("unsupported version", error.Message);
         }
+
+        [Test]
+        public void SkipsUtf8BomBeforeVersionedHeader()
+        {
+            var payload = new byte[]
+            {
+                0xEF, 0xBB, 0xBF,
+                (byte)'T', (byte)'E', (byte)'S', (byte)'T',
+                2, 0, 0, 0,
+                0x34, 0x12
+            };
+            var reader = new BinaryDataReader(payload, "bom.bin");
+            Assert.AreEqual(2u, reader.ReadVersionedHeader("TEST", new System.Collections.Generic.HashSet<uint> { 2 }));
+            Assert.AreEqual(0x1234, reader.ReadUInt16LittleEndian());
+        }
+
     }
 }
