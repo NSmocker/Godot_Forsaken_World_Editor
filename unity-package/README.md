@@ -57,11 +57,15 @@ sample step. `SkiTextureResolver` resolves SKI texture names via `GameDataIndex`
 `DDSD_LINEARSIZE` vs pitch) and optionally decode a top mip for fixtures — Unity 2022.3
 `IHVImageFormatImporter` imports those formats natively, so the package prefers copy+native
 import over a custom Runtime Texture2D path. `AssembledModelUnityBuilder` /
-`AssembledAnimationClipBuilder` / `AssembledUrpMaterialBuilder` create a GameObject hierarchy
-with `SkinnedMeshRenderer`/`Mesh`, `AnimationClip` curves on `Skeleton/...` bone paths, and
-URP Lit materials (`Shader.Find`; no `com.unity.render-pipelines.universal` package dependency).
-The browser can preview assembled animations/materials and import clips/materials with
-GUID-preserving reimport. Host DDS→Texture2D binding and scene playback remain later steps.
+`AssembledAnimationClipBuilder` / `AssembledUrpMaterialBuilder` / `AssembledTextureImporter`
+create a GameObject hierarchy with `SkinnedMeshRenderer`/`Mesh` (one submesh per surface),
+`AnimationClip` curves on `Skeleton/...` bone paths, URP Lit materials (`Shader.Find`; no
+`com.unity.render-pipelines.universal` package dependency), and host DDS→Texture2D binding
+under `Assets/ForsakenWorld/Imported/Textures` (prefer native `.dds` copy +
+`IHVImageFormatImporter`; DXT decode fallback only when native import is unsuitable). The
+browser can import clips/materials+textures with GUID-preserving reimport and instantiate an
+assembled model in the open scene (optional AnimationClip playback via the legacy `Animation`
+component). Full Scene View reflect/emissive polish and Animator Controllers remain later.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -71,12 +75,14 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **56**
-parser/asset/index/geometry/assembly/animation/materials/DDS test cases passed.
-Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
+standalone harness with temporary Unity API stubs, and **62**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh test cases
+passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
 `assets/models . pck`, not committed): SMD v8 1403 OK / 2144 unsupported; BON v6 5721 OK / 2214
 unsupported; SKI v9 12751 OK / 7562 unsupported; STCK v1 51240 OK; assembly 1401 OK / 1 missing
 skeleton / 0 assembler bugs; SMD actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip;
 1224040 joint-track evals OK); materials slots 2321 OK / textures 2291 resolved / 30 missing /
-0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb). This does not validate
-Unity compilation, the Test Runner, Editor UI, or AssetDatabase behavior.
+0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb; all LikelyUnityNative on
+resolved skins). Host Texture2D/AssetDatabase import and scene instantiate remain unverified in
+a real Unity Editor. This does not validate Unity compilation, the Test Runner, Editor UI, or
+AssetDatabase behavior.

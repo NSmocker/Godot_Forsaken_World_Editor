@@ -6,7 +6,10 @@ namespace SilverEcho.ForsakenWorld.Editor
 {
     public static class AssembledModelUnityBuilder
     {
-        public static GameObject BuildHierarchy(AssembledModel model, string rootName = null)
+        public static GameObject BuildHierarchy(
+            AssembledModel model,
+            string rootName = null,
+            Func<AssembledSurfaceMaterial, Texture> albedoLookup = null)
         {
             if (model == null)
                 throw new ArgumentNullException(nameof(model));
@@ -78,9 +81,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 renderer.bones = bones;
-                var materials = AssembledUrpMaterialBuilder.CreateMaterials(skin);
-                if (materials.Count > 0)
-                    renderer.sharedMaterials = materials.ToArray();
+                var materials = CreateSurfaceMaterials(skin, albedoLookup);
+                if (materials.Length > 0)
+                    renderer.sharedMaterials = materials;
             }
 
             return root;
@@ -89,14 +92,35 @@ namespace SilverEcho.ForsakenWorld.Editor
         public static GameObject BuildHierarchyWithAnimations(
             AssembledModel model,
             IEnumerable<AssembledAnimation> animations,
-            string rootName = null)
+            string rootName = null,
+            Func<AssembledSurfaceMaterial, Texture> albedoLookup = null,
+            int playClipIndex = 0)
         {
-            var root = BuildHierarchy(model, rootName);
+            var root = BuildHierarchy(model, rootName, albedoLookup);
             var clips = AssembledAnimationClipBuilder.CreateClips(animations ?? model.Animations);
             AssembledAnimationClipBuilder.BindClipsToHierarchy(root, clips);
+            if (clips.Count > 0)
+            {
+                var animation = root.GetComponent<Animation>();
+                if (animation != null)
+                {
+                    var index = playClipIndex;
+                    if (index < 0 || index >= clips.Count)
+                        index = 0;
+                    var clip = clips[index];
+                    if (clip != null && !string.IsNullOrEmpty(clip.name))
+                        animation.Play(clip.name);
+                }
+            }
+
             return root;
         }
 
+        /// <summary>
+        /// Builds one Unity submesh per AssembledSurface so sharedMaterials can map 1:1
+        /// (matching Godot surface_set_material). Surfaces that share a material slot still
+        /// get separate submeshes but reuse the same Material instance when possible.
+        /// </summary>
         public static Mesh BuildCombinedMesh(AssembledSkin skin)
         {
             if (skin == null)
@@ -108,10 +132,11 @@ namespace SilverEcho.ForsakenWorld.Editor
             var normals = new List<Vector3>();
             var uvs = new List<Vector2>();
             var boneWeights = new List<BoneWeight>();
-            var indices = new List<int>();
+            var submeshIndices = new List<int>[skin.Surfaces.Count];
 
-            foreach (var surface in skin.Surfaces)
+            for (var surfaceIndex = 0; surfaceIndex < skin.Surfaces.Count; surfaceIndex++)
             {
+                var surface = skin.Surfaces[surfaceIndex];
                 var vertexOffset = positions.Count;
                 var vertexCount = surface.Positions.Length / 3;
                 for (var v = 0; v < vertexCount; v++)
@@ -140,8 +165,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                     });
                 }
 
+                var indices = new List<int>(surface.Indices.Length);
                 for (var i = 0; i < surface.Indices.Length; i++)
                     indices.Add(surface.Indices[i] + vertexOffset);
+                submeshIndices[surfaceIndex] = indices;
             }
 
             var mesh = new Mesh();
@@ -151,9 +178,52 @@ namespace SilverEcho.ForsakenWorld.Editor
             mesh.SetUVs(0, uvs);
             mesh.boneWeights = boneWeights.ToArray();
             mesh.bindposes = CreateBindPoses(skin);
-            mesh.SetTriangles(indices, 0);
+            mesh.subMeshCount = submeshIndices.Length;
+            for (var i = 0; i < submeshIndices.Length; i++)
+                mesh.SetTriangles(submeshIndices[i], i);
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        public static Material[] CreateSurfaceMaterials(
+            AssembledSkin skin,
+            Func<AssembledSurfaceMaterial, Texture> albedoLookup = null)
+        {
+            if (skin == null)
+                return Array.Empty<Material>();
+
+            var slotMaterials = new Dictionary<string, Material>(StringComparer.Ordinal);
+            foreach (var slot in skin.SurfaceMaterials)
+            {
+                var key = SlotKey(slot.TextureIndex, slot.MaterialIndex);
+                Texture albedo = null;
+                if (albedoLookup != null)
+                    albedo = albedoLookup(slot);
+                slotMaterials[key] = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo);
+            }
+
+            var materials = new Material[skin.Surfaces.Count];
+            for (var i = 0; i < skin.Surfaces.Count; i++)
+            {
+                var surface = skin.Surfaces[i];
+                var key = SlotKey(surface.TextureIndex, surface.MaterialIndex);
+                Material material;
+                if (!slotMaterials.TryGetValue(key, out material))
+                {
+                    var shader = Shader.Find(AssembledUrpMaterialBuilder.UrpLitShaderName) ??
+                        Shader.Find(AssembledUrpMaterialBuilder.UrpUnlitShaderName) ??
+                        Shader.Find("Sprites/Default");
+                    material = new Material(shader) { name = "Material" };
+                }
+                materials[i] = material;
+            }
+
+            return materials;
+        }
+
+        private static string SlotKey(int textureIndex, int materialIndex)
+        {
+            return textureIndex + "_" + materialIndex;
         }
 
         private static Matrix4x4[] CreateBindPoses(AssembledSkin skin)

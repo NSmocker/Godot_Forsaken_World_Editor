@@ -38,6 +38,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private SkiDocument selectedSki;
         private StckDocument selectedStck;
         private AssembledModel selectedAssembledModel;
+        private int previewAnimationClipIndex;
         private Task<GameDataIndex> scanTask;
         private int scannedDirectories;
         private int scannedFiles;
@@ -203,8 +204,28 @@ namespace SilverEcho.ForsakenWorld.Editor
                         !selectedAssembledModel.IsValid ||
                         !HasAssembledMaterials(selectedAssembledModel)))
                     {
-                        if (GUILayout.Button("Import assembled URP materials"))
+                        if (GUILayout.Button("Import assembled URP materials + textures"))
                             ImportAssembledMaterials();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedAssembledModel == null ||
+                        !selectedAssembledModel.IsValid))
+                    {
+                        if (GUILayout.Button("Instantiate assembled model in scene"))
+                            InstantiateAssembledModelInScene(withAnimation: false);
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedAssembledModel == null ||
+                        !selectedAssembledModel.IsValid ||
+                        selectedAssembledModel.Animations.Count == 0))
+                    {
+                        previewAnimationClipIndex = EditorGUILayout.IntField(
+                            "Preview clip index",
+                            previewAnimationClipIndex);
+                        if (GUILayout.Button("Instantiate model + play AnimationClip"))
+                            InstantiateAssembledModelInScene(withAnimation: true);
                     }
 
                     if (selectedGfx != null)
@@ -1192,13 +1213,34 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             try
             {
+                int texturesCreated;
+                int texturesUpdated;
+                int texturesMissing;
+                List<string> textureErrors;
+                var textures = AssembledTextureImporter.ImportTexturesForModel(
+                    selectedAssembledModel,
+                    index,
+                    out texturesCreated,
+                    out texturesUpdated,
+                    out texturesMissing,
+                    out textureErrors);
+
                 var imported = 0;
                 var updated = 0;
                 foreach (var skin in selectedAssembledModel.Skins)
                 {
                     foreach (var slot in skin.SurfaceMaterials)
                     {
-                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot);
+                        Texture2D albedo = null;
+                        if (slot.TextureResolved &&
+                            !string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                        {
+                            textures.TryGetValue(
+                                slot.TextureSourcePath.Replace('\\', '/'),
+                                out albedo);
+                        }
+
+                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo);
                         var outputPath = AssembledUrpMaterialBuilder.GetMaterialAssetPath(
                             skin.SourcePath,
                             slot);
@@ -1230,7 +1272,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
                 status = "URP materials imported=" + imported + " updated=" + updated +
-                    " under " + ImportRoot + "/Materials";
+                    "; textures created=" + texturesCreated + " updated=" + texturesUpdated +
+                    " missing=" + texturesMissing +
+                    " under " + ImportRoot + "/Materials and /Textures";
+                if (textureErrors.Count > 0)
+                {
+                    status += " | texture issues: " + textureErrors.Count;
+                    foreach (var error in textureErrors)
+                        Debug.LogWarning("Forsaken texture: " + error);
+                }
             }
             catch (Exception exception) when (
                 exception is IOException ||
@@ -1244,7 +1294,83 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-                private static string GetAssetPath(GameDataFile file)
+        private void InstantiateAssembledModelInScene(bool withAnimation)
+        {
+            if (selectedAssembledModel == null || !selectedAssembledModel.IsValid)
+                return;
+
+            try
+            {
+                Func<AssembledSurfaceMaterial, Texture> albedoLookup = null;
+                if (index != null && HasAssembledMaterials(selectedAssembledModel))
+                {
+                    int created;
+                    int updated;
+                    int missing;
+                    List<string> errors;
+                    var textures = AssembledTextureImporter.ImportTexturesForModel(
+                        selectedAssembledModel,
+                        index,
+                        out created,
+                        out updated,
+                        out missing,
+                        out errors);
+                    albedoLookup = slot =>
+                    {
+                        if (slot == null ||
+                            string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                            return null;
+                        Texture2D texture;
+                        return textures.TryGetValue(
+                            slot.TextureSourcePath.Replace('\\', '/'),
+                            out texture)
+                            ? texture
+                            : null;
+                    };
+                    if (errors.Count > 0)
+                    {
+                        foreach (var error in errors)
+                            Debug.LogWarning("Forsaken texture: " + error);
+                    }
+                }
+
+                GameObject root;
+                if (withAnimation && selectedAssembledModel.Animations.Count > 0)
+                {
+                    root = AssembledModelUnityBuilder.BuildHierarchyWithAnimations(
+                        selectedAssembledModel,
+                        selectedAssembledModel.Animations,
+                        null,
+                        albedoLookup,
+                        previewAnimationClipIndex);
+                }
+                else
+                {
+                    root = AssembledModelUnityBuilder.BuildHierarchy(
+                        selectedAssembledModel,
+                        null,
+                        albedoLookup);
+                }
+
+                Undo.RegisterCreatedObjectUndo(root, "Instantiate Forsaken Model");
+                Selection.activeObject = root;
+                status = withAnimation
+                    ? "Instantiated assembled model with Animation preview in the open scene."
+                    : "Instantiated assembled model in the open scene.";
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is UnityException)
+            {
+                status = "Scene instantiate failed: " + exception.Message;
+                Debug.LogError(status);
+            }
+        }
+
+        private static string GetAssetPath(GameDataFile file)
         {
             var relativePath = file.RelativePath.Replace('\\', '/');
             var pathParts = relativePath.Split('/');
