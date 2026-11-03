@@ -44,7 +44,9 @@ malformed counts, invalid mesh indices, and truncated data. `BinaryDataReader` a
 optional UTF-8 BOM before magic/version checks.
 
 `ModelResourceResolver` resolves SMD → BON/SKI/STCK references through `GameDataIndex` with
-explicit missing/ambiguous reporting. `ModelAssembler` builds an engine-agnostic assembled model
+explicit missing/ambiguous reporting. `EcmModelResolver` resolves ECM `SkinModelPath` and
+`AddiSkinPath` (Models/ prefix, beside-ECM fallback, hangers warn-only; **no CoGfx**).
+`ModelAssembler` builds an engine-agnostic assembled model
 (bones, hooks, bindposes as inverse Init matrices, surfaces with preserved on-disk winding for
 Unity LH). `StckTrackEvaluator` samples STCK keys/segments (vector lerp + quaternion SLERP with
 Angelica epsilon 0.25, matching `angelica_model_reader.gd`). `ModelAnimationAssembler` maps SMD
@@ -57,15 +59,16 @@ sample step. `SkiTextureResolver` resolves SKI texture names via `GameDataIndex`
 `DDSD_LINEARSIZE` vs pitch) and optionally decode a top mip for fixtures — Unity 2022.3
 `IHVImageFormatImporter` imports those formats natively, so the package prefers copy+native
 import over a custom Runtime Texture2D path. `AssembledModelUnityBuilder` /
-`AssembledAnimationClipBuilder` / `AssembledUrpMaterialBuilder` / `AssembledTextureImporter`
+`AssembledAnimationClipBuilder` / `AssembledUrpMaterialBuilder` / `AssembledTextureImporter` /
+`AssembledModelAssetExporter`
 create a GameObject hierarchy with `SkinnedMeshRenderer`/`Mesh` (one submesh per surface),
 `AnimationClip` curves on `Skeleton/...` bone paths, URP Lit materials (`Shader.Find`; no
-`com.unity.render-pipelines.universal` package dependency), and host DDS→Texture2D binding
-under `Assets/ForsakenWorld/Imported/Textures` (prefer native `.dds` copy +
-`IHVImageFormatImporter`; DXT decode fallback only when native import is unsuitable). The
-browser can import clips/materials+textures with GUID-preserving reimport and instantiate an
-assembled model in the open scene (optional AnimationClip playback via the legacy `Animation`
-component). Full Scene View reflect/emissive polish and Animator Controllers remain later.
+`com.unity.render-pipelines.universal` package dependency), host DDS→Texture2D binding
+under `Assets/ForsakenWorld/Imported/Textures`, and Godot-parity persistence of Mesh
+(`Imported/Meshes/..._mesh.asset`) + Prefab (`Imported/Models/..._model.prefab` or
+`Imported/ECM/...prefab`) with GUID-preserving reimport. The browser can import
+clips/materials+textures/Prefabs and instantiate an assembled model (including ECM SkinModel +
+AddiSkins) in the open scene. CoGfx, GFX runtime, maps, and AUI remain later.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -75,14 +78,13 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **62**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh test cases
-passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
-`assets/models . pck`, not committed): SMD v8 1403 OK / 2144 unsupported; BON v6 5721 OK / 2214
-unsupported; SKI v9 12751 OK / 7562 unsupported; STCK v1 51240 OK; assembly 1401 OK / 1 missing
-skeleton / 0 assembler bugs; SMD actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip;
-1224040 joint-track evals OK); materials slots 2321 OK / textures 2291 resolved / 30 missing /
-0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb; all LikelyUnityNative on
-resolved skins). Host Texture2D/AssetDatabase import and scene instantiate remain unverified in
-a real Unity Editor. This does not validate Unity compilation, the Test Runner, Editor UI, or
-AssetDatabase behavior.
+standalone harness with temporary Unity API stubs, and **68**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path
+test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
+`assets`, not committed): SMD assembly 1401 OK / 1 missing skeleton / 2145 unsupported; SMD
+actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip); materials slots 2321 OK / textures 2291
+resolved / 30 missing; DDS under full `assets` 20271 OK / 7 fail (misnamed PNG); ECM
+prepare_ok=6163 / prepare_fail=10 / beside_fallback=1977, assemble_ok=2205 / assemble_fail=1 /
+assemble_skip_unsupported=3957. Prefab/AssetDatabase import and scene instantiate remain
+unverified in a real Unity Editor. This does not validate Unity compilation, the Test Runner,
+Editor UI, or AssetDatabase behavior.

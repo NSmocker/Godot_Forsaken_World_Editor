@@ -212,6 +212,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                         selectedAssembledModel == null ||
                         !selectedAssembledModel.IsValid))
                     {
+                        if (GUILayout.Button("Import assembled model Prefab (mesh + clips)"))
+                            ImportAssembledModelPrefab();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedAssembledModel == null ||
+                        !selectedAssembledModel.IsValid))
+                    {
                         if (GUILayout.Button("Instantiate assembled model in scene"))
                             InstantiateAssembledModelInScene(withAnimation: false);
                     }
@@ -635,6 +643,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         .Parse(File.ReadAllBytes(file.FullPath));
                     if (!string.IsNullOrEmpty(selectedEcm.Error))
                         status = selectedEcm.Error;
+                    else
+                        selectedAssembledModel = TryAssembleSelectedEcm(file, selectedEcm);
                 }
                 catch (InvalidOperationException exception)
                 {
@@ -997,6 +1007,150 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.HelpBox(error, MessageType.Error);
         }
 
+        private void ImportAssembledModelPrefab()
+        {
+            if (selectedAssembledModel == null ||
+                !selectedAssembledModel.IsValid ||
+                selectedFile == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var fromEcm = selectedFile.Extension == "ecm";
+                var result = AssembledModelAssetExporter.Export(
+                    selectedAssembledModel,
+                    index,
+                    selectedFile.RelativePath,
+                    fromEcm);
+                if (!result.Succeeded)
+                {
+                    status = "Prefab export failed: " + (result.Error ?? "unknown error");
+                    Debug.LogError(status);
+                    return;
+                }
+
+                status = "Prefab " +
+                    (result.PrefabCreated ? "created" : "updated") +
+                    " at " + result.PrefabPath +
+                    "; meshes +" + result.MeshesCreated + "/~" + result.MeshesUpdated +
+                    ", clips +" + result.ClipsCreated + "/~" + result.ClipsUpdated +
+                    ", materials +" + result.MaterialsCreated + "/~" + result.MaterialsUpdated +
+                    ", textures +" + result.TexturesCreated + "/~" + result.TexturesUpdated +
+                    " missing=" + result.TexturesMissing;
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning("Forsaken prefab: " + warning);
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is UnityException)
+            {
+                status = "Prefab export failed: " + exception.Message;
+                Debug.LogError(status);
+            }
+        }
+
+        private AssembledModel TryAssembleSelectedEcm(GameDataFile file, EcmDocument ecm)
+        {
+            if (index == null || file == null || ecm == null)
+                return null;
+
+            try
+            {
+                var ecmResolver = new EcmModelResolver(index);
+                var preparation = ecmResolver.Prepare(ecm, file.RelativePath);
+                if (preparation.HasBlockingErrors)
+                {
+                    var incomplete = new AssembledModel
+                    {
+                        SourceSmdPath = preparation.SkinModel != null && preparation.SkinModel.IsResolved
+                            ? preparation.SkinModel.File.RelativePath
+                            : string.Empty
+                    };
+                    incomplete.Errors.AddRange(preparation.Errors);
+                    incomplete.Warnings.AddRange(preparation.Warnings);
+                    return incomplete;
+                }
+
+                var smdFile = preparation.SkinModel.File;
+                var decoder = GetGameDataDecoder();
+                var smd = new SmdParser(decoder).Parse(
+                    File.ReadAllBytes(smdFile.FullPath),
+                    smdFile.RelativePath);
+                selectedSmd = smd;
+
+                var addiRequested = new List<string>();
+                foreach (var addi in preparation.AdditionalSkins)
+                    addiRequested.Add(addi.RequestedPath);
+                // Prefer original ECM AddiSkinPath strings for Godot-parity Models/ prefixing
+                if (ecm.AdditionalSkinPaths.Count > 0)
+                    addiRequested = new List<string>(ecm.AdditionalSkinPaths);
+
+                var resolution = ecmResolver.ResolveSmdWithAdditionalSkins(
+                    smd,
+                    smdFile.RelativePath,
+                    addiRequested,
+                    preparation.Warnings);
+                return AssembleFromResolution(smdFile, smd, resolution, decoder);
+            }
+            catch (Exception exception)
+            {
+                var failed = new AssembledModel();
+                failed.Errors.Add("ECM assemble failed: " + exception.Message);
+                return failed;
+            }
+        }
+
+        private AssembledModel AssembleFromResolution(
+            GameDataFile smdFile,
+            SmdDocument smd,
+            ModelResourceResolution resolution,
+            GfxTextDecoder decoder)
+        {
+            if (resolution.Skeleton == null || !resolution.Skeleton.IsResolved)
+            {
+                var incomplete = new AssembledModel
+                {
+                    SourceSmdPath = smdFile.RelativePath
+                };
+                incomplete.Errors.AddRange(resolution.Errors);
+                incomplete.Warnings.AddRange(resolution.Warnings);
+                return incomplete;
+            }
+
+            var skeletonBytes = File.ReadAllBytes(resolution.Skeleton.File.FullPath);
+            var skeleton = new BonParser(decoder).Parse(
+                skeletonBytes,
+                resolution.Skeleton.File.RelativePath);
+
+            var skins = new List<SkiDocument>();
+            var skinPaths = new List<string>();
+            foreach (var skinRef in resolution.Skins)
+            {
+                if (!skinRef.IsResolved)
+                    continue;
+                var skinBytes = File.ReadAllBytes(skinRef.File.FullPath);
+                skins.Add(new SkiParser(decoder).Parse(skinBytes, skinRef.File.RelativePath));
+                skinPaths.Add(skinRef.File.RelativePath);
+            }
+
+            var model = new ModelAssembler().Assemble(
+                smd,
+                smdFile.RelativePath,
+                skeleton,
+                resolution.Skeleton.File.RelativePath,
+                skins,
+                skinPaths,
+                resolution);
+            AttachAssembledAnimations(model, resolution, decoder);
+            AttachAssembledMaterials(model);
+            return model;
+        }
+
         private AssembledModel TryAssembleSelectedSmd(GameDataFile file, SmdDocument smd)
         {
             if (index == null || file == null || smd == null)
@@ -1005,45 +1159,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             try
             {
                 var resolution = new ModelResourceResolver(index).Resolve(smd, file.RelativePath);
-                if (resolution.Skeleton == null || !resolution.Skeleton.IsResolved)
-                {
-                    var incomplete = new AssembledModel
-                    {
-                        SourceSmdPath = file.RelativePath
-                    };
-                    incomplete.Errors.AddRange(resolution.Errors);
-                    incomplete.Warnings.AddRange(resolution.Warnings);
-                    return incomplete;
-                }
-
-                var decoder = GetGameDataDecoder();
-                var skeletonBytes = File.ReadAllBytes(resolution.Skeleton.File.FullPath);
-                var skeleton = new BonParser(decoder).Parse(
-                    skeletonBytes,
-                    resolution.Skeleton.File.RelativePath);
-
-                var skins = new System.Collections.Generic.List<SkiDocument>();
-                var skinPaths = new System.Collections.Generic.List<string>();
-                foreach (var skinRef in resolution.Skins)
-                {
-                    if (!skinRef.IsResolved)
-                        continue;
-                    var skinBytes = File.ReadAllBytes(skinRef.File.FullPath);
-                    skins.Add(new SkiParser(decoder).Parse(skinBytes, skinRef.File.RelativePath));
-                    skinPaths.Add(skinRef.File.RelativePath);
-                }
-
-                var model = new ModelAssembler().Assemble(
-                    smd,
-                    file.RelativePath,
-                    skeleton,
-                    resolution.Skeleton.File.RelativePath,
-                    skins,
-                    skinPaths,
-                    resolution);
-                AttachAssembledAnimations(model, resolution, decoder);
-                AttachAssembledMaterials(model);
-                return model;
+                return AssembleFromResolution(file, smd, resolution, GetGameDataDecoder());
             }
             catch (System.Exception exception)
             {
@@ -1408,7 +1524,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static void EnsureAssetFolders(string folderPath)
         {
             var normalizedPath = folderPath.Replace('\\', '/');
-            if (AssetDatabase.IsValidFolder(normalizedPath))
+            if (string.IsNullOrEmpty(normalizedPath) ||
+                normalizedPath == "Assets" ||
+                AssetDatabase.IsValidFolder(normalizedPath))
                 return;
 
             var parent = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');

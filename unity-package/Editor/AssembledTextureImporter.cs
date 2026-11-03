@@ -346,7 +346,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static void EnsureAssetFolders(string folderPath)
         {
             var normalizedPath = (folderPath ?? string.Empty).Replace('\\', '/');
-            if (string.IsNullOrEmpty(normalizedPath) || AssetDatabase.IsValidFolder(normalizedPath))
+            if (string.IsNullOrEmpty(normalizedPath) ||
+                normalizedPath == "Assets" ||
+                AssetDatabase.IsValidFolder(normalizedPath))
                 return;
 
             var parent = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');

@@ -26,13 +26,13 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 |---|---|
 | Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 2022.3 is the package's declared minimum. |
 | Render pipeline | **URP** chosen for Unity 2022.3. Package does **not** declare `com.unity.render-pipelines.universal`; host must enable URP. Editor uses `Shader.Find("Universal Render Pipeline/Lit")` (fallback Unlit/`Sprites/Default`). |
-| Resource index and browser | Background scan, search/filter, and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, and texture extensions (`.dds`/`.bmp`/`.tga`/`.png`/`.jpg`/`.jpeg`) for SKI resolve. Browser imports assembled materials+textures and can instantiate assembled models (optional AnimationClip playback) in the open scene. No folder tree or persistent index cache yet; Unity UI unverified. |
+| Resource index and browser | Background scan, search/filter, and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, and texture extensions (`.dds`/`.bmp`/`.tga`/`.png`/`.jpg`/`.jpeg`) for SKI resolve. Browser imports assembled materials+textures, can instantiate assembled models (optional AnimationClip playback), and can export Mesh+AnimationClip+Prefab (GUID-preserving). ECM selection assembles SkinModel+AddiSkins (no CoGfx). No folder tree or persistent index cache yet; Unity UI unverified. |
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
-| ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Binary `MOXB` ECM, model assembly, and animation/event integration are unsupported. |
-| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`/`SkiTextureResolver`/`ModelMaterialAssembler`/`DdsHeaderParser` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder`/`AssembledUrpMaterialBuilder`/`AssembledTextureImporter` assemble skeletons/meshes (one submesh/surface)/AnimationClips/URP Lit materials with host DDS→Texture2D binding (Unity LH, preserve on-disk winding; STCK sampling and SKI alpha/two-sided/`r_` reflect match Godot). Browser can instantiate assembled models in the open scene with optional AnimationClip playback. Morph/Supple/Muscle remain; real Unity Scene View / AssetDatabase verification still needed. |
+| ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Runtime `EcmModelResolver` resolves SkinModelPath + AddiSkinPath (Models/ prefix, beside-ECM fallback, hangers warn-only) and feeds `ModelAssembler` for Prefab export under `Imported/ECM` (**no CoGfx** port yet). Binary `MOXB` ECM still unsupported. |
+| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`/`SkiTextureResolver`/`ModelMaterialAssembler`/`DdsHeaderParser`/`EcmModelResolver` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder`/`AssembledUrpMaterialBuilder`/`AssembledTextureImporter`/`AssembledModelAssetExporter` assemble skeletons/meshes/AnimationClips/URP Lit materials and persist Mesh (`_mesh.asset`) + Prefab (`_model.prefab` / ECM `.prefab`) with GUID-preserving reimport (Godot `_save_model` parity, no CoGfx). Morph/Supple/Muscle remain unsupported as in Godot; real Unity AssetDatabase/Prefab verification still needed. |
 | Maps and AUI | Not ported. `.trn2` is indexed but not parsed/imported; AUI and localization readers/previews are not implemented. |
-| Verification | Standalone harness (Unity/NUnit stubs) passed **62** tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip; 1224040 joint-track evals OK); materials slots 2321 OK / textures 2291 resolved / 30 missing with reasons / 0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb; all LikelyUnityNative on resolved skins). Not a Unity Test Runner run; AssetDatabase/UI/scene instantiate remain unverified in real Unity. Game assets were not committed. |
+| Verification | Standalone harness (Unity/NUnit stubs) passed **68** tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets`: SMD assembly 1401 OK / 1 missing skeleton / 2145 unsupported SMD; actions→STCK 44276 OK (0 fail, 80 skip); materials slots 2321 OK / textures 2291 resolved / 30 missing; DDS under full `assets` 20271 OK / 7 fail (misnamed PNG in surfaces/facedata). ECM prepare_ok=6163 / prepare_fail=10 (ambiguous basename) / beside_fallback=1977; assemble_ok=2205 / assemble_fail=1 / assemble_skip_unsupported=3957 (older SMD/BON). Not a Unity Test Runner run; Prefab/AssetDatabase/UI remain unverified in real Unity. Game assets were not committed. |
 
 There is no Unity host project in this repository, and the Unity Editor was unavailable in the
 last verification environment. Do not claim that Unity integration has been tested. A host
@@ -128,14 +128,15 @@ from names or comments alone.
 
 ## Recommended next work
 
-1. Verify host DDS→Texture2D import, material binding, and scene instantiate/playback in a
-   real Unity 2022.3 URP project (AssetDatabase, Scene View, Test Runner). Optional polish:
-   Animator Controllers, reflect (`r_`) shader, mesh/prefab asset export.
-2. Optional: support additional SMD/BON/SKI versions only when a concrete need and fixtures
-   exist (current targets remain SMD v8, BON v6, SKI v9, STCK v1).
-3. After the model pipeline, resume GFX runtime/rendering (URP shaders), maps, and AUI
-   according to `TODO.md`; these are substantial feature areas, not implied complete by the
-   current browser.
+1. Verify Mesh/Prefab export, ECM assemble import, DDS→Texture2D binding, and scene
+   instantiate/playback in a real Unity 2022.3 URP project (AssetDatabase, PrefabUtility,
+   Scene View, Test Runner).
+2. Godot-parity remaining (do not invent beyond Godot): GFX runtime/elements/player, CoGfx on
+   ECM hooks, maps (`.trn2`/`.bmd`/`.ecwld`), AUI, browser folder tree / scan cache, reflect
+   (`r_`) shader polish.
+3. Optional: additional SMD/BON/SKI versions only when a concrete need and fixtures exist
+   (current targets remain SMD v8, BON v6, SKI v9, STCK v1; Morph/Supple/Muscle stay out of
+   scope while absent from Godot).
 
 ## Progress reporting template
 
