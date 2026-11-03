@@ -1,0 +1,11 @@
+{
+  "name": "ForsakenWorld.Editor",
+  "rootNamespace": "SilverEcho.ForsakenWorld.Editor",
+  "references": [
+    "ForsakenWorld.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": true
+}

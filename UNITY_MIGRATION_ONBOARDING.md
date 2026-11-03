@@ -1,0 +1,144 @@
+# Unity migration onboarding
+
+**Last verified:** 2026-11-03 (latest standalone validation)
+**Audience:** coding agents continuing the Godot-to-Unity editor migration
+**Current package:** `unity-package/` — local Unity Package Manager package targeting Unity 2022.3
+
+## Purpose and source of truth
+
+This repository contains a Godot editor for inspecting and importing Forsaken World game
+resources. The Unity work is a migration of editor and content-inspection capabilities, not
+the game client, server, or networking code. Game data is external and must not be copied
+into the repository.
+
+Use this document to onboard and understand the current implementation. Use `TODO.md` as the
+detailed work plan and update its checkboxes when verified progress changes. The Godot plugin
+and its current limitations are documented in the repository `README.md` and files under
+`gfx_importer/`; verify behavior there before porting it.
+
+## Migration progress
+
+This is a **feature-by-feature snapshot**, not an overall percentage: the remaining work spans
+very different systems, and no agreed weighting exists for a meaningful aggregate percentage.
+`[~]` in `TODO.md` means an initial slice exists but the stage is not complete.
+
+| Area | Status at last verification |
+|---|---|
+| Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 2022.3 is the package's declared minimum. |
+| Resource index and browser | Background scan, search/filter, and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, and `.trn2`. No folder tree or persistent index cache yet. |
+| Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
+| GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
+| ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Binary `MOXB` ECM, model assembly, and animation/event integration are unsupported. |
+| Models | SMD v8 manifest, BON v6 skeleton/joint/hook, and SKI v9 material/skin/rigid mesh parsers, inspectors, and assets exist. Morph/Supple/Muscle meshes, STCK, coordinate/winding conversion, Unity mesh/material construction, and animation playback remain. |
+| Maps and AUI | Not ported. `.trn2` is indexed but not parsed/imported; AUI and localization readers/previews are not implemented. |
+| Verification | A standalone harness using temporary Unity/NUnit API stubs compiled the package code and passed 31 test cases on 2026-11-03. This is not a Unity Test Runner run. Real AssetDatabase/UI behavior and Unity EditMode tests remain unverified. |
+
+There is no Unity host project in this repository, and the Unity Editor was unavailable in the
+last verification environment. Do not claim that Unity integration has been tested. A host
+project is not needed to work on pure parsers, but it is needed to run the actual Unity Test
+Runner and validate Editor UI, `AssetDatabase`, and imported assets.
+
+## Repository map
+
+### Unity implementation
+
+- `unity-package/package.json` — UPM manifest and Unity minimum version.
+- `unity-package/Runtime/` — format models, parsers, index, serialized assets, and shared
+  decoding/binary-reading code. Keep this assembly independent of `UnityEditor`.
+- `unity-package/Runtime/Data/gbk_table.bin` — small GBK mapping table used by the Godot
+  importer and the Unity Editor browser.
+- `unity-package/Editor/GameDataBrowserWindow.cs` — scan, search, preview, and selected-file
+  asset import UI. Editor-only Unity APIs belong here or in other Editor files.
+- `unity-package/Tests/Editor/` — NUnit EditMode tests, including synthetic parser fixtures.
+- `unity-package/README.md` — package installation, current behavior, and limitations.
+- `TODO.md` — detailed migration stages and outstanding work.
+
+### Godot reference implementation
+
+Read the relevant Godot implementation before porting a feature; do not infer file semantics
+from names or comments alone.
+
+- `gfx_importer/angelica_files.gd` — game-data paths, UTF-8/GBK decoding, and resource lookup.
+- `gfx_importer/angelica_model_reader.gd` — SMD/BON/SKI/STCK binary layouts, supported
+  versions, geometry fields, transforms, and animation tracks.
+- `gfx_importer/ecm_importer.gd` — ECM text parsing, resource relationships, and model import
+  flow.
+- Other `gfx_importer/` files — GFX element builders, effects, maps, materials, and UI
+  behavior; locate the relevant reader/builder before starting a port.
+
+## Architecture and implementation rules
+
+1. **Keep format parsing testable and Unity-independent.** Parsers and their data models belong
+   in `unity-package/Runtime/`. They should accept bytes or text and return structured data;
+   they must not access `AssetDatabase`, scenes, windows, or other `UnityEditor` APIs.
+2. **Keep Unity integration at the edge.** Put preview, selection, progress, and
+   `AssetDatabase` work in the Editor assembly. Use serializable `ScriptableObject` assets for
+   imported data when that matches the existing format importer pattern.
+3. **Port one format/version slice at a time.** Start by reading the Godot reader and its callers,
+   record the exact on-disk field order and supported version, then implement the matching
+   parser, model/asset mapping, browser integration, tests, and documentation together.
+4. **Treat untrusted binary inputs defensively.** Use `BinaryDataReader`; validate signatures,
+   versions, lengths, and counts before allocating or looping. Reject truncated or unsupported
+   data with an actionable error that includes the source file. Reject unexplained trailing
+   bytes when the reference format expects the file to end there.
+5. **Preserve source data and relationships.** Keep raw names, relative resource paths,
+   repeated values, ordering, flags, and indices unless the Godot implementation explicitly
+   transforms them. Do not silently select one of several ambiguous resources.
+6. **Keep fixtures synthetic and small.** Create byte-level fixtures for each supported format
+   version and test normal input, empty collections, malformed lengths/counts, truncation,
+   unsupported versions, and unexpected trailing bytes where applicable. Never add proprietary
+   game files or derived bulk data.
+7. **Preserve asset identity on reimport.** Follow the existing in-place update pattern so
+   reimporting a source does not replace the Unity asset GUID. Report import errors rather than
+   showing success-shaped fallbacks.
+8. **Avoid unrelated cleanup.** Make focused changes, preserve existing user/worktree changes,
+   and update only directly related docs and tests. Do not create a Unity host project unless it
+   is explicitly needed and approved.
+9. **Do not overstate validation.** Distinguish a standalone C# compile/test harness from Unity
+   compilation, EditMode tests, and live `AssetDatabase` verification. State unavailable checks
+   explicitly in handoffs.
+
+## Efficient workflow for each migration slice
+
+1. Check `git status` and read the related TODO entry, Unity implementation, tests, and Godot
+   reader/callers. Do not overwrite or revert unrelated worktree changes.
+2. Write down the supported format version and the observable behavior being ported. Use the
+   Godot implementation as the behavior reference; use `TODO.md` for scope and sequencing.
+3. Implement the smallest complete vertical slice: parser/data model → validation and tests →
+   serialized asset if applicable → browser preview/import if applicable → README/TODO status.
+4. Re-run the narrowest available test/compile command after copying the **current** source
+   files. If Unity is unavailable, clearly label any temporary stubs/harness and do not claim a
+   Unity run.
+5. Inspect the final diff and `git status`. Check that Runtime still has no Editor dependency,
+   unsupported files remain clearly reported, and no game data or temporary build artifacts
+   were added.
+6. Update progress only after verification. Change `[ ]` to `[~]` for an implemented but
+   incomplete/Unity-unverified slice; use `[x]` only when the TODO's completion criteria are
+   actually satisfied. Keep this snapshot, `TODO.md`, and `unity-package/README.md` consistent.
+7. In the handoff, state what changed, what command/check ran, what remains, and any environment
+   limitation. Report progress by capability/stage; do not invent an aggregate percentage.
+
+## Recommended next work
+
+1. Port STCK v1 tracks from `gfx_importer/angelica_model_reader.gd` and test key/segment
+   decoding separately from Unity animation creation.
+2. Build a model assembly layer that resolves SMD → BON/SKI/STCK references using
+   `GameDataIndex`, reports missing/ambiguous resources, and produces Unity meshes, skeletons,
+   materials, and animations only after the underlying parsers are covered.
+3. Add Unity Mesh/SkinnedMeshRenderer conversion from the parsed SKI data. Preserve source
+   indices in the parser; decide and test the coordinate-system and winding conversion in the
+   Unity assembly layer against the Godot model builder.
+4. After the model pipeline, resume GFX runtime/rendering, maps, and AUI according to `TODO.md`;
+   these are substantial feature areas, not implied complete by the current browser.
+
+## Progress reporting template
+
+For a status update, briefly report:
+
+- **Done:** capabilities implemented and files/assets affected.
+- **Verified:** exact build/test or manual Unity check; identify standalone versus Unity.
+- **Remaining:** the next incomplete milestone and known unsupported formats/versions.
+- **Blocked:** only concrete environment or input blockers, such as Unity Editor not installed.
+
+Do not report parser coverage as successful game-content parity until it has been checked
+against permitted representative fixtures or a trusted Godot result.

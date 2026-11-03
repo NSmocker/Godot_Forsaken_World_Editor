@@ -1,0 +1,10 @@
+{
+  "name": "com.silverechogames.forsaken-world-editor",
+  "version": "0.1.0",
+  "displayName": "Forsaken World Editor",
+  "description": "Tools for inspecting and importing Forsaken World game data.",
+  "unity": "2022.3",
+  "author": {
+    "name": "Silver Echo Games"
+  }
+}

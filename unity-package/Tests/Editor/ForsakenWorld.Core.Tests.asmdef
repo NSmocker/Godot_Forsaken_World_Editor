@@ -1,0 +1,13 @@
+{
+  "name": "ForsakenWorld.Core.Tests",
+  "rootNamespace": "SilverEcho.ForsakenWorld.Tests",
+  "references": [
+    "ForsakenWorld.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
