@@ -1,6 +1,6 @@
 # План перенесення редактора Forsaken World на Unity
 
-> **Стан на 2026-11-03:** Unity UPM package для Unity 2022.3 із браузером ресурсів і частковим читанням GFX/ECM/SMD v8/BON v6/SKI v9. Остання standalone-перевірка скомпілювала Runtime/Editor проти тимчасових Unity API stubs і пройшла 31 тестовий випадок. Це не запуск Unity Test Runner; реальна AssetDatabase/UI-інтеграція не перевірена. Загального відсотка не вказуємо: функціональні області мають різний масштаб.
+> **Стан на 2026-11-03:** Unity UPM package для Unity 2022.3 із браузером ресурсів і частковим читанням GFX/ECM/SMD v8/BON v6/SKI v9/STCK v1. Остання standalone-перевірка скомпілювала Runtime/Editor проти тимчасових Unity API stubs і пройшла 36 тестових випадків. Це не запуск Unity Test Runner; реальна AssetDatabase/UI-інтеграція не перевірена. Загального відсотка не вказуємо: функціональні області мають різний масштаб.
 
 ## Межі та вихідні припущення
 
@@ -36,21 +36,21 @@
 ### 1. Ядро читання форматів і пошуку ресурсів
 
 - [~] Реалізувати незалежні від Unity C# моделі даних і парсер текстових `.gfx`, включно з повторюваними ключами, контролерами, keypoints, PS-константами та grid-анімаціями (`unity-package/Runtime`). Потрібна перевірка паритету на fixtures у Unity.
-- [~] Реалізувати декодування GBK/UTF-8 для `.gfx` і текстового `.ecm`; Editor використовує bundled GBK-мапу без залежності від системного code page provider. Каталог `.bon` / `.ecm` / `.gfx` / `.ski` / `.smd` / `.trn2` із пошуком та безпечним case-insensitive resolution інтегровано у browser (`unity-package/Runtime/GameDataIndex.cs`).
-- [~] Додати `BinaryDataReader` із перевіркою меж, little-endian primitive reads, magic/version і змістовними помилками (`unity-package/Runtime/BinaryDataReader.cs`); його використовують `.smd` v8 та `.bon` v6 parsers. Інші бінарні формати ще не перенесені.
+- [~] Реалізувати декодування GBK/UTF-8 для `.gfx` і текстового `.ecm`; Editor використовує bundled GBK-мапу без залежності від системного code page provider. Каталог `.bon` / `.ecm` / `.gfx` / `.ski` / `.smd` / `.stck` / `.trn2` із пошуком та безпечним case-insensitive resolution інтегровано у browser (`unity-package/Runtime/GameDataIndex.cs`).
+- [~] Додати `BinaryDataReader` із перевіркою меж, little-endian primitive reads, magic/version і змістовними помилками (`unity-package/Runtime/BinaryDataReader.cs`); його використовують `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 parsers.
 - [ ] Перенести XML/AUI парсер, який приймає нестандартний XML, що відхиляє стандартний парсер; забезпечити збереження порядку й повторюваних полів.
 - [ ] Винести конфігурацію коренів джерел і каталогів даних у налаштування Unity-проєкту; додати перевірку наявності потрібних папок перед імпортом.
-- [~] Додати Unity EditMode-тести для `.gfx`, `.ecm`, `.smd`, `.bon`, `.ski`, assets, каталогу ресурсів і binary reader (`unity-package/Tests/Editor`). Standalone harness проходить 31 тестовий випадок; запуск Unity Test Runner і перевірка паритету на реальних дозволених fixtures ще потрібні.
+- [~] Додати Unity EditMode-тести для `.gfx`, `.ecm`, `.smd`, `.bon`, `.ski`, `.stck`, assets, каталогу ресурсів і binary reader (`unity-package/Tests/Editor`). Standalone harness проходить 36 тестових випадків; запуск Unity Test Runner і перевірка паритету на реальних дозволених fixtures ще потрібні.
 
 **Готово, коли:** парсери працюють без сцени та Editor API, повертають структуровані дані/помилки і перевірені тестами на fixtures.
 
 ### 2. Основа Unity-редактора й імпорт ресурсів
 
-- [~] Створити EditorWindow із вибором папки, фоновим скануванням, прогресом, пошуком/фільтром і переглядом `.gfx`/`.ecm`/`.smd`/`.bon`/`.ski` (`unity-package/Editor/GameDataBrowserWindow.cs`). Ліниве дерево папок ще потрібне.
+- [~] Створити EditorWindow із вибором папки, фоновим скануванням, прогресом, пошуком/фільтром і переглядом `.gfx`/`.ecm`/`.smd`/`.bon`/`.ski`/`.stck` (`unity-package/Editor/GameDataBrowserWindow.cs`). Ліниве дерево папок ще потрібне.
 - [~] Фонове сканування з прогресом і відображенням результату на головному потоці; кеш індексу ще потрібен.
-- [~] Реалізувати імпорт вибраних `.gfx`, текстових `.ecm`, `.smd` v8, `.bon` v6 і `.ski` v9 через AssetDatabase, з детермінованими шляхами та оновленням asset на місці (`unity-package/Editor/GameDataBrowserWindow.cs`). Атомарність при помилках і пакетний імпорт ще потрібні.
+- [~] Реалізувати імпорт вибраних `.gfx`, текстових `.ecm`, `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 через AssetDatabase, з детермінованими шляхами та оновленням asset на місці (`unity-package/Editor/GameDataBrowserWindow.cs`). Атомарність при помилках і пакетний імпорт ще потрібні.
 - [~] Додати `GfxAsset` ScriptableObject із серіалізованими заголовками, елементами, контролерами, keypoints і попередженнями (`unity-package/Runtime/GfxAsset.cs`); сцени/префаби для відтворення GFX ще не створюються.
-- [~] Додати читання Angelica `.smd` v8, `.bon` v6 і `.ski` v9, перегляд та імпорт маніфесту/скелета/меш-даних у `SmdAsset` / `BonAsset` / `SkiAsset`; `.stck` reader і побудова Unity-моделі ще потрібні.
+- [~] Додати читання Angelica `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1, перегляд та імпорт маніфесту/скелета/меш/track-даних у `SmdAsset` / `BonAsset` / `SkiAsset` / `StckAsset`; побудова Unity-моделі та AnimationClip ще потрібні.
 - [ ] Додати пакетний імпорт і журнал імпорту з підсумком: створені ресурси, пропущені елементи, невирішені посилання та причини помилок.
 - [ ] Визначити політику для DDS, зокрема копіювання оригіналу, імпорт через Unity або власне декодування форматів, які Unity не читає.
 
@@ -72,7 +72,7 @@
 ### 4. Моделі та ECM
 
 - [~] Додати текстовий `.ecm` parser для основної моделі, додаткових скінів, CoGfx-подій/параметрів і combined actions; вікно показує дані та імпортує їх у `EcmAsset` (`unity-package/Runtime/EcmParser.cs`, `unity-package/Editor/GameDataBrowserWindow.cs`). Парсер моделей і побудова сцен ще не реалізовані.
-- [~] Перенести `.smd` v8, `.bon` v6 і `.ski` v9 (маніфест, кістки/матриці, суглоби/hooks, матеріали та сирі дані skinned/rigid meshes); залишилися `.stck`, конвертація координат/індексів і складання Unity-скелета, мешів та анімацій.
+- [~] Перенести `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 (маніфест, кістки/матриці, суглоби/hooks, матеріали, сирі дані skinned/rigid meshes, ключі/сегменти анімаційних треків); залишилися конвертація координат/індексів і складання Unity-скелета, мешів та AnimationClip.
 - [ ] Створювати Unity Mesh/Skinning/Animation assets із коректними координатами, нормалями, UV, ієрархією кісток і повторним використанням спільних ресурсів.
 - [ ] Перенести текстури та матеріали, включно з DXT1/3/5, альфа-режимами, двосторонніми матеріалами й картами відбиття; визначити відповідність шейдерів URP/HDRP.
 - [ ] Перенести `.ecm`: вибір основної моделі, додаткові скіни, анімації та CoGfx на hooks; додати обробку GFX/звукових подій анімацій.

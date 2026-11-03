@@ -25,7 +25,7 @@ namespace SilverEcho.ForsakenWorld
         private static readonly HashSet<string> SupportedExtensions =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                ".bon", ".ecm", ".gfx", ".ski", ".smd", ".trn2"
+                ".bon", ".ecm", ".gfx", ".ski", ".smd", ".stck", ".trn2"
             };
 
         private readonly string root;

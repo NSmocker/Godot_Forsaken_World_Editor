@@ -16,7 +16,7 @@ provide an encoding factory. The parser tests use Unity Test Framework and can b
 **Window > General > Test Runner** after importing the package into a Unity project with Test
 Framework enabled.
 
-`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, and `.trn2` files,
+`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, and `.trn2` files,
 supports path/extension search and case-insensitive resource resolution, and can resolve a
 unique path suffix for Angelica references that omit leading folders. It rejects
 absolute/parent-traversing paths, skips symbolic links, and reports ambiguous suffix matches
@@ -24,26 +24,29 @@ instead of choosing arbitrarily.
 
 The initial **Tools > Forsaken World > Game Data Browser** window scans a selected data folder
 in the background, reports scan progress, and lets you search/filter files. Text `.gfx` and
-`.ecm` files and binary Angelica `.smd` v8 model manifests can be inspected and imported as
-reusable `GfxAsset`, `EcmAsset`, `SmdAsset`, `BonAsset`, and `SkiAsset` ScriptableObject assets
-under `Assets/ForsakenWorld/Imported/GFX`, `ECM`, `Models`, `Skeletons`, and `Skins`, preserving
-relative folders. Reimport updates an existing asset in place to keep its GUID. The SMD reader
-imports references to BON, SKI, PHY, TCK, and STCK files; BON v6 skeleton/joint/hook data and SKI
-v9 materials, skin/rigid mesh vertices, weights, and indices are parsed and imported. Morph,
-supple, and muscle mesh families remain unsupported; PHY, TCK, and STCK are not parsed yet.
-Binary `MOXB` ECM files and `.trn2` maps are listed but not yet imported.
+`.ecm` files and binary Angelica `.smd` v8, `.bon` v6, `.ski` v9, and `.stck` v1 files can be
+inspected and imported as reusable `GfxAsset`, `EcmAsset`, `SmdAsset`, `BonAsset`, `SkiAsset`,
+and `StckAsset` ScriptableObject assets under `Assets/ForsakenWorld/Imported/GFX`, `ECM`,
+`Models`, `Skeletons`, `Skins`, and `Tracks`, preserving relative folders. Reimport updates an
+existing asset in place to keep its GUID. The SMD reader imports references to BON, SKI, PHY,
+TCK, and STCK files; BON v6 skeleton/joint/hook data, SKI v9 materials, skin/rigid mesh vertices,
+weights, and indices, and STCK v1 joint position/rotation keys and segments are parsed and
+imported. Morph, supple, and muscle mesh families remain unsupported; PHY and TCK are not parsed
+yet. Binary `MOXB` ECM files and `.trn2` maps are listed but not yet imported.
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton
 records, matrices, joint types, joints, and hooks. `SkiParser` reads SKI v9 references, material
-properties, skin/rigid vertex streams, and source index buffers. These parsers reject unsupported
-versions, malformed counts, invalid mesh indices, and truncated data. Coordinate conversion,
-triangle winding conversion, and Unity Mesh/SkinnedMeshRenderer construction are a later step.
+properties, skin/rigid vertex streams, and source index buffers. `StckParser` reads STCK v1 joint
+tracks with position/rotation keys and segment tables. These parsers reject unsupported versions,
+malformed counts, invalid mesh indices, and truncated data. Coordinate conversion, triangle
+winding conversion, Unity Mesh/SkinnedMeshRenderer construction, and AnimationClip creation from
+STCK tracks are later steps.
 
 The repository does not currently contain a Unity host project. A host project is not needed
 to develop the parser or index, but one is required to run Unity EditMode tests or validate
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and 31 parser/asset/index test cases passed.
+standalone harness with temporary Unity API stubs, and 36 parser/asset/index test cases passed.
 This does not validate Unity compilation, the Test Runner, Editor UI, or AssetDatabase behavior.

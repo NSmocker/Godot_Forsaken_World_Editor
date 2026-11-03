@@ -18,9 +18,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private const int VisibleResultLimit = 500;
         private static GfxTextDecoder gameDataDecoder;
         private static readonly string[] FileTypes =
-            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Maps" };
+            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps" };
         private static readonly string[] Extensions =
-            { "", "ecm", "gfx", "smd", "bon", "ski", "trn2" };
+            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2" };
 
         private string rootPath;
         private string searchText = string.Empty;
@@ -36,6 +36,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private SmdDocument selectedSmd;
         private BonDocument selectedBon;
         private SkiDocument selectedSki;
+        private StckDocument selectedStck;
         private Task<GameDataIndex> scanTask;
         private int scannedDirectories;
         private int scannedFiles;
@@ -61,7 +62,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnGUI()
         {
             EditorGUILayout.HelpBox(
-                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, and .trn2 files. Supported text " +
+                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, and .trn2 files. Supported text " +
                 "and model files can be inspected and imported as ScriptableObject assets.",
                 MessageType.Info);
 
@@ -197,6 +198,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         DrawBonDetails(selectedBon);
                     else if (selectedSki != null)
                         DrawSkiDetails(selectedSki);
+                    else if (selectedStck != null)
+                        DrawStckDetails(selectedStck);
                     else
                         EditorGUILayout.HelpBox(
                             "Selected " + selectedFile.Extension.ToUpperInvariant() +
@@ -357,6 +360,26 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
+        private void DrawStckDetails(StckDocument document)
+        {
+            EditorGUILayout.LabelField(
+                "Animation range: " + document.AnimationStart + "–" + document.AnimationEnd +
+                " ms, frame rate " + document.FramesPerSecond);
+            EditorGUILayout.LabelField(
+                "Joint tracks (" + document.Tracks.Count + ")",
+                EditorStyles.boldLabel);
+            foreach (var track in document.Tracks)
+            {
+                EditorGUILayout.LabelField(
+                    "Joint " + track.JointIndex +
+                    " — pos keys " + track.Position.KeyCount +
+                    "/segs " + track.Position.SegmentCount +
+                    ", rot keys " + track.Rotation.KeyCount +
+                    "/segs " + track.Rotation.SegmentCount,
+                    EditorStyles.miniLabel);
+            }
+        }
+
         private void DrawSkiDetails(SkiDocument document)
         {
             EditorGUILayout.LabelField(
@@ -425,6 +448,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSmd = null;
             selectedBon = null;
             selectedSki = null;
+            selectedStck = null;
             visibleFiles = Array.Empty<GameDataFile>();
             scannedDirectories = 0;
             scannedFiles = 0;
@@ -515,6 +539,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 selectedSmd = null;
                 selectedBon = null;
                 selectedSki = null;
+                selectedStck = null;
             }
         }
 
@@ -526,6 +551,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSmd = null;
             selectedBon = null;
             selectedSki = null;
+            selectedStck = null;
             status = "Selected " + file.RelativePath;
             if (file.Extension == "gfx")
             {
@@ -681,6 +707,38 @@ namespace SilverEcho.ForsakenWorld.Editor
                     status = "Permission denied while reading file: " + exception.Message;
                 }
             }
+            else if (file.Extension == "stck")
+            {
+                try
+                {
+                    selectedStck = new StckParser()
+                        .Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (NotSupportedException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (InvalidDataException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    status = "Access denied while reading file: " + exception.Message;
+                }
+                catch (IOException exception)
+                {
+                    status = "Could not read file: " + exception.Message;
+                }
+                catch (SecurityException exception)
+                {
+                    status = "Permission denied while reading file: " + exception.Message;
+                }
+            }
 
             Repaint();
         }
@@ -717,7 +775,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         string.IsNullOrEmpty(selectedEcm.Error)) ||
                     (selectedFile.Extension == "smd" && selectedSmd != null) ||
                     (selectedFile.Extension == "bon" && selectedBon != null) ||
-                    (selectedFile.Extension == "ski" && selectedSki != null));
+                    (selectedFile.Extension == "ski" && selectedSki != null) ||
+                    (selectedFile.Extension == "stck" && selectedStck != null));
         }
 
         private void ImportSelectedAsset()
@@ -793,6 +852,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return typeof(BonAsset);
                 case "ski":
                     return typeof(SkiAsset);
+                case "stck":
+                    return typeof(StckAsset);
                 default:
                     throw new InvalidOperationException(
                         "No importer is available for ." + extension + " files.");
@@ -813,6 +874,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return BonAsset.CreateFrom(selectedFile.RelativePath, selectedBon);
                 case "ski":
                     return SkiAsset.CreateFrom(selectedFile.RelativePath, selectedSki);
+                case "stck":
+                    return StckAsset.CreateFrom(selectedFile.RelativePath, selectedStck);
                 default:
                     throw new InvalidOperationException(
                         "No importer is available for ." + selectedFile.Extension + " files.");
@@ -834,7 +897,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                         ? "Skeletons"
                         : file.Extension == "ski"
                             ? "Skins"
-                            : "Models";
+                            : file.Extension == "stck"
+                                ? "Tracks"
+                                : "Models";
             var outputPath = ImportRoot + "/" + typeFolder + "/" + string.Join("/", pathParts);
             return Path.ChangeExtension(outputPath, ".asset").Replace('\\', '/');
         }
