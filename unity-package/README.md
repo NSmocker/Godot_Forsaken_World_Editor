@@ -16,7 +16,8 @@ provide an encoding factory. The parser tests use Unity Test Framework and can b
 **Window > General > Test Runner** after importing the package into a Unity project with Test
 Framework enabled.
 
-`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, and `.trn2` files,
+`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, and
+common texture extensions (`.dds`, `.bmp`, `.tga`, `.png`, `.jpg`, `.jpeg`) for SKI resolve,
 supports path/extension search and case-insensitive resource resolution, and can resolve a
 unique path suffix for Angelica references that omit leading folders. It rejects
 absolute/parent-traversing paths, skips symbolic links, and reports ambiguous suffix matches
@@ -48,20 +49,34 @@ explicit missing/ambiguous reporting. `ModelAssembler` builds an engine-agnostic
 Unity LH). `StckTrackEvaluator` samples STCK keys/segments (vector lerp + quaternion SLERP with
 Angelica epsilon 0.25, matching `angelica_model_reader.gd`). `ModelAnimationAssembler` maps SMD
 action name/start/end frames onto clips using skeleton FPS for FrameToTime and STCK FPS for the
-sample step. `AssembledModelUnityBuilder` / `AssembledAnimationClipBuilder` create a GameObject
-hierarchy with `SkinnedMeshRenderer`/`Mesh` and `AnimationClip` curves on `Skeleton/...` bone
-paths; the browser can preview assembled animations and import clips with GUID-preserving
-reimport. Material/texture binding and scene playback remain later steps.
+sample step. `SkiTextureResolver` resolves SKI texture names via `GameDataIndex` (same
+`Textures/` then `Tex_<skiBase>/` order as Godot) and reports missing/ambiguous paths.
+`ModelMaterialAssembler` maps SKI material properties (Opaque / AlphaClip with threshold
+84/255 / Transparent, two-sided, `r_` reflect maps) onto `AssembledSurfaceMaterial` slots.
+`DdsHeaderParser` / `DdsDxtDecoder` validate DX9 DDS headers (DXT1/3/5 and uncompressed;
+`DDSD_LINEARSIZE` vs pitch) and optionally decode a top mip for fixtures — Unity 2022.3
+`IHVImageFormatImporter` imports those formats natively, so the package prefers copy+native
+import over a custom Runtime Texture2D path. `AssembledModelUnityBuilder` /
+`AssembledAnimationClipBuilder` / `AssembledUrpMaterialBuilder` create a GameObject hierarchy
+with `SkinnedMeshRenderer`/`Mesh`, `AnimationClip` curves on `Skeleton/...` bone paths, and
+URP Lit materials (`Shader.Find`; no `com.unity.render-pipelines.universal` package dependency).
+The browser can preview assembled animations/materials and import clips/materials with
+GUID-preserving reimport. Host DDS→Texture2D binding and scene playback remain later steps.
+
+**Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
+does not embed the URP UPM dependency.
 
 The repository does not currently contain a Unity host project. A host project is not needed
 to develop the parser or index, but one is required to run Unity EditMode tests or validate
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and 49 parser/asset/index/geometry/assembly/animation
-test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
+standalone harness with temporary Unity API stubs, and **56**
+parser/asset/index/geometry/assembly/animation/materials/DDS test cases passed.
+Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
 `assets/models . pck`, not committed): SMD v8 1403 OK / 2144 unsupported; BON v6 5721 OK / 2214
 unsupported; SKI v9 12751 OK / 7562 unsupported; STCK v1 51240 OK; assembly 1401 OK / 1 missing
-skeleton / 0 assembler bugs; SMD actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip missing
-track; 1224040 joint-track evals OK). This does not validate Unity compilation, the Test Runner,
-Editor UI, or AssetDatabase behavior.
+skeleton / 0 assembler bugs; SMD actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip;
+1224040 joint-track evals OK); materials slots 2321 OK / textures 2291 resolved / 30 missing /
+0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb). This does not validate
+Unity compilation, the Test Runner, Editor UI, or AssetDatabase behavior.

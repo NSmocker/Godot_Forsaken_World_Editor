@@ -198,6 +198,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                             ImportAssembledAnimationClips();
                     }
 
+                    using (new EditorGUI.DisabledScope(
+                        selectedAssembledModel == null ||
+                        !selectedAssembledModel.IsValid ||
+                        !HasAssembledMaterials(selectedAssembledModel)))
+                    {
+                        if (GUILayout.Button("Import assembled URP materials"))
+                            ImportAssembledMaterials();
+                    }
+
                     if (selectedGfx != null)
                         DrawGfxDetails(selectedGfx);
                     else if (selectedEcm != null)
@@ -909,6 +918,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             EditorGUILayout.LabelField("Skins: " + model.Skins.Count);
             EditorGUILayout.LabelField("Actions: " + model.Actions.Count);
             EditorGUILayout.LabelField("Animations: " + model.Animations.Count);
+            var materialSlots = 0;
+            var texturesResolved = 0;
+            foreach (var skin in model.Skins)
+            {
+                materialSlots += skin.SurfaceMaterials.Count;
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    if (slot.TextureResolved)
+                        texturesResolved++;
+                }
+            }
+
+            EditorGUILayout.LabelField(
+                "Materials: " + materialSlots + " (textures resolved " + texturesResolved + ")");
             EditorGUILayout.LabelField(
                 "Status: " + (model.IsValid ? "OK" : "Has errors"),
                 EditorStyles.miniBoldLabel);
@@ -917,8 +940,25 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 EditorGUILayout.LabelField(
                     skin.SourcePath + " (" + skin.Surfaces.Count + " surfaces, " +
-                    skin.BindBones.Count + " bind bones)",
+                    skin.BindBones.Count + " bind bones, " +
+                    skin.SurfaceMaterials.Count + " materials)",
                     EditorStyles.miniLabel);
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    var tex = slot.TextureResolved
+                        ? slot.TextureSourcePath
+                        : (string.IsNullOrEmpty(slot.TextureError) ? "missing" : slot.TextureError);
+                    var dds = slot.TextureDds != null
+                        ? (" [" + slot.TextureDds.Compression + " " +
+                           slot.TextureDds.Width + "x" + slot.TextureDds.Height + "]")
+                        : string.Empty;
+                    EditorGUILayout.LabelField(
+                        "  " + slot.Name + " tex=" + (slot.TextureName ?? "") +
+                        " alpha=" + slot.AlphaMode +
+                        (slot.TwoSided ? " two-sided" : "") +
+                        " -> " + tex + dds,
+                        EditorStyles.miniLabel);
+                }
             }
 
             foreach (var animation in model.Animations)
@@ -981,6 +1021,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     skinPaths,
                     resolution);
                 AttachAssembledAnimations(model, resolution, decoder);
+                AttachAssembledMaterials(model);
                 return model;
             }
             catch (System.Exception exception)
@@ -1120,7 +1161,90 @@ namespace SilverEcho.ForsakenWorld.Editor
             return folder + "/" + SanitizeAssetName(clipName) + ".anim";
         }
 
-        private static string GetAssetPath(GameDataFile file)
+        private void AttachAssembledMaterials(AssembledModel model)
+        {
+            if (model == null || index == null)
+                return;
+            new ModelMaterialAssembler(new SkiTextureResolver(index)).BuildForModel(model);
+        }
+
+        private static bool HasAssembledMaterials(AssembledModel model)
+        {
+            if (model == null)
+                return false;
+            foreach (var skin in model.Skins)
+            {
+                if (skin.SurfaceMaterials.Count > 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void ImportAssembledMaterials()
+        {
+            if (selectedAssembledModel == null ||
+                !selectedAssembledModel.IsValid ||
+                !HasAssembledMaterials(selectedAssembledModel))
+            {
+                return;
+            }
+
+            try
+            {
+                var imported = 0;
+                var updated = 0;
+                foreach (var skin in selectedAssembledModel.Skins)
+                {
+                    foreach (var slot in skin.SurfaceMaterials)
+                    {
+                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot);
+                        var outputPath = AssembledUrpMaterialBuilder.GetMaterialAssetPath(
+                            skin.SourcePath,
+                            slot);
+                        var existing = AssetDatabase.LoadMainAssetAtPath(outputPath);
+                        if (existing != null)
+                        {
+                            if (!(existing is Material))
+                                throw new IOException(
+                                    "An incompatible asset already exists at the output path: " +
+                                    outputPath);
+                            EditorUtility.CopySerialized(material, existing);
+                            EditorUtility.SetDirty(existing);
+                            DestroyImmediate(material);
+                            updated++;
+                        }
+                        else
+                        {
+                            if (File.Exists(outputPath))
+                                throw new IOException(
+                                    "A file already exists at the output path but is not a Unity asset: " +
+                                    outputPath);
+                            EnsureAssetFolders(Path.GetDirectoryName(outputPath));
+                            AssetDatabase.CreateAsset(material, outputPath);
+                            imported++;
+                        }
+                    }
+                }
+
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                status = "URP materials imported=" + imported + " updated=" + updated +
+                    " under " + ImportRoot + "/Materials";
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is UnityException)
+            {
+                status = "Material import failed: " + exception.Message;
+                Debug.LogError(status);
+            }
+        }
+
+                private static string GetAssetPath(GameDataFile file)
         {
             var relativePath = file.RelativePath.Replace('\\', '/');
             var pathParts = relativePath.Split('/');

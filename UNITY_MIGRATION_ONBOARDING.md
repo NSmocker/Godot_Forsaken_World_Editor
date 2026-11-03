@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-11-03 (latest standalone validation)
 **Audience:** coding agents continuing the Godot-to-Unity editor migration
-**Current package:** `unity-package/` — local Unity Package Manager package targeting Unity 2022.3
+**Current package:** `unity-package/` — local Unity Package Manager package targeting Unity 2022.3 **URP**
 
 ## Purpose and source of truth
 
@@ -25,13 +25,14 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 | Area | Status at last verification |
 |---|---|
 | Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 2022.3 is the package's declared minimum. |
-| Resource index and browser | Background scan, search/filter, and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, and `.trn2`. No folder tree or persistent index cache yet. |
+| Render pipeline | **URP** chosen for Unity 2022.3. Package does **not** declare `com.unity.render-pipelines.universal`; host must enable URP. Editor uses `Shader.Find("Universal Render Pipeline/Lit")` (fallback Unlit/`Sprites/Default`). |
+| Resource index and browser | Background scan, search/filter, and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, and texture extensions (`.dds`/`.bmp`/`.tga`/`.png`/`.jpg`/`.jpeg`) for SKI resolve. Browser previews/imports assembled materials. No folder tree or persistent index cache yet. |
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
 | ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Binary `MOXB` ECM, model assembly, and animation/event integration are unsupported. |
-| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder` assemble skeletons/meshes/AnimationClips (Unity LH, preserve on-disk winding; STCK sampling matches Godot reader/builder). Morph/Supple/Muscle, materials, and scene playback remain. |
+| Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`/`SkiTextureResolver`/`ModelMaterialAssembler`/`DdsHeaderParser` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder`/`AssembledUrpMaterialBuilder` assemble skeletons/meshes/AnimationClips/URP Lit materials (Unity LH, preserve on-disk winding; STCK sampling and SKI alpha/two-sided/`r_` reflect match Godot). Morph/Supple/Muscle and scene playback remain; host Texture2D binding from DDS is still needed. |
 | Maps and AUI | Not ported. `.trn2` is indexed but not parsed/imported; AUI and localization readers/previews are not implemented. |
-| Verification | Standalone harness (Unity/NUnit stubs) passed 49 tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip missing track; 1224040 joint-track evals OK). Not a Unity Test Runner run; AssetDatabase/UI remain unverified. Game assets were not committed. |
+| Verification | Standalone harness (Unity/NUnit stubs) passed **56** tests on 2026-11-03. Real-asset standalone-harness scan of PW-Workshop `Models-Database` / `assets/models . pck`: SMD v8 1403 OK (2144 unsupported v5/v6), BON v6 5721 OK (2214 unsupported v5), SKI v9 12751 OK (7562 unsupported, mostly v8), STCK v1 51240 OK; assembly 1401 OK / 1 missing skeleton / 0 assembler bugs; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip; 1224040 joint-track evals OK); materials slots 2321 OK / textures 2291 resolved / 30 missing with reasons / 0 ambiguous; DDS headers 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb; all LikelyUnityNative on resolved skins). Not a Unity Test Runner run; AssetDatabase/UI remain unverified. Game assets were not committed. |
 
 There is no Unity host project in this repository, and the Unity Editor was unavailable in the
 last verification environment. Do not claim that Unity integration has been tested. A host
@@ -52,6 +53,11 @@ Runner and validate Editor UI, `AssetDatabase`, and imported assets.
 - `unity-package/Tests/Editor/` — NUnit EditMode tests, including synthetic parser fixtures.
 - `unity-package/README.md` — package installation, current behavior, and limitations.
 - `TODO.md` — detailed migration stages and outstanding work.
+- DDS policy (models): prefer copying the original `.dds` so Unity 2022.3 `IHVImageFormatImporter`
+  imports DXT1/DXT3/DXT5 and common uncompressed Texture2D natively. Runtime
+  `DdsHeaderParser` / optional `DdsDxtDecoder` validate DX9 headers (including
+  `DDSD_LINEARSIZE` vs pitch) and support fixtures/scans without claiming host import.
+  Do not add a custom URP shader package dependency unless Lit/Unlit prove insufficient.
 
 ### Godot reference implementation
 
@@ -120,12 +126,14 @@ from names or comments alone.
 
 ## Recommended next work
 
-1. Material/texture binding for assembled skins; harden Editor preview instantiation / scene
-   playback beyond the assemble-preview details panel and AnimationClip import.
+1. Host-side DDS→Texture2D binding for assembled URP materials; harden Editor preview
+   instantiation / scene playback beyond the assemble-preview details panel and
+   AnimationClip/Material import.
 2. Optional: support additional SMD/BON/SKI versions only when a concrete need and fixtures
    exist (current targets remain SMD v8, BON v6, SKI v9, STCK v1).
-3. After the model pipeline, resume GFX runtime/rendering, maps, and AUI according to `TODO.md`;
-   these are substantial feature areas, not implied complete by the current browser.
+3. After the model pipeline, resume GFX runtime/rendering (URP shaders), maps, and AUI
+   according to `TODO.md`; these are substantial feature areas, not implied complete by the
+   current browser.
 
 ## Progress reporting template
 

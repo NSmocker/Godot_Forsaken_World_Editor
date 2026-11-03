@@ -1,13 +1,13 @@
 # План перенесення редактора Forsaken World на Unity
 
-> **Стан на 2026-11-03:** Unity UPM package для Unity 2022.3 із браузером ресурсів і частковим читанням GFX/ECM/SMD v8/BON v6/SKI v9/STCK v1 плюс Runtime STCK evaluation / AnimationClip assembly. Остання standalone-перевірка скомпілювала Runtime/Editor проти тимчасових Unity API stubs і пройшла 49 тестових випадків; real-asset scan на PW-Workshop Models-Database (models . pck) через той самий harness: SMD v8 1403 OK / 2144 unsupported (v5/v6), BON v6 5721 OK / 2214 unsupported (v5), SKI v9 12751 OK / 7562 unsupported (переважно v8), STCK v1 51240 OK / 0 fail; assembly SMD→BON/SKI 1401 OK / 1 missing skeleton / 0 assembler bugs; анімації SMD-actions→STCK: actions_ok=44276 / actions_fail=0 / skip_no_track=80, stck_tracks_eval_ok=1224040 / fail=0, clips_ok=44276 / fail=0 (без коміту ігрових ассетів). Це не запуск Unity Test Runner; реальна AssetDatabase/UI-інтеграція не перевірена. Загального відсотка не вказуємо: функціональні області мають різний масштаб.
+> **Стан на 2026-11-03:** Unity UPM package для Unity 2022.3 **URP** із браузером ресурсів і частковим читанням GFX/ECM/SMD v8/BON v6/SKI v9/STCK v1 плюс Runtime STCK evaluation / AnimationClip assembly і матеріали/текстури зібраних моделей (DDS policy + SKI→URP Lit). Остання standalone-перевірка скомпілювала Runtime/Editor проти тимчасових Unity API stubs і пройшла **56** тестових випадків; real-asset scan на PW-Workshop Models-Database (`models . pck`) через той самий harness: SMD v8 1403 OK / 2144 unsupported (v5/v6), BON v6 5721 OK / 2214 unsupported (v5), SKI v9 12751 OK / 7562 unsupported (переважно v8), STCK v1 51240 OK / 0 fail; assembly SMD→BON/SKI 1401 OK / 1 missing skeleton / 0 assembler bugs; анімації SMD-actions→STCK: actions_ok=44276 / fail=0 / skip_no_track=80, stck_tracks_eval_ok=1224040 / fail=0, clips_ok=44276 / fail=0; матеріали: slots_ok=2321 / textures_resolved=2291 / missing=30 / ambiguous=0, dds_headers_ok=2291 (усі LikelyUnityNative); повний DDS scan 11640 OK / 0 fail (Dxt1/3/5 + UncompressedRgb; без коміту ігрових ассетів). Це не запуск Unity Test Runner; реальна AssetDatabase/UI-інтеграція не перевірена. Загального відсотка не вказуємо: функціональні області мають різний масштаб.
 
 ## Межі та вихідні припущення
 
 - Поточний репозиторій містить Godot-плагін редактора, а не готову гру: він читає зовнішні розпаковані дані Forsaken World з `.resources` і створює сцени/ресурси для редагування та перегляду.
 - Переносимо насамперед можливості редактора й перегляду контенту. Це не план переносу сервера, мережевої гри або ігрової логіки.
 - Цільова архітектура: C#-пакет/Editor assembly для Unity, окреме ядро читання форматів без залежності від Unity Editor API, а також Unity-компоненти для відтворення ефектів і сцен.
-- Мінімальна версія пакета зараз Unity 2022.3; render pipeline та підтримувані платформи ще не визначені, тому не починати залежну від pipeline реалізацію шейдерів до окремого рішення. Оригінальні ігрові дані не додаються до репозиторію; тести мають використовувати створені мінімальні fixtures або дані, на які є дозвіл.
+- Мінімальна версія пакета зараз Unity 2022.3; **обраний render pipeline — URP** (Universal Render Pipeline). Підтримувані платформи редактора ще не зафіксовані. Пакет **не** додає `com.unity.render-pipelines.universal` як UPM-залежність: Editor шукає `Universal Render Pipeline/Lit` (fallback Unlit/`Sprites/Default`) у host-проєкті з URP. Оригінальні ігрові дані не додаються до репозиторію; тести мають використовувати створені мінімальні fixtures або дані, на які є дозвіл.
 
 ## Що вже робить Godot-плагін
 
@@ -25,7 +25,7 @@
 ### 0. Зафіксувати обсяг і еталон поведінки
 
 - [x] Встановити базову сумісність UPM-пакета з Unity 2022.3 LTS (`unity-package/package.json`).
-- [ ] Вибрати render pipeline та підтримувані платформи редактора; перевірити обмеження потрібних шейдерів.
+- [~] Обрано **URP** для Unity 2022.3 (Editor `AssembledUrpMaterialBuilder` → URP Lit/Unlit через `Shader.Find`, без залежності URP у `package.json`). Підтримувані платформи редактора та повна перевірка обмежень шейдерів у host Unity ще потрібні.
 - [x] Закласти структуру UPM-пакета `Editor/`, `Runtime/` і `Tests/`, розділивши Editor assembly та переносиме runtime/core (`unity-package/`).
 - [ ] Скласти матрицю підтримки форматів, GFX ID, контролерів, UI-контролів і функцій мап за поточною реалізацією та наявним `gfx_importer/GFX-ECM-Todo-List.txt`.
 - [ ] Підготувати невеликі синтетичні fixtures і еталонні результати: значення парсерів, трансформації, таймінги анімацій, меші, матеріали та кількість об'єктів.
@@ -40,19 +40,19 @@
 - [~] Додати `BinaryDataReader` із перевіркою меж, little-endian primitive reads, magic/version, optional UTF-8 BOM skip і змістовними помилками (`unity-package/Runtime/BinaryDataReader.cs`); його використовують `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 parsers.
 - [ ] Перенести XML/AUI парсер, який приймає нестандартний XML, що відхиляє стандартний парсер; забезпечити збереження порядку й повторюваних полів.
 - [ ] Винести конфігурацію коренів джерел і каталогів даних у налаштування Unity-проєкту; додати перевірку наявності потрібних папок перед імпортом.
-- [~] Додати Unity EditMode-тести для `.gfx`, `.ecm`, `.smd`, `.bon`, `.ski`, `.stck`, assets, каталогу ресурсів, geometry/assembly/animation helpers і binary reader (`unity-package/Tests/Editor`). Standalone harness проходить 49 тестових випадків; запуск Unity Test Runner ще потрібен. Real-asset summary (standalone harness, Models-Database/`models . pck`): SMD v8 1403 OK, BON v6 5721 OK, SKI v9 12751 OK, STCK v1 51240 OK; assembly 1401 OK; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip missing track).
+- [~] Додати Unity EditMode-тести для `.gfx`, `.ecm`, `.smd`, `.bon`, `.ski`, `.stck`, assets, каталогу ресурсів, geometry/assembly/animation/materials/DDS helpers і binary reader (`unity-package/Tests/Editor`). Standalone harness проходить **56** тестових випадків; запуск Unity Test Runner ще потрібен. Real-asset summary (standalone harness, Models-Database/`models . pck`): SMD v8 1403 OK, BON v6 5721 OK, SKI v9 12751 OK, STCK v1 51240 OK; assembly 1401 OK; SMD actions→STCK eval/clips 44276 OK (0 fail, 80 skip); materials slots 2321 OK / textures 2291 resolved / 30 missing / 0 ambiguous; DDS headers 11640 OK / 0 fail.
 
 **Готово, коли:** парсери працюють без сцени та Editor API, повертають структуровані дані/помилки і перевірені тестами на fixtures.
 
 ### 2. Основа Unity-редактора й імпорт ресурсів
 
-- [~] Створити EditorWindow із вибором папки, фоновим скануванням, прогресом, пошуком/фільтром і переглядом `.gfx`/`.ecm`/`.smd`/`.bon`/`.ski`/`.stck` плюс assemble-preview (кістки/скіни/анімації) та імпорт AnimationClip для SMD (`unity-package/Editor/GameDataBrowserWindow.cs`). Ліниве дерево папок ще потрібне.
+- [~] Створити EditorWindow із вибором папки, фоновим скануванням, прогресом, пошуком/фільтром і переглядом `.gfx`/`.ecm`/`.smd`/`.bon`/`.ski`/`.stck` плюс assemble-preview (кістки/скіни/анімації/матеріали) та імпорт AnimationClip і URP Material для SMD (`unity-package/Editor/GameDataBrowserWindow.cs`). Ліниве дерево папок ще потрібне.
 - [~] Фонове сканування з прогресом і відображенням результату на головному потоці; кеш індексу ще потрібен.
-- [~] Реалізувати імпорт вибраних `.gfx`, текстових `.ecm`, `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 через AssetDatabase, з детермінованими шляхами та оновленням asset на місці; AnimationClip імпорт із GUID-preserving reimport для зібраних SMD-анімацій (`unity-package/Editor/GameDataBrowserWindow.cs`, `AssembledAnimationClipBuilder.cs`). Атомарність при помилках і пакетний імпорт ще потрібні.
+- [~] Реалізувати імпорт вибраних `.gfx`, текстових `.ecm`, `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 через AssetDatabase, з детермінованими шляхами та оновленням asset на місці; AnimationClip і URP Material імпорт із GUID-preserving reimport для зібраних SMD (`unity-package/Editor/GameDataBrowserWindow.cs`, `AssembledAnimationClipBuilder.cs`, `AssembledUrpMaterialBuilder.cs`). Атомарність при помилках і пакетний імпорт ще потрібні.
 - [~] Додати `GfxAsset` ScriptableObject із серіалізованими заголовками, елементами, контролерами, keypoints і попередженнями (`unity-package/Runtime/GfxAsset.cs`); сцени/префаби для відтворення GFX ще не створюються.
-- [~] Додати читання Angelica `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1, перегляд та імпорт маніфесту/скелета/меш/track-даних у `SmdAsset` / `BonAsset` / `SkiAsset` / `StckAsset`; Runtime assembly (`ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`) і Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder` (Mesh/SkinnedMeshRenderer + AnimationClip на `Skeleton/...` bone paths, preserve on-disk winding) додано; матеріали/текстури та playback у сцені ще потрібні.
+- [~] Додати читання Angelica `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1, перегляд та імпорт маніфесту/скелета/меш/track/матеріал-даних у `SmdAsset` / `BonAsset` / `SkiAsset` / `StckAsset`; Runtime assembly (`ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`/`SkiTextureResolver`/`ModelMaterialAssembler`/`DdsHeaderParser`) і Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder`/`AssembledUrpMaterialBuilder` (Mesh/SkinnedMeshRenderer + AnimationClip + URP Lit materials, GUID-preserving reimport) додано; прив'язка DDS→Texture2D у host і scene playback ще потрібні.
 - [ ] Додати пакетний імпорт і журнал імпорту з підсумком: створені ресурси, пропущені елементи, невирішені посилання та причини помилок.
-- [ ] Визначити політику для DDS, зокрема копіювання оригіналу, імпорт через Unity або власне декодування форматів, які Unity не читає.
+- [~] Політика DDS: Unity 2022.3 `IHVImageFormatImporter` нативно імпортує DXT1/DXT3/DXT5 і поширені uncompressed DDS як Texture2D — host копіює/імпортує файл; Runtime `DdsHeaderParser`/`DdsDxtDecoder` валідують DX9-заголовок (pitch vs LINEARSIZE) і опційно декодують top-mip для fixtures/скану; volume/incomplete-mip/exotic FourCC позначаються (`LikelyUnityNativeImport=false`). Повна Texture2D-прив'язка в Editor ще залежить від host AssetDatabase.
 
 **Готово, коли:** користувач може вибрати каталог даних, знайти файл, імпортувати його повторно без дублікатів і бачити повний результат/помилки.
 
@@ -72,9 +72,9 @@
 ### 4. Моделі та ECM
 
 - [~] Додати текстовий `.ecm` parser для основної моделі, додаткових скінів, CoGfx-подій/параметрів і combined actions; вікно показує дані та імпортує їх у `EcmAsset` (`unity-package/Runtime/EcmParser.cs`, `unity-package/Editor/GameDataBrowserWindow.cs`). Парсер моделей і побудова сцен ще не реалізовані.
-- [~] Перенести `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 (маніфест, кістки/матриці, суглоби/hooks, матеріали, сирі дані skinned/rigid meshes, ключі/сегменти анімаційних треків); Runtime STCK evaluation (lerp/SLERP як у Godot reader) і SMD action→clip mapping, Editor AnimationClip на шляхах скелета додано; матеріали/текстури та scene playback ще потрібні.
-- [~] Створювати Unity Mesh/Skinning/Animation assets із коректними координатами, нормалями, UV, ієрархією кісток і повторним використанням спільних ресурсів (Mesh/SkinnedMeshRenderer + AnimationClip з GUID-preserving reimport є; матеріали/текстури та повне повторне використання між ECM/GFX ще потрібні).
-- [ ] Перенести текстури та матеріали, включно з DXT1/3/5, альфа-режимами, двосторонніми матеріалами й картами відбиття; визначити відповідність шейдерів URP/HDRP.
+- [~] Перенести `.smd` v8, `.bon` v6, `.ski` v9 і `.stck` v1 (маніфест, кістки/матриці, суглоби/hooks, матеріали, сирі дані skinned/rigid meshes, ключі/сегменти анімаційних треків); Runtime STCK evaluation (lerp/SLERP як у Godot reader), SMD action→clip mapping і SKI material/texture assembly додано; Editor AnimationClip + URP Lit materials на шляхах скелета/слотів; scene playback ще потрібен.
+- [~] Створювати Unity Mesh/Skinning/Animation/Material assets із коректними координатами, нормалями, UV, ієрархією кісток і повторним використанням спільних ресурсів (Mesh/SkinnedMeshRenderer + AnimationClip + URP Material з GUID-preserving reimport є; прив'язка Texture2D з DDS і повне повторне використання між ECM/GFX ще потрібні).
+- [~] Перенести текстури та матеріали: `SkiTextureResolver` (Textures/ + Tex_<skiBase>/ як у Godot), `ModelMaterialAssembler` (alpha Opaque/Clip/Transparent з ALPHA_REF 84/255, two-sided, `r_` reflect), `AssembledUrpMaterialBuilder` → URP Lit (не HDRP); DDS DXT1/3/5 + uncompressed через native Unity import + Runtime header validation. Texture2D copy/import у host і повна перевірка reflect/emissive у Scene View ще потрібні.
 - [ ] Перенести `.ecm`: вибір основної моделі, додаткові скіни, анімації та CoGfx на hooks; додати обробку GFX/звукових подій анімацій.
 - [ ] Додати повторне використання імпортованих моделей/текстур/анімацій між `.ecm`, GFX і мапами.
 - [ ] Розширити підтримку відомих прогалин: `.smd` версій 5/6, дочірні моделі, бінарні `.ecm` (`MOXB`), Hanger та Morph/Supple/Muscle meshes.
@@ -108,7 +108,7 @@
 - [ ] Створити тестовий набір паритету з Godot-результатами: парсери, трансформації, тривалість ефекту, кількість мешів/вершин, анімаційні ключі й склад сцен.
 - [ ] Перевірити імпорт повторно, скасування/повторення, пошкоджені файли, дублікати назв, регістр шляхів, неіснуючі ресурси та великі каталоги.
 - [ ] Заміряти час сканування/імпорту, використання пам'яті, кількість draw calls і час відтворення представницьких GFX/мап; усунути блокування Editor UI.
-- [ ] Визначити мінімальні версії Unity та render pipeline, задокументувати зовнішні дані й налаштування.
+- [~] Мінімальна версія Unity 2022.3 і render pipeline **URP** задокументовані; зовнішні дані/налаштування host-проєкту та платформи редактора ще потрібні.
 - [ ] Додати приклад конфігурації, інструкцію встановлення пакета, сценарій першого імпорту та таблицю підтримки/обмежень.
 - [ ] Перед випуском перевірити чисте встановлення в окремому Unity-проєкті без Godot і без прихованих локальних залежностей.
 

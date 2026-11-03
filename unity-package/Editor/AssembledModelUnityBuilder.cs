@@ -78,6 +78,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 renderer.bones = bones;
+                var materials = AssembledUrpMaterialBuilder.CreateMaterials(skin);
+                if (materials.Count > 0)
+                    renderer.sharedMaterials = materials.ToArray();
             }
 
             return root;

@@ -38,6 +38,38 @@ namespace SilverEcho.ForsakenWorld
         public List<SkiMaterial> Materials { get; } = new List<SkiMaterial>();
         public List<AssembledBindBone> BindBones { get; } = new List<AssembledBindBone>();
         public List<AssembledSurface> Surfaces { get; } = new List<AssembledSurface>();
+        public List<AssembledSurfaceMaterial> SurfaceMaterials { get; } = new List<AssembledSurfaceMaterial>();
+    }
+
+    public enum AssembledAlphaMode
+    {
+        Opaque = 0,
+        AlphaClip = 1,
+        Transparent = 2
+    }
+
+    /// <summary>
+    /// Engine-agnostic material slot matching angelica_model_builder.gd _material.
+    /// </summary>
+    public sealed class AssembledSurfaceMaterial
+    {
+        public string Name { get; internal set; } = string.Empty;
+        public int TextureIndex { get; internal set; } = -1;
+        public int MaterialIndex { get; internal set; } = -1;
+        public string TextureName { get; internal set; } = string.Empty;
+        public string TextureSourcePath { get; internal set; } = string.Empty;
+        public bool TextureResolved { get; internal set; }
+        public DdsDocument TextureDds { get; internal set; }
+        public string TextureError { get; internal set; }
+        public float[] Diffuse { get; internal set; }
+        public float[] Emissive { get; internal set; }
+        public float[] Specular { get; internal set; }
+        public float SpecularLuminance { get; internal set; }
+        public bool TwoSided { get; internal set; }
+        public AssembledAlphaMode AlphaMode { get; internal set; }
+        public float AlphaClipThreshold { get; internal set; } = 84f / 255f;
+        public bool UsesReflectShader { get; internal set; }
+        public List<int> SurfaceIndices { get; } = new List<int>();
     }
 
     public sealed class AssembledBindBone
