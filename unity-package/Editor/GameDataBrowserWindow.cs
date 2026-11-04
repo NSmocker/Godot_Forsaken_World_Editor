@@ -6,7 +6,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
-using UnityEditor.PackageManager;
+using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld.Editor

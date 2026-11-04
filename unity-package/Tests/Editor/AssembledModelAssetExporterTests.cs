@@ -27,9 +27,8 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
-        public void ExportWritesPrefabMeshAndClipsThroughAssetDatabaseStubs()
+        public void ExportWritesPrefabAndMeshThroughAssetDatabase()
         {
-            PrefabUtility.SavedPrefabPaths.Clear();
             var decoder = new GfxTextDecoder(() => Encoding.GetEncoding(28591));
             var ski = new SkiParser(decoder).Parse(
                 SkiParserTests.BuildFixture(),
@@ -66,7 +65,9 @@ namespace SilverEcho.ForsakenWorld.Tests
                     result.PrefabPath);
                 Assert.Greater(result.MeshPaths.Count, 0);
                 Assert.IsTrue(result.PrefabCreated || result.PrefabUpdated);
-                Assert.IsTrue(PrefabUtility.SavedPrefabPaths.Contains(result.PrefabPath));
+                Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath));
+                foreach (var meshPath in result.MeshPaths)
+                    Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Mesh>(meshPath));
             }
             finally
             {

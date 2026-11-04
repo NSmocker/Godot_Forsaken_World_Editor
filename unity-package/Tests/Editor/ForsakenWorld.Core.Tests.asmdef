@@ -2,7 +2,8 @@
   "name": "ForsakenWorld.Core.Tests",
   "rootNamespace": "SilverEcho.ForsakenWorld.Tests",
   "references": [
-    "ForsakenWorld.Core"
+    "ForsakenWorld.Core",
+    "ForsakenWorld.Editor"
   ],
   "includePlatforms": [
     "Editor"
