@@ -38,8 +38,11 @@ yet. Binary `MOXB` ECM files remain unsupported. `.trn2` terrain (Loader B) can 
 imported as a Prefab with area meshes, layer masks, and daytime lightmaps. Individual buildings
 (`.bmd` litmodels) can be previewed and imported as Prefabs under
 `Assets/ForsakenWorld/Imported/Buildings` with the Angelica LitModel URP shader (vertex day color ×
-texture × 2, alpha test 84/255, optional two-sided). Map-wide building batching and
-`.ecwld`/`.ecbsd` world-object placement from Godot `import_map` are not included yet.
+texture × 2, alpha test 84/255, optional two-sided). Full map import (Godot `import_map` parity) reads sibling `.ecwld`/`.ecbsd` (+ `BSData.dat`
+water), filters buildings by ornament lists, and builds a map Prefab under
+`Assets/ForsakenWorld/Imported/Maps` with water (`Angelica Water` URP shader), lights,
+ECModels (existing ECM Prefab path), AudioSource sound placeholders, day/night + load-radius
+controller, and GFX effect placeholders (GFX runtime TODO).
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton
@@ -74,7 +77,8 @@ under `Assets/ForsakenWorld/Imported/Textures`, and Godot-parity persistence of 
 (`Imported/Meshes/..._mesh.asset`) + Prefab (`Imported/Models/..._model.prefab` or
 `Imported/ECM/...prefab`) with GUID-preserving reimport. The browser can import
 clips/materials+textures/Prefabs and instantiate an assembled model (including ECM SkinModel +
-AddiSkins) in the open scene. CoGfx, GFX runtime, world map objects (`.ecwld`/`.ecbsd`), and AUI remain later.
+AddiSkins) in the open scene and can import a full map Prefab from `.trn2`+`.ecwld`/`.ecbsd`.
+CoGfx, GFX runtime (world effect placeholders stay until then), and AUI remain later.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -84,12 +88,11 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **90**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/pagination
+standalone harness with temporary Unity API stubs, and **97**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/ecwld/ecbsd/water/pagination
 test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
-`assets`, not committed): previous model/ECM/DDS numbers unchanged; BMD litmodels 4521 parse OK /
-0 fail / collide_only 18 / assemble_ok 4503; complete `.trn2`+`.t2bk`+`.t2mk` map sets were **not**
-present (only orphan/raw `.t2mk` pieces under `assets/maps/*/decompressed`, not TMKB headers);
-`Building/textures` referenced by `.bmd` files are mostly absent in that branch. Prefab/AssetDatabase/
-terrain/building import and browser pagination remain unverified in a real Unity Editor. This does
+`assets`, not committed): previous model/ECM/DDS/BMD numbers unchanged; **no** `.ecwld`/`.ecbsd`/
+`BSData.dat` or complete `.trn2`+`.t2bk`+`.t2mk` map sets were present (only `.hmap` and orphan/raw
+`.t2mk` under `assets/maps`); `Building/textures` mostly absent. Prefab/AssetDatabase/terrain/
+building/map import and browser pagination remain unverified in a real Unity Editor. This does
 not validate Unity compilation, the Test Runner, Editor UI, or live AssetDatabase behavior.

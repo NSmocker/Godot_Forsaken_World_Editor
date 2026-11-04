@@ -39,6 +39,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private SkiDocument selectedSki;
         private StckDocument selectedStck;
         private TerrainDocument selectedTerrain;
+        private EcwldDocument selectedEcwld;
+        private EcbsdDocument selectedEcbsd;
+        private string selectedWorldStatus;
         private BmdDocument selectedBuilding;
         private AssembledBuilding selectedAssembledBuilding;
         private AssembledModel selectedAssembledModel;
@@ -75,7 +78,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnGUI()
         {
             EditorGUILayout.HelpBox(
-                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, .trn2, and .bmd files. Supported text, " +
+                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, .trn2, .ecwld, .ecbsd, and .bmd files. Supported text, " +
                 "model, terrain, and building files can be inspected and imported as Unity assets/prefabs.",
                 MessageType.Info);
 
@@ -260,6 +263,16 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                     using (new EditorGUI.DisabledScope(
                         selectedFile == null ||
+                        selectedFile.Extension != "trn2" ||
+                        selectedTerrain == null ||
+                        index == null))
+                    {
+                        if (GUILayout.Button("Import map Prefab (terrain + buildings + world)"))
+                            ImportSelectedMap();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedFile == null ||
                         selectedFile.Extension != "bmd" ||
                         selectedBuilding == null ||
                         selectedAssembledBuilding == null ||
@@ -329,7 +342,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                     else if (selectedStck != null)
                         DrawStckDetails(selectedStck);
                     else if (selectedTerrain != null)
+                    {
                         DrawTerrainDetails(selectedTerrain);
+                        DrawWorldDetailsBesideTerrain();
+                    }
+                    else if (selectedEcwld != null)
+                        DrawWorldDetails(selectedEcwld, selectedEcbsd, selectedWorldStatus);
                     else if (selectedBuilding != null)
                         DrawBuildingDetails(selectedBuilding, selectedAssembledBuilding);
                     else
@@ -585,6 +603,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSki = null;
             selectedStck = null;
             selectedTerrain = null;
+            selectedEcwld = null;
+            selectedEcbsd = null;
+            selectedWorldStatus = null;
             selectedBuilding = null;
             selectedAssembledBuilding = null;
             selectedAssembledModel = null;
@@ -708,6 +729,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSki = null;
             selectedStck = null;
             selectedTerrain = null;
+            selectedEcwld = null;
+            selectedEcbsd = null;
+            selectedWorldStatus = null;
             selectedBuilding = null;
             selectedAssembledBuilding = null;
             selectedAssembledModel = null;
@@ -933,6 +957,47 @@ namespace SilverEcho.ForsakenWorld.Editor
                     status = "Permission denied while reading file: " + exception.Message;
                 }
             }
+
+            else if (file.Extension == "ecwld")
+            {
+                try
+                {
+                    selectedEcwld = new EcwldParser(GetGameDataDecoder())
+                        .Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                    selectedWorldStatus = null;
+                    var dir = (Path.GetDirectoryName(file.RelativePath) ?? "").Replace('\\', '/');
+                    var bsdRel = string.IsNullOrEmpty(dir)
+                        ? file.Name + ".ecbsd"
+                        : dir + "/" + file.Name + ".ecbsd";
+                    if (index != null && index.TryResolve(bsdRel, out var bsd, out _))
+                    {
+                        selectedEcbsd = new EcbsdParser(GetGameDataDecoder()).Parse(
+                            File.ReadAllBytes(bsd.FullPath),
+                            bsd.RelativePath,
+                            selectedEcwld.OrnamentRefs,
+                            selectedEcwld.BoxRefs,
+                            selectedEcwld.WaterRefs,
+                            name =>
+                            {
+                                var bsdDir = Path.GetDirectoryName(bsd.FullPath) ?? "";
+                                var full = Path.Combine(bsdDir, name.Replace('\\', Path.DirectorySeparatorChar));
+                                if (!File.Exists(full))
+                                    throw new FileNotFoundException(name);
+                                return File.ReadAllBytes(full);
+                            });
+                    }
+                    else
+                        selectedWorldStatus = file.Name + ".ecbsd missing beside .ecwld.";
+                }
+                catch (InvalidDataException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (IOException exception)
+                {
+                    status = "Could not read file: " + exception.Message;
+                }
+            }
             else if (file.Extension == "bmd")
             {
                 try
@@ -1139,10 +1204,10 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             EditorGUILayout.HelpBox(
-                "Import builds terrain Mesh/Material/Lightmap assets and a Prefab under " +
-                "Assets/ForsakenWorld/Imported/Terrain. Godot also places map-listed buildings " +
-                "during import_map; select a .bmd to import a single building Prefab. World " +
-                "object placement (.ecwld/.ecbsd filter) remains a later slice.",
+                "Import terrain Prefab writes Mesh/Material/Lightmap assets under " +
+                "Assets/ForsakenWorld/Imported/Terrain. Import map Prefab also places " +
+                ".ecbsd-listed buildings, water, lights, ECModels, sounds, and GFX placeholders " +
+                "under Assets/ForsakenWorld/Imported/Maps (Godot import_map parity).",
                 MessageType.Info);
         }
 
@@ -1187,7 +1252,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             EditorGUILayout.HelpBox(
                 "Import builds a Mesh, Angelica LitModel materials (vertex day color × texture × 2), " +
                 "and a Prefab under Assets/ForsakenWorld/Imported/Buildings with the building's " +
-                "world transform. Map-wide batching and .ecwld/.ecbsd filtering remain with the world slice.",
+                "world transform. Map import filters buildings via .ecwld/.ecbsd ornament lists.",
                 MessageType.Info);
         }
 
@@ -1308,6 +1373,150 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.HelpBox(warning, MessageType.Warning);
             foreach (var error in model.Errors)
                 EditorGUILayout.HelpBox(error, MessageType.Error);
+        }
+
+
+        private void DrawWorldDetailsBesideTerrain()
+        {
+            if (selectedFile == null || selectedFile.Extension != "trn2")
+                return;
+            EnsureWorldSelectionLoaded();
+            DrawWorldDetails(selectedEcwld, selectedEcbsd, selectedWorldStatus);
+        }
+
+        private void EnsureWorldSelectionLoaded()
+        {
+            if (selectedFile == null || index == null)
+                return;
+            if (selectedEcwld != null || selectedWorldStatus != null)
+                return;
+            try
+            {
+                var mapName = selectedFile.Name;
+                var dir = (Path.GetDirectoryName(selectedFile.RelativePath) ?? "").Replace('\\', '/');
+                var wldRel = string.IsNullOrEmpty(dir) ? mapName + ".ecwld" : dir + "/" + mapName + ".ecwld";
+                GameDataFile wld;
+                if (!index.TryResolve(wldRel, out wld, out _))
+                {
+                    selectedWorldStatus = mapName + ".ecwld not found beside terrain.";
+                    return;
+                }
+
+                selectedEcwld = new EcwldParser(GetGameDataDecoder()).Parse(
+                    File.ReadAllBytes(wld.FullPath), wld.RelativePath);
+                var bsdRel = string.IsNullOrEmpty(dir) ? mapName + ".ecbsd" : dir + "/" + mapName + ".ecbsd";
+                GameDataFile bsd;
+                if (index.TryResolve(bsdRel, out bsd, out _))
+                {
+                    selectedEcbsd = new EcbsdParser(GetGameDataDecoder()).Parse(
+                        File.ReadAllBytes(bsd.FullPath),
+                        bsd.RelativePath,
+                        selectedEcwld.OrnamentRefs,
+                        selectedEcwld.BoxRefs,
+                        selectedEcwld.WaterRefs,
+                        name =>
+                        {
+                            var bsdDir = Path.GetDirectoryName(bsd.FullPath) ?? "";
+                            var full = Path.Combine(bsdDir, name.Replace('\\', Path.DirectorySeparatorChar));
+                            if (!File.Exists(full))
+                                throw new FileNotFoundException(name);
+                            return File.ReadAllBytes(full);
+                        });
+                }
+                else
+                    selectedWorldStatus = mapName + ".ecbsd missing; water/light unavailable, buildings unfiltered.";
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is InvalidDataException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException)
+            {
+                selectedWorldStatus = exception.Message;
+            }
+        }
+
+        private void DrawWorldDetails(EcwldDocument world, EcbsdDocument bsd, string statusMessage)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("World (.ecwld / .ecbsd)", EditorStyles.boldLabel);
+            if (!string.IsNullOrEmpty(statusMessage))
+                EditorGUILayout.HelpBox(statusMessage, MessageType.Warning);
+            if (world == null)
+                return;
+            EditorGUILayout.LabelField("Version: " + world.Version);
+            EditorGUILayout.LabelField(
+                "Effects: " + world.Effects.Count +
+                "  ECModels: " + world.Models.Count +
+                "  Sounds: " + world.Sounds.Count);
+            EditorGUILayout.LabelField(
+                "Water refs: " + world.WaterRefs.Count +
+                "  Ornaments: " + world.OrnamentRefs.Count +
+                "  Boxes: " + world.BoxRefs.Count);
+            if (bsd != null)
+            {
+                EditorGUILayout.LabelField(
+                    "BSD ornaments: " + bsd.Ornaments.Count +
+                    "  water areas: " + bsd.WaterAreas.Count +
+                    (bsd.DefaultLight != null ? "  light: yes" : "  light: no"));
+                foreach (var warning in bsd.Warnings)
+                    EditorGUILayout.HelpBox(warning, MessageType.Warning);
+            }
+
+            EditorGUILayout.HelpBox(
+                "Import map Prefab builds terrain + filtered buildings + water/light/ECModels/sounds " +
+                "and GFX placeholders (GFX runtime TODO) under Assets/ForsakenWorld/Imported/Maps.",
+                MessageType.Info);
+        }
+
+        private void ImportSelectedMap()
+        {
+            if (selectedFile == null ||
+                selectedFile.Extension != "trn2" ||
+                selectedTerrain == null ||
+                index == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = MapAssetImporter.Import(
+                    selectedFile,
+                    index,
+                    GetGameDataDecoder(),
+                    showProgress: true);
+                status = "Imported map prefab " + result.PrefabPath +
+                    " (terrain areas=" + result.TerrainAreas +
+                    ", buildings=" + result.Buildings +
+                    ", unused_bmd=" + result.UnusedBuildings +
+                    ", water=" + result.Water +
+                    ", effects=" + result.Effects +
+                    ", models=" + result.Models +
+                    ", sounds=" + result.Sounds +
+                    (result.HasLight ? ", light" : "") +
+                    (result.Warnings.Count > 0
+                        ? ", " + result.Warnings.Count + " warnings"
+                        : string.Empty) +
+                    ")";
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning(warning);
+                AssetDatabase.Refresh();
+                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is InvalidDataException ||
+                exception is NotSupportedException ||
+                exception is OperationCanceledException ||
+                exception is UnityException)
+            {
+                status = "Map import failed: " + exception.Message;
+                Debug.LogError(status);
+            }
         }
 
         private void ImportSelectedTerrain()

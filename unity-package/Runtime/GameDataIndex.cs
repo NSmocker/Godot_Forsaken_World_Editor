@@ -25,7 +25,7 @@ namespace SilverEcho.ForsakenWorld
         private static readonly HashSet<string> SupportedExtensions =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                ".bmd", ".bon", ".ecm", ".gfx", ".ski", ".smd", ".stck", ".trn2", ".t2bk", ".t2mk", ".t2lm",
+                ".bmd", ".bon", ".dat", ".ecbsd", ".ecm", ".ecwld", ".gfx", ".ski", ".smd", ".stck", ".trn2", ".t2bk", ".t2mk", ".t2lm", ".wav",
                 // Textures referenced by SKI / materials (DDS policy: Unity-native import).
                 ".dds", ".bmp", ".tga", ".png", ".jpg", ".jpeg"
             };
