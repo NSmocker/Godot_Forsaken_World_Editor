@@ -26,13 +26,13 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 |---|---|
 | Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 2022.3 is the package's declared minimum. |
 | Render pipeline | **URP** chosen for Unity 2022.3. Package does **not** declare `com.unity.render-pipelines.universal`; host must enable URP. Editor uses `Shader.Find("Universal Render Pipeline/Lit")` (fallback Unlit/`Sprites/Default`). |
-| Resource index and browser | Background scan, search/filter, paginated results (`ListPagination` 50/100/250/500), and inspection/import UI exist. The index handles `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, `.t2bk`, `.t2mk`, `.t2lm`, and texture extensions for SKI/terrain resolve. Browser imports assembled materials+textures, can instantiate assembled models (optional AnimationClip playback), export Mesh+AnimationClip+Prefab (GUID-preserving), and import terrain Prefabs from `.trn2`. ECM selection assembles SkinModel+AddiSkins (no CoGfx). No folder tree or persistent index cache yet; Unity UI/pagination unverified. |
+| Resource index and browser | Background scan, search/filter, paginated results (`ListPagination` 50/100/250/500), and inspection/import UI exist. The index handles `.bmd`, `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, `.t2bk`, `.t2mk`, `.t2lm`, and texture extensions for SKI/terrain/building resolve. Browser imports assembled materials+textures, can instantiate assembled models (optional AnimationClip playback), export Mesh+AnimationClip+Prefab (GUID-preserving), import terrain Prefabs from `.trn2`, and import building Prefabs from `.bmd`. ECM selection assembles SkinModel+AddiSkins (no CoGfx). No folder tree or persistent index cache yet; Unity UI/pagination unverified. |
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and serialized `GfxAsset` exist. GFX scene construction, playback, rendering, and effect authoring have not been ported. |
 | ECM | Text parser, CoGfx/combined-action inspection, and `EcmAsset` exist. Runtime `EcmModelResolver` resolves SkinModelPath + AddiSkinPath (Models/ prefix, beside-ECM fallback, hangers warn-only) and feeds `ModelAssembler` for Prefab export under `Imported/ECM` (**no CoGfx** port yet). Binary `MOXB` ECM still unsupported. |
 | Models | SMD v8 / BON v6 / SKI v9 / STCK v1 parsers, inspectors, and assets exist. Runtime `ModelResourceResolver`/`ModelAssembler`/`StckTrackEvaluator`/`ModelAnimationAssembler`/`SkiTextureResolver`/`ModelMaterialAssembler`/`DdsHeaderParser`/`EcmModelResolver` plus Editor `AssembledModelUnityBuilder`/`AssembledAnimationClipBuilder`/`AssembledUrpMaterialBuilder`/`AssembledTextureImporter`/`AssembledModelAssetExporter` assemble skeletons/meshes/AnimationClips/URP Lit materials and persist Mesh (`_mesh.asset`) + Prefab (`_model.prefab` / ECM `.prefab`) with GUID-preserving reimport (Godot `_save_model` parity, no CoGfx). Morph/Supple/Muscle remain unsupported as in Godot; real Unity AssetDatabase/Prefab verification still needed. |
-| Maps and AUI | Terrain Loader B is [~]: `TerrainParser`/`TerrainMeshAssembler`/`TerrainAssetImporter`/`AngelicaTerrain` parse `.trn2`/`.t2bk`/`.t2mk`/`.t2lm` and import Prefabs (no buildings/world yet). AUI and localization readers/previews are not implemented. |
-| Verification | Standalone harness (Unity/NUnit stubs) passed **81** tests on 2026-11-05 (includes terrain parser/mesh + pagination). Prior model/ECM/DDS real-asset numbers unchanged. Complete `.trn2`+`.t2bk`+`.t2mk` sets were not available in PW-Workshop `Models-Database` (only 302 non-TMKB `.t2mk` pieces under `maps/*/decompressed`). Not a Unity Test Runner run; Prefab/AssetDatabase/UI/terrain/pagination remain unverified in real Unity. Game assets were not committed. |
+| Maps and AUI | Terrain Loader B is [~]: `TerrainParser`/`TerrainMeshAssembler`/`TerrainAssetImporter`/`AngelicaTerrain` parse `.trn2`/`.t2bk`/`.t2mk`/`.t2lm` and import Prefabs. Buildings `.bmd` are [~]: `BmdParser`/`BmdMeshAssembler`/`BuildingAssetImporter`/`AngelicaLitModel` import single-building Prefabs (map batch + `.ecwld`/`.ecbsd` filter not yet). AUI and localization readers/previews are not implemented. |
+| Verification | Standalone harness (Unity/NUnit stubs) passed **90** tests on 2026-11-05 (includes terrain + BMD parser/assembler + pagination). Prior model/ECM/DDS numbers unchanged. BMD real-asset scan (Models-Database `assets/litmodels`): 4521 parse OK / 0 fail / collide_only 18 / assemble_ok 4503. Complete `.trn2`+`.t2bk`+`.t2mk` sets were not available in PW-Workshop `Models-Database` (only 302 non-TMKB `.t2mk` pieces under `maps/*/decompressed`). Building textures (`Building/textures/...`) mostly absent in that branch. Not a Unity Test Runner run; Prefab/AssetDatabase/UI/terrain/building/pagination remain unverified in real Unity. Game assets were not committed. |
 
 There is no Unity host project in this repository, and the Unity Editor was unavailable in the
 last verification environment. Do not claim that Unity integration has been tested. A host
@@ -129,12 +129,12 @@ from names or comments alone.
 ## Recommended next work
 
 1. Verify Mesh/Prefab export, ECM assemble import, DDS→Texture2D binding, terrain Prefab import,
-   browser pagination, and scene instantiate/playback in a real Unity 2022.3 URP project
-   (AssetDatabase, PrefabUtility, Scene View, Test Runner). Provide complete `.trn2` map sets
-   when available (Models-Database currently lacks them).
-2. Godot-parity remaining (do not invent beyond Godot): buildings `.bmd`, world `.ecwld`/`.ecbsd`,
-   GFX runtime/elements/player, CoGfx on ECM hooks, AUI, browser folder tree / scan cache,
-   reflect (`r_`) shader polish.
+   building `.bmd` Prefab/shader, browser pagination, and scene instantiate/playback in a real
+   Unity 2022.3 URP project (AssetDatabase, PrefabUtility, Scene View, Test Runner). Provide
+   complete `.trn2` map sets and `Building/textures` when available.
+2. Godot-parity remaining (do not invent beyond Godot): world `.ecwld`/`.ecbsd` (incl. map-listed
+   building filter during `import_map`), GFX runtime/elements/player, CoGfx on ECM hooks, AUI,
+   browser folder tree / scan cache, reflect (`r_`) shader polish.
 3. Optional: additional SMD/BON/SKI versions only when a concrete need and fixtures exist
    (current targets remain SMD v8, BON v6, SKI v9, STCK v1; Morph/Supple/Muscle stay out of
    scope while absent from Godot).

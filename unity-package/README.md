@@ -16,9 +16,9 @@ provide an encoding factory. The parser tests use Unity Test Framework and can b
 **Window > General > Test Runner** after importing the package into a Unity project with Test
 Framework enabled.
 
-`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`,
+`GameDataIndex` recursively indexes `.bmd`, `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`,
 `.t2bk`, `.t2mk`, `.t2lm`, and common texture extensions (`.dds`, `.bmp`, `.tga`, `.png`,
-`.jpg`, `.jpeg`) for SKI/terrain resolve, supports path/extension search and case-insensitive
+`.jpg`, `.jpeg`) for SKI/terrain/building resolve, supports path/extension search and case-insensitive
 resource resolution, and can resolve a unique path suffix for Angelica references that omit
 leading folders. It rejects absolute/parent-traversing paths, skips symbolic links, and reports
 ambiguous suffix matches instead of choosing arbitrarily.
@@ -35,8 +35,11 @@ TCK, and STCK files; BON v6 skeleton/joint/hook data, SKI v9 materials, skin/rig
 weights, and indices, and STCK v1 joint position/rotation keys and segments are parsed and
 imported. Morph, supple, and muscle mesh families remain unsupported; PHY and TCK are not parsed
 yet. Binary `MOXB` ECM files remain unsupported. `.trn2` terrain (Loader B) can be previewed and
-imported as a Prefab with area meshes, layer masks, and daytime lightmaps; buildings (`.bmd`) and
-world objects (`.ecwld`/`.ecbsd`) from Godot `import_map` are not included yet.
+imported as a Prefab with area meshes, layer masks, and daytime lightmaps. Individual buildings
+(`.bmd` litmodels) can be previewed and imported as Prefabs under
+`Assets/ForsakenWorld/Imported/Buildings` with the Angelica LitModel URP shader (vertex day color ×
+texture × 2, alpha test 84/255, optional two-sided). Map-wide building batching and
+`.ecwld`/`.ecbsd` world-object placement from Godot `import_map` are not included yet.
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton
@@ -71,7 +74,7 @@ under `Assets/ForsakenWorld/Imported/Textures`, and Godot-parity persistence of 
 (`Imported/Meshes/..._mesh.asset`) + Prefab (`Imported/Models/..._model.prefab` or
 `Imported/ECM/...prefab`) with GUID-preserving reimport. The browser can import
 clips/materials+textures/Prefabs and instantiate an assembled model (including ECM SkinModel +
-AddiSkins) in the open scene. CoGfx, GFX runtime, buildings/world map objects, and AUI remain later.
+AddiSkins) in the open scene. CoGfx, GFX runtime, world map objects (`.ecwld`/`.ecbsd`), and AUI remain later.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -81,11 +84,12 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **81**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/pagination
+standalone harness with temporary Unity API stubs, and **90**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/pagination
 test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
-`assets`, not committed): previous model/ECM/DDS numbers unchanged; complete `.trn2`+`.t2bk`+`.t2mk`
-map sets were **not** present (only orphan/raw `.t2mk` pieces under `assets/maps/*/decompressed`,
-not TMKB headers). Prefab/AssetDatabase/terrain import and browser pagination remain unverified in
-a real Unity Editor. This does not validate Unity compilation, the Test Runner, Editor UI, or live
-AssetDatabase behavior.
+`assets`, not committed): previous model/ECM/DDS numbers unchanged; BMD litmodels 4521 parse OK /
+0 fail / collide_only 18 / assemble_ok 4503; complete `.trn2`+`.t2bk`+`.t2mk` map sets were **not**
+present (only orphan/raw `.t2mk` pieces under `assets/maps/*/decompressed`, not TMKB headers);
+`Building/textures` referenced by `.bmd` files are mostly absent in that branch. Prefab/AssetDatabase/
+terrain/building import and browser pagination remain unverified in a real Unity Editor. This does
+not validate Unity compilation, the Test Runner, Editor UI, or live AssetDatabase behavior.

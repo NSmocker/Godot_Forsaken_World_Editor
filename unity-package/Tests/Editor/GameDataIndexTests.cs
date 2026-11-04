@@ -23,6 +23,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             File.WriteAllText(Path.Combine(root, "models", "Guard.BON"), "bon");
             File.WriteAllText(Path.Combine(root, "models", "Guard.SKI"), "ski");
             File.WriteAllText(Path.Combine(root, "models", "Guard.STCK"), "stck");
+            Directory.CreateDirectory(Path.Combine(root, "litmodels", "a01"));
+            File.WriteAllText(Path.Combine(root, "litmodels", "a01", "litmodel_0.BMD"), "bmd");
             File.WriteAllText(Path.Combine(root, "readme.txt"), "not indexed");
         }
 
@@ -45,14 +47,15 @@ namespace SilverEcho.ForsakenWorld.Tests
                 reportedFiles = files;
             });
 
-            Assert.AreEqual(6, index.Files.Count);
-            Assert.AreEqual(4, reportedDirectories);
-            Assert.AreEqual(6, reportedFiles);
+            Assert.AreEqual(7, index.Files.Count);
+            Assert.AreEqual(6, reportedDirectories);
+            Assert.AreEqual(7, reportedFiles);
             Assert.AreEqual("Guard", index.Search("guard", ".ecm")[0].Name);
             Assert.AreEqual("Guard", index.Search("guard", "smd")[0].Name);
             Assert.AreEqual("Guard", index.Search("guard", "bon")[0].Name);
             Assert.AreEqual("Guard", index.Search("guard", "ski")[0].Name);
             Assert.AreEqual("Guard", index.Search("guard", "stck")[0].Name);
+            Assert.AreEqual("litmodel_0", index.Search("litmodel", "bmd")[0].Name);
             Assert.AreEqual(1, index.Search("EFFECTS", "gfx").Count);
         }
 

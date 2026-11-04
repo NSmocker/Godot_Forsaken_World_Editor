@@ -19,9 +19,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static readonly string[] PageSizeLabels = { "50", "100", "250", "500" };
         private static GfxTextDecoder gameDataDecoder;
         private static readonly string[] FileTypes =
-            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps" };
+            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps", "Buildings" };
         private static readonly string[] Extensions =
-            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2" };
+            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2", "bmd" };
 
         private string rootPath;
         private string searchText = string.Empty;
@@ -39,6 +39,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private SkiDocument selectedSki;
         private StckDocument selectedStck;
         private TerrainDocument selectedTerrain;
+        private BmdDocument selectedBuilding;
+        private AssembledBuilding selectedAssembledBuilding;
         private AssembledModel selectedAssembledModel;
         private int previewAnimationClipIndex;
         private Task<GameDataIndex> scanTask;
@@ -73,8 +75,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnGUI()
         {
             EditorGUILayout.HelpBox(
-                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, and .trn2 files. Supported text, " +
-                "model, and terrain files can be inspected and imported as Unity assets/prefabs.",
+                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, .trn2, and .bmd files. Supported text, " +
+                "model, terrain, and building files can be inspected and imported as Unity assets/prefabs.",
                 MessageType.Info);
 
             DrawRootPicker();
@@ -257,6 +259,18 @@ namespace SilverEcho.ForsakenWorld.Editor
                     }
 
                     using (new EditorGUI.DisabledScope(
+                        selectedFile == null ||
+                        selectedFile.Extension != "bmd" ||
+                        selectedBuilding == null ||
+                        selectedAssembledBuilding == null ||
+                        selectedAssembledBuilding.CollideOnly ||
+                        selectedAssembledBuilding.Surfaces.Length == 0))
+                    {
+                        if (GUILayout.Button("Import building Prefab"))
+                            ImportSelectedBuilding();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
                         selectedAssembledModel == null ||
                         !selectedAssembledModel.IsValid ||
                         selectedAssembledModel.Animations.Count == 0))
@@ -316,6 +330,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         DrawStckDetails(selectedStck);
                     else if (selectedTerrain != null)
                         DrawTerrainDetails(selectedTerrain);
+                    else if (selectedBuilding != null)
+                        DrawBuildingDetails(selectedBuilding, selectedAssembledBuilding);
                     else
                         EditorGUILayout.HelpBox(
                             "Selected " + selectedFile.Extension.ToUpperInvariant() +
@@ -569,6 +585,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSki = null;
             selectedStck = null;
             selectedTerrain = null;
+            selectedBuilding = null;
+            selectedAssembledBuilding = null;
             selectedAssembledModel = null;
             visibleFiles = Array.Empty<GameDataFile>();
             pageFiles = Array.Empty<GameDataFile>();
@@ -667,6 +685,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 selectedSki = null;
                 selectedStck = null;
                 selectedTerrain = null;
+                selectedBuilding = null;
+                selectedAssembledBuilding = null;
                 selectedAssembledModel = null;
             }
         }
@@ -688,6 +708,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedSki = null;
             selectedStck = null;
             selectedTerrain = null;
+            selectedBuilding = null;
+            selectedAssembledBuilding = null;
             selectedAssembledModel = null;
             status = "Selected " + file.RelativePath;
             if (file.Extension == "gfx")
@@ -911,6 +933,39 @@ namespace SilverEcho.ForsakenWorld.Editor
                     status = "Permission denied while reading file: " + exception.Message;
                 }
             }
+            else if (file.Extension == "bmd")
+            {
+                try
+                {
+                    selectedBuilding = new BmdParser(GetGameDataDecoder())
+                        .Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                    selectedAssembledBuilding = BmdMeshAssembler.Assemble(selectedBuilding);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (NotSupportedException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (InvalidDataException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    status = "Access denied while reading file: " + exception.Message;
+                }
+                catch (IOException exception)
+                {
+                    status = "Could not read file: " + exception.Message;
+                }
+                catch (SecurityException exception)
+                {
+                    status = "Permission denied while reading file: " + exception.Message;
+                }
+            }
 
             Repaint();
         }
@@ -1085,9 +1140,107 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             EditorGUILayout.HelpBox(
                 "Import builds terrain Mesh/Material/Lightmap assets and a Prefab under " +
-                "Assets/ForsakenWorld/Imported/Terrain. Buildings (.bmd) and world objects " +
-                "(.ecwld/.ecbsd) from Godot import_map are not included yet.",
+                "Assets/ForsakenWorld/Imported/Terrain. Godot also places map-listed buildings " +
+                "during import_map; select a .bmd to import a single building Prefab. World " +
+                "object placement (.ecwld/.ecbsd filter) remains a later slice.",
                 MessageType.Info);
+        }
+
+        private void DrawBuildingDetails(BmdDocument building, AssembledBuilding assembled)
+        {
+            EditorGUILayout.LabelField("Building (BMD litmodel)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "LitModel: 0x" + building.LitModelVersion.ToString("X8") +
+                (building.CollideOnly ? "  collide-only" : string.Empty));
+            EditorGUILayout.LabelField(
+                "Pos: (" +
+                building.Pos[0].ToString("0.###") + ", " +
+                building.Pos[1].ToString("0.###") + ", " +
+                building.Pos[2].ToString("0.###") + ")");
+            EditorGUILayout.LabelField(
+                "Scale: (" +
+                building.Scale[0].ToString("0.###") + ", " +
+                building.Scale[1].ToString("0.###") + ", " +
+                building.Scale[2].ToString("0.###") + ")");
+            EditorGUILayout.LabelField("Meshes: " + building.Meshes.Length);
+            foreach (var mesh in building.Meshes)
+            {
+                EditorGUILayout.LabelField(
+                    "  " + mesh.Name +
+                    " ver=0x" + mesh.Version.ToString("X8") +
+                    " verts=" + (mesh.Positions.Length / 3) +
+                    " tris=" + (mesh.Indices.Length / 3) +
+                    " tex=" + mesh.Texture +
+                    (mesh.TwoSided ? " two-sided" : string.Empty),
+                    EditorStyles.miniLabel);
+            }
+
+            if (assembled != null)
+            {
+                EditorGUILayout.LabelField(
+                    "Assemble: " + assembled.Surfaces.Length + " surfaces" +
+                    (assembled.CollideOnly ? " (skipped collide-only)" : string.Empty));
+                foreach (var warning in assembled.Warnings)
+                    EditorGUILayout.HelpBox(warning, MessageType.Warning);
+            }
+
+            EditorGUILayout.HelpBox(
+                "Import builds a Mesh, Angelica LitModel materials (vertex day color × texture × 2), " +
+                "and a Prefab under Assets/ForsakenWorld/Imported/Buildings with the building's " +
+                "world transform. Map-wide batching and .ecwld/.ecbsd filtering remain with the world slice.",
+                MessageType.Info);
+        }
+
+        private void ImportSelectedBuilding()
+        {
+            if (selectedFile == null ||
+                selectedFile.Extension != "bmd" ||
+                selectedBuilding == null ||
+                selectedAssembledBuilding == null ||
+                index == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = BuildingAssetImporter.Import(
+                    selectedFile,
+                    index,
+                    GetGameDataDecoder(),
+                    showProgress: true);
+                if (result.Skipped)
+                {
+                    status = "Skipped collide-only building " + selectedFile.RelativePath;
+                    return;
+                }
+
+                status = "Imported building prefab " + result.PrefabPath +
+                    " (" + result.Surfaces + " surfaces, " +
+                    result.Vertices + " verts, " +
+                    result.Triangles + " tris" +
+                    (result.Warnings.Count > 0
+                        ? ", " + result.Warnings.Count + " warnings"
+                        : string.Empty) +
+                    ")";
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning(warning);
+                AssetDatabase.Refresh();
+                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is InvalidDataException ||
+                exception is NotSupportedException ||
+                exception is OperationCanceledException ||
+                exception is UnityException)
+            {
+                status = "Building import failed: " + exception.Message;
+                Debug.LogError(status);
+            }
         }
 
         private void DrawAssembledModelDetails(AssembledModel model)
