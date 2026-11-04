@@ -51,26 +51,46 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject root = null;
             try
             {
-                // Validate all required chunks before replacing any existing assets.
+                // Match Godot import_map: warn and skip unreadable subs instead of aborting the map.
                 string relativeDir = (Path.GetDirectoryName(file.RelativePath) ?? "").Replace('\\', '/');
-                var required = new GameDataFile[t.Subs.Length, 2];
-                for (int s = 0; s < t.Subs.Length; s++)
-                {
-                    required[s, 0] = ResolveRequired(index, Join(relativeDir, t.Subs[s].Name + ".t2bk"));
-                    required[s, 1] = ResolveRequired(index, Join(relativeDir, t.Subs[s].Name + ".t2mk"));
-                }
                 EnsureFolder(folder);
                 Progress(showProgress, "Reading ground textures", 0);
                 var layers = Save(BuildLayers(t, file, index, result.Warnings), folder + "/Layers.asset");
                 root = new GameObject(file.Name + "_Terrain");
                 for (int s = 0; s < t.Subs.Length; s++)
                 {
-                    Progress(showProgress, "Reading " + t.Subs[s].Name, (float)s / t.Subs.Length);
-                    var blocks = parser.ReadBlocks(File.ReadAllBytes(required[s, 0].FullPath), t.BlockGrid, required[s, 0].RelativePath);
-                    var masks = parser.ReadMasks(File.ReadAllBytes(required[s, 1].FullPath), required[s, 1].RelativePath);
-                    int perSide = t.AreasPerSubSide;
-                    if (masks.Areas.Length != perSide * perSide || blocks.Count != (t.SubGrid / t.BlockGrid) * (t.SubGrid / t.BlockGrid))
-                        throw new InvalidDataException(t.Subs[s].Name + ": block/mask counts do not match TRN2");
+                    Progress(showProgress, "Reading " + t.Subs[s].Name, (float)s / Math.Max(1, t.Subs.Length));
+                    GameDataFile blockFile;
+                    GameDataFile maskFile;
+                    try
+                    {
+                        blockFile = ResolveRequired(index, Join(relativeDir, t.Subs[s].Name + ".t2bk"));
+                        maskFile = ResolveRequired(index, Join(relativeDir, t.Subs[s].Name + ".t2mk"));
+                    }
+                    catch (FileNotFoundException e)
+                    {
+                        result.Warnings.Add(e.Message);
+                        continue;
+                    }
+
+                    Dictionary<long, TerrainBlock> blocks;
+                    TerrainMasks masks;
+                    int perSide;
+                    try
+                    {
+                        blocks = parser.ReadBlocks(File.ReadAllBytes(blockFile.FullPath), t.BlockGrid, blockFile.RelativePath);
+                        masks = parser.ReadMasks(File.ReadAllBytes(maskFile.FullPath), maskFile.RelativePath);
+                        perSide = t.AreasPerSubSide;
+                        if (masks.Areas.Length != perSide * perSide ||
+                            blocks.Count != (t.SubGrid / t.BlockGrid) * (t.SubGrid / t.BlockGrid))
+                            throw new InvalidDataException(t.Subs[s].Name + ": block/mask counts do not match TRN2");
+                    }
+                    catch (InvalidDataException e)
+                    {
+                        result.Warnings.Add(e.Message);
+                        continue;
+                    }
+
                     var lightmaps = Array.Empty<TerrainLightmap>();
                     string lmPath = Join(relativeDir, t.Subs[s].Name + ".t2lm");
                     if (index.TryResolve(lmPath, out var lmFile, out _))
@@ -85,12 +105,22 @@ namespace SilverEcho.ForsakenWorld.Editor
                     for (int a = 0; a < masks.Areas.Length; a++)
                     {
                         Progress(showProgress, t.Subs[s].Name + ": area " + (a + 1) + "/" + masks.Areas.Length,
-                            (s + (float)a / masks.Areas.Length) / t.Subs.Length);
+                            (s + (float)a / Math.Max(1, masks.Areas.Length)) / Math.Max(1, t.Subs.Length));
                         int row = s / t.SubColumns * perSide + a / perSide, col = s % t.SubColumns * perSide + a % perSide;
                         string areaName = "Area_" + (row * t.AreaColumns + col).ToString("D4"), prefix = folder + "/" + areaName;
-                        var meshData = TerrainMeshAssembler.BuildArea(t, blocks, row, col);
+                        TerrainMeshData meshData;
+                        try { meshData = TerrainMeshAssembler.BuildArea(t, blocks, row, col); }
+                        catch (InvalidDataException e)
+                        {
+                            result.Warnings.Add(e.Message);
+                            continue;
+                        }
                         if (meshData.Indices.Length == 0) { result.HiddenAreas++; continue; }
-                        if (masks.Areas[a].Length == 0) throw new InvalidDataException(areaName + ": visible terrain has no texture layers");
+                        if (masks.Areas[a].Length == 0)
+                        {
+                            result.Warnings.Add(areaName + ": visible terrain has no texture layers");
+                            continue;
+                        }
                         var mesh = Save(BuildMesh(meshData, areaName), prefix + "_Mesh.asset");
                         var mat = BuildMaterial(t, masks, a, s, layers, shader, prefix, result.Warnings);
                         if (a < lightmaps.Length)
@@ -146,7 +176,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             Texture2DArray layers, Shader shader, string prefix, List<string> warnings)
         {
             var entries = masks.Areas[area];
-            if (entries.Length > MaxLayers) throw new NotSupportedException(prefix + ": more than 16 terrain layers are not supported.");
+            // Godot truncates to MaxLayers with a warning instead of failing the area.
+            if (entries.Length > MaxLayers)
+            {
+                warnings.Add(prefix + ": mask area has " + entries.Length + " layers, using first " + MaxLayers);
+                var truncated = new TerrainAreaLayer[MaxLayers];
+                Array.Copy(entries, truncated, MaxLayers);
+                entries = truncated;
+            }
             int size = 1;
             for (int i = 1; i < entries.Length; i++) size = Math.Max(size, masks.Layers[entries[i].LayerIndex].MaskSize);
             var array = new Texture2DArray(size, size, Math.Max(1, entries.Length - 1), TextureFormat.RGBA32, true, true)

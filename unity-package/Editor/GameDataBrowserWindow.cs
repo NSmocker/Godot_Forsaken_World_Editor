@@ -14,8 +14,9 @@ namespace SilverEcho.ForsakenWorld.Editor
     public sealed class GameDataBrowserWindow : EditorWindow
     {
         private const string RootPreference = "SilverEcho.ForsakenWorld.GameDataRoot";
+        private const string PageSizePreference = "SilverEcho.ForsakenWorld.GameDataPageSize";
         private const string ImportRoot = "Assets/ForsakenWorld/Imported";
-        private const int VisibleResultLimit = 500;
+        private static readonly string[] PageSizeLabels = { "50", "100", "250", "500" };
         private static GfxTextDecoder gameDataDecoder;
         private static readonly string[] FileTypes =
             { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps" };
@@ -37,12 +38,17 @@ namespace SilverEcho.ForsakenWorld.Editor
         private BonDocument selectedBon;
         private SkiDocument selectedSki;
         private StckDocument selectedStck;
+        private TerrainDocument selectedTerrain;
         private AssembledModel selectedAssembledModel;
         private int previewAnimationClipIndex;
         private Task<GameDataIndex> scanTask;
         private int scannedDirectories;
         private int scannedFiles;
         private int lastReportedDirectoryCount;
+        private int pageSize = 100;
+        private int pageIndex;
+        private ListPagination pagination = ListPagination.Create(0, 100, 0);
+        private IReadOnlyList<GameDataFile> pageFiles = Array.Empty<GameDataFile>();
 
         [MenuItem("Tools/Forsaken World/Game Data Browser")]
         private static void Open()
@@ -53,6 +59,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnEnable()
         {
             rootPath = EditorPrefs.GetString(RootPreference, string.Empty);
+            pageSize = ListPagination.NormalizePageSize(
+                EditorPrefs.GetInt(PageSizePreference, 100));
+            pagination = ListPagination.Create(0, pageSize, 0);
             EditorApplication.update += PollScanTask;
         }
 
@@ -64,8 +73,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnGUI()
         {
             EditorGUILayout.HelpBox(
-                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, and .trn2 files. Supported text " +
-                "and model files can be inspected and imported as ScriptableObject assets.",
+                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, and .trn2 files. Supported text, " +
+                "model, and terrain files can be inspected and imported as Unity assets/prefabs.",
                 MessageType.Info);
 
             DrawRootPicker();
@@ -134,11 +143,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.LabelField(
                     "Files (" + visibleFiles.Count + ")",
                     EditorStyles.boldLabel);
+                DrawPaginationControls();
                 fileListScroll = EditorGUILayout.BeginScrollView(fileListScroll);
-                var displayed = Math.Min(visibleFiles.Count, VisibleResultLimit);
-                for (var i = 0; i < displayed; i++)
+                for (var i = 0; i < pageFiles.Count; i++)
                 {
-                    var file = visibleFiles[i];
+                    var file = pageFiles[i];
                     var label = file.RelativePath;
                     if (GUILayout.Toggle(
                         selectedFile == file,
@@ -151,15 +160,63 @@ namespace SilverEcho.ForsakenWorld.Editor
                     }
                 }
 
-                if (visibleFiles.Count > displayed)
+                EditorGUILayout.EndScrollView();
+            }
+        }
+
+        private void DrawPaginationControls()
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                EditorGUI.BeginChangeCheck();
+                var sizeIndex = ListPagination.IndexOfAllowedPageSize(pageSize);
+                sizeIndex = EditorGUILayout.Popup(
+                    sizeIndex,
+                    PageSizeLabels,
+                    EditorStyles.toolbarPopup,
+                    GUILayout.Width(60));
+                if (EditorGUI.EndChangeCheck())
                 {
-                    EditorGUILayout.HelpBox(
-                        "Showing the first " + displayed +
-                        " matches. Refine the search to see other files.",
-                        MessageType.None);
+                    pageSize = ListPagination.AllowedPageSizes[sizeIndex];
+                    EditorPrefs.SetInt(PageSizePreference, pageSize);
+                    pageIndex = 0;
+                    RefreshPagination();
                 }
 
-                EditorGUILayout.EndScrollView();
+                using (new EditorGUI.DisabledScope(!pagination.HasPrevious))
+                {
+                    if (GUILayout.Button("|<", EditorStyles.toolbarButton, GUILayout.Width(28)))
+                    {
+                        pageIndex = 0;
+                        RefreshPagination();
+                    }
+
+                    if (GUILayout.Button("<", EditorStyles.toolbarButton, GUILayout.Width(24)))
+                    {
+                        pageIndex = Math.Max(0, pageIndex - 1);
+                        RefreshPagination();
+                    }
+                }
+
+                var pageLabel = pagination.PageCount == 0
+                    ? "0 / 0"
+                    : pagination.DisplayPage + " / " + pagination.PageCount;
+                GUILayout.Label(pageLabel, EditorStyles.miniLabel, GUILayout.Width(64));
+
+                using (new EditorGUI.DisabledScope(!pagination.HasNext))
+                {
+                    if (GUILayout.Button(">", EditorStyles.toolbarButton, GUILayout.Width(24)))
+                    {
+                        pageIndex++;
+                        RefreshPagination();
+                    }
+
+                    if (GUILayout.Button(">|", EditorStyles.toolbarButton, GUILayout.Width(28)))
+                    {
+                        pageIndex = Math.Max(0, pagination.PageCount - 1);
+                        RefreshPagination();
+                    }
+                }
             }
         }
 
@@ -188,6 +245,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                     {
                         if (GUILayout.Button("Import selected asset"))
                             ImportSelectedAsset();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedFile == null ||
+                        selectedFile.Extension != "trn2" ||
+                        selectedTerrain == null))
+                    {
+                        if (GUILayout.Button("Import terrain Prefab"))
+                            ImportSelectedTerrain();
                     }
 
                     using (new EditorGUI.DisabledScope(
@@ -248,6 +314,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         DrawSkiDetails(selectedSki);
                     else if (selectedStck != null)
                         DrawStckDetails(selectedStck);
+                    else if (selectedTerrain != null)
+                        DrawTerrainDetails(selectedTerrain);
                     else
                         EditorGUILayout.HelpBox(
                             "Selected " + selectedFile.Extension.ToUpperInvariant() +
@@ -500,8 +568,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedBon = null;
             selectedSki = null;
             selectedStck = null;
+            selectedTerrain = null;
             selectedAssembledModel = null;
             visibleFiles = Array.Empty<GameDataFile>();
+            pageFiles = Array.Empty<GameDataFile>();
+            pageIndex = 0;
+            pagination = ListPagination.Create(0, pageSize, 0);
             scannedDirectories = 0;
             scannedFiles = 0;
             lastReportedDirectoryCount = 0;
@@ -583,6 +655,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             visibleFiles = index.Search(searchText, Extensions[selectedFileType]);
+            pageIndex = 0;
+            RefreshPagination();
             if (selectedFile != null && !visibleFiles.Contains(selectedFile))
             {
                 selectedFile = null;
@@ -592,8 +666,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                 selectedBon = null;
                 selectedSki = null;
                 selectedStck = null;
+                selectedTerrain = null;
                 selectedAssembledModel = null;
             }
+        }
+
+        private void RefreshPagination()
+        {
+            pagination = ListPagination.Create(visibleFiles.Count, pageSize, pageIndex);
+            pageIndex = pagination.PageIndex;
+            pageFiles = pagination.Slice(visibleFiles);
         }
 
         private void SelectFile(GameDataFile file)
@@ -605,6 +687,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             selectedBon = null;
             selectedSki = null;
             selectedStck = null;
+            selectedTerrain = null;
             selectedAssembledModel = null;
             status = "Selected " + file.RelativePath;
             if (file.Extension == "gfx")
@@ -796,6 +879,38 @@ namespace SilverEcho.ForsakenWorld.Editor
                     status = "Permission denied while reading file: " + exception.Message;
                 }
             }
+            else if (file.Extension == "trn2")
+            {
+                try
+                {
+                    selectedTerrain = new TerrainParser(GetGameDataDecoder())
+                        .Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (NotSupportedException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (InvalidDataException exception)
+                {
+                    status = exception.Message;
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    status = "Access denied while reading file: " + exception.Message;
+                }
+                catch (IOException exception)
+                {
+                    status = "Could not read file: " + exception.Message;
+                }
+                catch (SecurityException exception)
+                {
+                    status = "Permission denied while reading file: " + exception.Message;
+                }
+            }
 
             Repaint();
         }
@@ -940,6 +1055,41 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
 
+        private void DrawTerrainDetails(TerrainDocument terrain)
+        {
+            EditorGUILayout.LabelField("Terrain (TRN2 Loader B)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "Size: " + terrain.Width.ToString("0.###") + " x " + terrain.Length.ToString("0.###") +
+                "  grid=" + terrain.GridSize.ToString("0.###"));
+            EditorGUILayout.LabelField(
+                "Blocks: " + terrain.BlockRows + "x" + terrain.BlockColumns +
+                " (grid " + terrain.BlockGrid + ", count " + terrain.BlockCount + ")");
+            EditorGUILayout.LabelField(
+                "Mask areas: " + terrain.MaskAreaCount +
+                " (mask blocks " + terrain.MaskBlock + ", mask grid " + terrain.MaskGrid + ")");
+            EditorGUILayout.LabelField(
+                "Subs: " + terrain.SubRows + "x" + terrain.SubColumns +
+                " (sub grid " + terrain.SubGrid + ")");
+            EditorGUILayout.LabelField("Textures: " + terrain.Textures.Length);
+            foreach (var texture in terrain.Textures)
+                EditorGUILayout.LabelField("  " + texture, EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("Subterrains: " + terrain.Subs.Length);
+            foreach (var sub in terrain.Subs)
+            {
+                EditorGUILayout.LabelField(
+                    "  " + sub.Name +
+                    " height=[" + sub.MinHeight.ToString("0.###") + ", " +
+                    sub.MaxHeight.ToString("0.###") + "]",
+                    EditorStyles.miniLabel);
+            }
+
+            EditorGUILayout.HelpBox(
+                "Import builds terrain Mesh/Material/Lightmap assets and a Prefab under " +
+                "Assets/ForsakenWorld/Imported/Terrain. Buildings (.bmd) and world objects " +
+                "(.ecwld/.ecbsd) from Godot import_map are not included yet.",
+                MessageType.Info);
+        }
+
         private void DrawAssembledModelDetails(AssembledModel model)
         {
             EditorGUILayout.Space();
@@ -1005,6 +1155,52 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.HelpBox(warning, MessageType.Warning);
             foreach (var error in model.Errors)
                 EditorGUILayout.HelpBox(error, MessageType.Error);
+        }
+
+        private void ImportSelectedTerrain()
+        {
+            if (selectedFile == null ||
+                selectedFile.Extension != "trn2" ||
+                selectedTerrain == null ||
+                index == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = TerrainAssetImporter.Import(
+                    selectedFile,
+                    index,
+                    GetGameDataDecoder(),
+                    showProgress: true);
+                status = "Imported terrain prefab " + result.PrefabPath +
+                    " (" + result.Areas + " areas, " +
+                    result.HiddenAreas + " hidden, " +
+                    result.Vertices + " verts, " +
+                    result.Triangles + " tris" +
+                    (result.Warnings.Count > 0
+                        ? ", " + result.Warnings.Count + " warnings"
+                        : string.Empty) +
+                    ")";
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning(warning);
+                AssetDatabase.Refresh();
+                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is ArgumentException ||
+                exception is InvalidOperationException ||
+                exception is InvalidDataException ||
+                exception is NotSupportedException ||
+                exception is OperationCanceledException ||
+                exception is UnityException)
+            {
+                status = "Terrain import failed: " + exception.Message;
+                Debug.LogError(status);
+            }
         }
 
         private void ImportAssembledModelPrefab()

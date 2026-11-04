@@ -16,15 +16,16 @@ provide an encoding factory. The parser tests use Unity Test Framework and can b
 **Window > General > Test Runner** after importing the package into a Unity project with Test
 Framework enabled.
 
-`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, and
-common texture extensions (`.dds`, `.bmp`, `.tga`, `.png`, `.jpg`, `.jpeg`) for SKI resolve,
-supports path/extension search and case-insensitive resource resolution, and can resolve a
-unique path suffix for Angelica references that omit leading folders. It rejects
-absolute/parent-traversing paths, skips symbolic links, and reports ambiguous suffix matches
-instead of choosing arbitrarily.
+`GameDataIndex` recursively indexes `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`,
+`.t2bk`, `.t2mk`, `.t2lm`, and common texture extensions (`.dds`, `.bmp`, `.tga`, `.png`,
+`.jpg`, `.jpeg`) for SKI/terrain resolve, supports path/extension search and case-insensitive
+resource resolution, and can resolve a unique path suffix for Angelica references that omit
+leading folders. It rejects absolute/parent-traversing paths, skips symbolic links, and reports
+ambiguous suffix matches instead of choosing arbitrarily.
 
 The initial **Tools > Forsaken World > Game Data Browser** window scans a selected data folder
-in the background, reports scan progress, and lets you search/filter files. Text `.gfx` and
+in the background, reports scan progress, and lets you search/filter files with paginated results
+(page sizes 50/100/250/500, first/prev/next/last, page X of Y; filter changes reset to page 1). Text `.gfx` and
 `.ecm` files and binary Angelica `.smd` v8, `.bon` v6, `.ski` v9, and `.stck` v1 files can be
 inspected and imported as reusable `GfxAsset`, `EcmAsset`, `SmdAsset`, `BonAsset`, `SkiAsset`,
 and `StckAsset` ScriptableObject assets under `Assets/ForsakenWorld/Imported/GFX`, `ECM`,
@@ -33,7 +34,9 @@ existing asset in place to keep its GUID. The SMD reader imports references to B
 TCK, and STCK files; BON v6 skeleton/joint/hook data, SKI v9 materials, skin/rigid mesh vertices,
 weights, and indices, and STCK v1 joint position/rotation keys and segments are parsed and
 imported. Morph, supple, and muscle mesh families remain unsupported; PHY and TCK are not parsed
-yet. Binary `MOXB` ECM files and `.trn2` maps are listed but not yet imported.
+yet. Binary `MOXB` ECM files remain unsupported. `.trn2` terrain (Loader B) can be previewed and
+imported as a Prefab with area meshes, layer masks, and daytime lightmaps; buildings (`.bmd`) and
+world objects (`.ecwld`/`.ecbsd`) from Godot `import_map` are not included yet.
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton
@@ -68,7 +71,7 @@ under `Assets/ForsakenWorld/Imported/Textures`, and Godot-parity persistence of 
 (`Imported/Meshes/..._mesh.asset`) + Prefab (`Imported/Models/..._model.prefab` or
 `Imported/ECM/...prefab`) with GUID-preserving reimport. The browser can import
 clips/materials+textures/Prefabs and instantiate an assembled model (including ECM SkinModel +
-AddiSkins) in the open scene. CoGfx, GFX runtime, maps, and AUI remain later.
+AddiSkins) in the open scene. CoGfx, GFX runtime, buildings/world map objects, and AUI remain later.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -77,14 +80,12 @@ The repository does not currently contain a Unity host project. A host project i
 to develop the parser or index, but one is required to run Unity EditMode tests or validate
 Editor UI, AssetDatabase imports, and rendering.
 
-**Migration verification status (2026-11-03):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **68**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path
+**Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
+standalone harness with temporary Unity API stubs, and **81**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/pagination
 test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
-`assets`, not committed): SMD assembly 1401 OK / 1 missing skeleton / 2145 unsupported; SMD
-actions→STCK evaluation/clips 44276 OK (0 fail, 80 skip); materials slots 2321 OK / textures 2291
-resolved / 30 missing; DDS under full `assets` 20271 OK / 7 fail (misnamed PNG); ECM
-prepare_ok=6163 / prepare_fail=10 / beside_fallback=1977, assemble_ok=2205 / assemble_fail=1 /
-assemble_skip_unsupported=3957. Prefab/AssetDatabase import and scene instantiate remain
-unverified in a real Unity Editor. This does not validate Unity compilation, the Test Runner,
-Editor UI, or AssetDatabase behavior.
+`assets`, not committed): previous model/ECM/DDS numbers unchanged; complete `.trn2`+`.t2bk`+`.t2mk`
+map sets were **not** present (only orphan/raw `.t2mk` pieces under `assets/maps/*/decompressed`,
+not TMKB headers). Prefab/AssetDatabase/terrain import and browser pagination remain unverified in
+a real Unity Editor. This does not validate Unity compilation, the Test Runner, Editor UI, or live
+AssetDatabase behavior.
