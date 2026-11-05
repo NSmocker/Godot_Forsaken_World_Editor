@@ -30,7 +30,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             "Dir: 0, 1, 0\n" +
             "Vel: 1\n" +
             "Acc: 0\n" +
-            "GFXELEMENTID: 210 Grid\n" +
+            "GFXELEMENTID: 220 Phys\n" +
             "StartTime: 0\n" +
             "KEYPOINTCOUNT: 0\n";
 
@@ -42,13 +42,13 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(2f, plan.DefaultScale, 0.01f);
             Assert.AreEqual(2, plan.Elements.Count);
             Assert.IsFalse(plan.Elements[0].IsStub); // 100 ported
-            Assert.IsTrue(plan.Elements[1].IsStub);  // 210 stub
+            Assert.IsTrue(plan.Elements[1].IsStub);  // 220 stub
             Assert.AreEqual(1, plan.ElementIdHistogram["100"]);
-            Assert.AreEqual(1, plan.ElementIdHistogram["210"]);
+            Assert.AreEqual(1, plan.ElementIdHistogram["220"]);
             Assert.AreEqual(1, plan.Elements[0].Keypoints.Count);
             Assert.AreEqual(1, plan.Elements[0].Keypoints[0].Ctrls.Count);
             Assert.AreEqual(100, plan.Elements[0].Keypoints[0].Ctrls[0].Type);
-            Assert.IsTrue(plan.StubbedElementIds.Contains("210"));
+            Assert.IsTrue(plan.StubbedElementIds.Contains("220"));
             Assert.IsFalse(plan.StubbedElementIds.Contains("100"));
         }
 
@@ -68,7 +68,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.Greater(sprites[0].GetKeypoints().Count, 0);
             var stubs = built.Root.GetComponentsInChildren<GfxElementStub>(true);
             Assert.AreEqual(1, stubs.Length);
-            Assert.AreEqual("210", stubs[0].SystemId);
+            Assert.AreEqual("220", stubs[0].SystemId);
 
             built.Player.Tick(16f);
             Assert.Greater(built.Player.TimeMs, 0f);

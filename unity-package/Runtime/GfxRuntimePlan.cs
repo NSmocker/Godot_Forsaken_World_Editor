@@ -40,6 +40,7 @@ namespace SilverEcho.ForsakenWorld
         public int RepeatCount = 1;
         public float RepeatDelay;
         public bool IsEndless;
+        public List<string> GridAnimations = new List<string>();
     }
 
     /// <summary>
@@ -61,7 +62,7 @@ namespace SilverEcho.ForsakenWorld
             };
 
         // IDs with a real Unity visual builder in this package.
-        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "120", "121", "122", "123", "124", "125", "130", "140", "150", "151", "152", "160", "170", "180", "190", "200" };
+        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "120", "121", "122", "123", "124", "125", "130", "140", "150", "151", "152", "160", "170", "180", "190", "200", "210", "211" };
 
         private static readonly HashSet<string> PortedIds =
             new HashSet<string>(DefaultPortedIds, StringComparer.Ordinal);
@@ -79,7 +80,7 @@ namespace SilverEcho.ForsakenWorld
                 PortedIds.Add(systemId);
         }
 
-        /// <summary>Resets to the default ported set (currently 100/101/110/120–125/130/140/150–152/160/170/180/190/200).</summary>
+        /// <summary>Resets to the default ported set (currently 100/101/110/120–125/130/140/150–152/160/170/180/190/200/210/211).</summary>
         internal static void ClearPortedForTests()
         {
             PortedIds.Clear();
@@ -135,6 +136,11 @@ namespace SilverEcho.ForsakenWorld
                     el.Affectors.Add(new Dictionary<string, string>(a));
                 foreach (var c in element.ControlMethods)
                     el.ControlMethods.Add(new Dictionary<string, string>(c));
+                if (element.GridAnimations != null)
+                {
+                    foreach (var line in element.GridAnimations)
+                        el.GridAnimations.Add(line);
+                }
 
                 FillTiming(el, element);
                 plan.Elements.Add(el);

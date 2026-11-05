@@ -31,7 +31,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         public void ParsesAffectorsKeypointControllersAndGridLines()
         {
             const string text =
-                "GFXELEMENTID: 210 Decal\n" +
+                "GFXELEMENTID: 220 Decal\n" +
                 "AffectorCount: 1\n" +
                 "CtrlType: 1\n" +
                 "StartTime: 0\n" +
