@@ -146,6 +146,24 @@ namespace SilverEcho.ForsakenWorld.Tests
             "AffectorCount: 0\n";
 
         [Test]
+        public void EmitterCtrlTimeUsesSecondsForCtrlStartEndLikeGodot()
+        {
+            // gfx_particle_eval._ctrl_time: kp base/dur = TimeSpan*0.001, StartTime/EndTime raw seconds.
+            var spec = new GfxCtrlSpec { Start = 0.5f, End = -1f };
+            var tr = GfxParticleSim.CtrlTime(spec, 2.0f, 1000f, 2000f);
+            Assert.AreEqual(0.5f, tr.Item1, 1e-5f);
+            Assert.AreEqual(1.5f, tr.Item2, 1e-5f);
+            spec.End = 1.2f;
+            tr = GfxParticleSim.CtrlTime(spec, 3.5f, 1000f, 2000f);
+            Assert.AreEqual(0.7f, tr.Item1, 1e-5f);
+            Assert.AreEqual(0.7f, tr.Item2, 1e-5f);
+            spec.End = -1f;
+            tr = GfxParticleSim.CtrlTime(spec, 9f, 0f, -1f);
+            Assert.AreEqual(8.5f, tr.Item1, 1e-5f);
+            Assert.AreEqual(0f, tr.Item2, 1e-5f);
+        }
+
+        [Test]
         public void ParticleParamsParsePointAndBox()
         {
             var doc = new GfxParser().Parse(PointGfx);

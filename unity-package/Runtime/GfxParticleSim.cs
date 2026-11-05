@@ -905,27 +905,32 @@ namespace SilverEcho.ForsakenWorld
             return GfxMath.Lerp3(pts[seg], pts[seg + 1], f);
         }
 
-        private static Tuple<float, float> CtrlTime(
-            GfxCtrlSpec spec, float tElem, float kpBase, float kpDur)
+        /// <summary>
+        /// gfx_particle_eval._ctrl_time: KeyPoint base/duration come from TimeSpan (ms → s),
+        /// while CtrlMethod StartTime/EndTime are compared raw in seconds (like the shader).
+        /// Returns [t_run, duration] in seconds.
+        /// </summary>
+        internal static Tuple<float, float> CtrlTime(
+            GfxCtrlSpec spec, float tElem, float kpBaseMs, float kpDurMs)
         {
-            // tElem is seconds; Start/End/base/dur are milliseconds in Angelica/Godot.
-            var kpTime = Math.Max(0f, tElem * 1000f - kpBase);
+            var kpTime = Math.Max(0f, tElem - kpBaseMs * 0.001f);
             var start = spec.Start;
             var end = spec.End;
-            var tRunMs = Math.Max(0f, kpTime - start);
+            var tRun = Math.Max(0f, kpTime - start);
             var duration = 0f;
             if (end >= 0f)
             {
                 duration = Math.Max(0.0001f, end - start);
-                tRunMs = Math.Min(tRunMs, Math.Max(0f, end - start));
+                tRun = Math.Min(tRun, Math.Max(0f, end - start));
             }
-            else if (kpDur != -1f)
+            else if (kpDurMs != -1f)
             {
+                var kpDur = kpDurMs * 0.001f;
                 duration = Math.Max(0.0001f, kpDur - start);
-                tRunMs = Math.Min(tRunMs, Math.Max(0f, kpDur - start));
+                tRun = Math.Min(tRun, Math.Max(0f, kpDur - start));
             }
 
-            return Tuple.Create(tRunMs * 0.001f, duration * 0.001f);
+            return Tuple.Create(tRun, duration);
         }
 
 
