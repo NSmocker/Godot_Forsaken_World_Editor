@@ -247,13 +247,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     }
                     images.Add(image); size = Math.Max(size, Math.Max(image.width, image.height));
                 }
-                size = Math.Min(size, 1024);
-                if ((long)size * size * images.Count > 134217728)
-                    throw new NotSupportedException("Terrain texture array exceeds the 512 MiB uncompressed import limit.");
-                array = new Texture2DArray(size, size, images.Count, TextureFormat.RGBA32, true, true)
-                    { name = "Terrain Layers", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 8 };
-                for (int i = 0; i < images.Count; i++) array.SetPixels32(TerrainTextureBuilder.Resample(images[i], size, size), i);
-                array.Apply(true, false); return array;
+                array = AngelicaTextureArrayBuilder.Build(
+                    images, name: "Terrain Layers", maxEdge: 1024, linear: true);
+                return array;
             }
             catch { if (array != null) Object.DestroyImmediate(array); throw; }
             finally { foreach (var image in images) Object.DestroyImmediate(image); }
