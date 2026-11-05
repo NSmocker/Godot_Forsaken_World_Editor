@@ -58,7 +58,8 @@ namespace SilverEcho.ForsakenWorld.Tests
                     fromEcm: false,
                     rootName: "Guard");
 
-                Assert.IsTrue(result.Succeeded);
+                if (!result.Succeeded)
+                    Assert.Fail(result.Error ?? "(export failed with empty error)");
                 Assert.IsTrue(string.IsNullOrEmpty(result.Error));
                 Assert.AreEqual(
                     "Assets/ForsakenWorld/Imported/Models/models/npc/Guard_model.prefab",

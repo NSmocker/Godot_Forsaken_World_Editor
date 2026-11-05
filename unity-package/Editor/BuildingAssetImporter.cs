@@ -217,6 +217,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataIndex index,
             List<string> warnings)
         {
+            if (shader == null)
+                shader = Shader.Find("Hidden/InternalErrorShader");
+
+            if (shader == null)
+                throw new System.InvalidOperationException("No shader for material.");
+
             var material = new Material(shader)
             {
                 name = string.IsNullOrEmpty(surface.Name) ? "LitModel" : surface.Name

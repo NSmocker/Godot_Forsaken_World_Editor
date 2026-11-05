@@ -211,6 +211,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (entries.Length == 1) array.SetPixels32(new[] { new Color32(0, 0, 0, 255) }, 0);
                 array.Apply(true, false); parameters.Apply();
                 // Texture assets serialize all layer parameters, unlike Material.SetVectorArray.
+                if (shader == null)
+                    shader = Shader.Find("Hidden/InternalErrorShader");
+
+                if (shader == null)
+                    throw new System.InvalidOperationException("No shader for material.");
+
                 var mat = new Material(shader) { name = Path.GetFileName(prefix) };
                 mat.SetTexture("_Layers", layers);
                 mat.SetTexture("_Masks", Save(array, prefix + "_Masks.asset")); array = null;

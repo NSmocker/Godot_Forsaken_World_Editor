@@ -21,6 +21,12 @@ namespace SilverEcho.ForsakenWorld
                          Shader.Find("Universal Render Pipeline/Unlit") ??
                          Shader.Find("Sprites/Default") ??
                          Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+                shader = Shader.Find("Hidden/InternalErrorShader");
+
+            if (shader == null)
+                throw new System.InvalidOperationException("No shader for material.");
+
             var mat = new Material(shader)
             {
                 name = string.IsNullOrEmpty(name) ? "GfxParticle" : name

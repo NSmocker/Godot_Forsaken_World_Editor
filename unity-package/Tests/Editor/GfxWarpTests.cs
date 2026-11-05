@@ -20,8 +20,12 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void WarpMaterialApplyNoopsWithoutProperty()
         {
-            // Stub Material may or may not expose _Warp; Apply must not throw.
-            var mat = new Material((Shader)null);
+            // Real Unity rejects Material(null shader). Use a built-in shader that has no _Warp.
+            var shader = Shader.Find("Hidden/InternalErrorShader")
+                ?? Shader.Find("Sprites/Default")
+                ?? Shader.Find("Unlit/Color");
+            Assert.IsNotNull(shader);
+            var mat = new Material(shader);
             var applied = GfxWarpMaterial.Apply(mat, true);
             Assert.IsFalse(applied);
             Assert.IsFalse(GfxWarpMaterial.SupportsWarp(null));

@@ -108,7 +108,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     if (index < 0 || index >= clips.Count)
                         index = 0;
                     var clip = clips[index];
-                    if (clip != null && !string.IsNullOrEmpty(clip.name))
+                    if (clip != null && !string.IsNullOrEmpty(clip.name) &&
+                        AngelicaAnimationUtil.FindClip(animation, clip.name) != null)
                         animation.Play(clip.name);
                 }
             }
@@ -214,7 +215,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     var shader = Shader.Find(AssembledUrpMaterialBuilder.UrpLitShaderName) ??
                         Shader.Find(AssembledUrpMaterialBuilder.UrpUnlitShaderName) ??
-                        Shader.Find("Sprites/Default");
+                        Shader.Find("Sprites/Default") ??
+                        Shader.Find("Hidden/InternalErrorShader");
+                    if (shader == null)
+                        throw new InvalidOperationException("No shader for fallback material.");
                     material = new Material(shader) { name = "Material" };
                 }
                 materials[i] = material;

@@ -253,10 +253,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                 exception is IOException ||
                 exception is UnauthorizedAccessException ||
                 exception is ArgumentException ||
+                exception is ArgumentNullException ||
                 exception is InvalidOperationException ||
                 exception is UnityException)
             {
-                result.Error = exception.Message;
+                result.Error = exception.GetType().Name + ": " + exception.Message;
             }
             finally
             {

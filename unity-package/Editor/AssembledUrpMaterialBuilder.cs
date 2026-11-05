@@ -41,7 +41,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             if (shader == null)
-                shader = Shader.Find("Sprites/Default");
+                shader = Shader.Find("Sprites/Default")
+                    ?? Shader.Find("Hidden/InternalErrorShader")
+                    ?? Shader.Find("Unlit/Color");
+            if (shader == null)
+                throw new InvalidOperationException(
+                    "No usable shader found for AssembledUrpMaterialBuilder (URP Lit/Unlit missing).");
 
             var material = new Material(shader)
             {
