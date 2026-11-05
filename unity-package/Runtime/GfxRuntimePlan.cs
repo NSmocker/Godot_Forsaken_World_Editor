@@ -111,6 +111,7 @@ namespace SilverEcho.ForsakenWorld
             plan.Warnings.AddRange(document.Warnings);
 
             var index = 1;
+            var fileLoop = 0f;
             foreach (var element in document.Elements)
             {
                 var id = element.SystemId ?? string.Empty;
@@ -142,19 +143,29 @@ namespace SilverEcho.ForsakenWorld
                         el.GridAnimations.Add(line);
                 }
 
-                FillTiming(el, element);
+                float headerContribution;
+                FillTiming(el, element, out headerContribution);
+                if (headerContribution > fileLoop)
+                    fileLoop = headerContribution;
                 plan.Elements.Add(el);
                 index++;
             }
 
+            // Godot create_id_*._get_max_time_for_header: shared GlobalLoopTime for every
+            // element = max non-endless raw totals, else 3000 when all endless/empty.
+            if (fileLoop <= 0f)
+                fileLoop = 3000f;
+            foreach (var el in plan.Elements)
+                el.GlobalLoopTime = fileLoop;
+
             return plan;
         }
 
-        private static void FillTiming(GfxElementPlan el, GfxElement element)
+        private static void FillTiming(
+            GfxElementPlan el, GfxElement element, out float headerContribution)
         {
+            // LocalStart/LocalTotal: lightning 150/152 v102+ uses StartTime_2 (create_id_150).
             var start = GfxPropertyValues.Float(element.Properties, "StartTime", 0f);
-            // Lightning 150/152 v102+: DestNum amplitude StartTime, real start in StartTime_2
-            // (create_id_150._element_start_time).
             if ((el.SystemId == "150" || el.SystemId == "152") &&
                 element.Properties != null &&
                 element.Properties.ContainsKey("DestNum") &&
@@ -162,6 +173,11 @@ namespace SilverEcho.ForsakenWorld
             {
                 start = GfxPropertyValues.Float(element.Properties, "StartTime_2", start);
             }
+
+            // Header max uses Godot _get_max_time_for_header: always property StartTime
+            // (not StartTime_2), no per-element +3000 fallback, endless → ignore.
+            var headerStart = GfxPropertyValues.Float(element.Properties, "StartTime", 0f);
+            var headerTotal = headerStart;
             var localTotal = start;
             var endless = false;
             foreach (var kp in element.Keypoints)
@@ -172,7 +188,10 @@ namespace SilverEcho.ForsakenWorld
                 if (ts < 0f)
                     endless = true;
                 else if (ts > 0f)
+                {
                     localTotal += ts;
+                    headerTotal += ts;
+                }
             }
 
             if (localTotal <= start && !endless)
@@ -183,9 +202,9 @@ namespace SilverEcho.ForsakenWorld
             el.IsEndless = endless;
             el.RepeatCount = GfxPropertyValues.Int(element.Properties, "RepeatCount", 1);
             el.RepeatDelay = GfxPropertyValues.Float(element.Properties, "RepeatDelay", 0f);
-
-            // GlobalLoopTime: max over keypoints spans like Godot shader setup (~local total).
-            el.GlobalLoopTime = Math.Max(localTotal, 3000f);
+            // Placeholder; Build overwrites with file-wide max.
+            el.GlobalLoopTime = localTotal;
+            headerContribution = endless ? 0f : headerTotal;
         }
     }
 }

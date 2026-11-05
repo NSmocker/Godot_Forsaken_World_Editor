@@ -85,5 +85,94 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(100, kps[0].Ctrls[0].Type);
             Assert.AreEqual(1f, kps[0].Ctrls[0].Vel, 0.01f);
         }
+
+        [Test]
+        public void GlobalLoopTimeUsesFileWideMaxMatchingGodot()
+        {
+            // Short-only file: Godot max_group_time = 800, NOT floored per-element to 3000.
+            var shortGfx =
+                "MOXTVersion: 92\n" +
+                "DedaultScale: 1\n" +
+                "GFXELEMENTID: 100 A\n" +
+                "StartTime: 0\n" +
+                "RepeatCount: 1\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 500\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n" +
+                "GFXELEMENTID: 100 B\n" +
+                "StartTime: 0\n" +
+                "RepeatCount: 1\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 800\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n";
+            var plan = GfxRuntimePlanner.Build(new GfxParser().Parse(shortGfx));
+            Assert.AreEqual(2, plan.Elements.Count);
+            Assert.AreEqual(500f, plan.Elements[0].LocalTotalTime, 0.01f);
+            Assert.AreEqual(800f, plan.Elements[1].LocalTotalTime, 0.01f);
+            Assert.AreEqual(800f, plan.Elements[0].GlobalLoopTime, 0.01f);
+            Assert.AreEqual(800f, plan.Elements[1].GlobalLoopTime, 0.01f);
+
+            // Mixed with longer element: both share 8000.
+            var mixed =
+                "MOXTVersion: 92\n" +
+                "DedaultScale: 1\n" +
+                "GFXELEMENTID: 100 A\n" +
+                "StartTime: 0\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 500\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n" +
+                "GFXELEMENTID: 100 B\n" +
+                "StartTime: 0\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 8000\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n";
+            var plan2 = GfxRuntimePlanner.Build(new GfxParser().Parse(mixed));
+            Assert.AreEqual(8000f, plan2.Elements[0].GlobalLoopTime, 0.01f);
+            Assert.AreEqual(8000f, plan2.Elements[1].GlobalLoopTime, 0.01f);
+
+            // All endless → fallback 3000.
+            var endless =
+                "MOXTVersion: 92\n" +
+                "DedaultScale: 1\n" +
+                "GFXELEMENTID: 100 A\n" +
+                "StartTime: 0\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: -1\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n";
+            var plan3 = GfxRuntimePlanner.Build(new GfxParser().Parse(endless));
+            Assert.AreEqual(3000f, plan3.Elements[0].GlobalLoopTime, 0.01f);
+            Assert.IsTrue(plan3.Elements[0].IsEndless);
+        }
+
     }
 }

@@ -235,10 +235,50 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void SpriteHidesOutsideLocalWindow()
         {
-            var doc = new GfxParser().Parse(SpriteGfx);
+            // Godot GlobalLoopTime is file-wide max. Companion 8000ms element makes
+            // GlobalLoopTime=8000 so after RepeatCount=1 the short sprite's tGlobal
+            // falls past LocalTotal and hides (ElementTime returns tGlobal).
+            var gfx =
+                "MOXTVersion: 92\n" +
+                "DedaultScale: 1\n" +
+                "GFXELEMENTID: 100 SpriteA\n" +
+                "Name: SpriteA\n" +
+                "DestBlend: 2\n" +
+                "RepeatCount: 1\n" +
+                "TexFile: fx\\glow.dds\n" +
+                "Width: 1\n" +
+                "Height: 0.5\n" +
+                "StartTime: 0\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 1000\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n" +
+                "GFXELEMENTID: 100 Long\n" +
+                "Name: Long\n" +
+                "DestBlend: 2\n" +
+                "RepeatCount: 1\n" +
+                "TexFile: fx\\glow.dds\n" +
+                "Width: 1\n" +
+                "Height: 1\n" +
+                "StartTime: 0\n" +
+                "KEYPOINTCOUNT: 1\n" +
+                "InterpolateMode: 0\n" +
+                "TimeSpan: 8000\n" +
+                "Position: 0, 0, 0\n" +
+                "Color: -1\n" +
+                "Scale: 1\n" +
+                "Direction: 0, 0, 0, 1\n" +
+                "Rad_2D: 0\n" +
+                "CtrlMethodCount: 0\n";
+            var doc = new GfxParser().Parse(gfx);
             var built = GfxSceneBuilder.Build(doc, "Sprites", "sprites.gfx");
             var sprite = built.Root.GetComponentsInChildren<GfxSpriteDriver>(true)[0];
-            // Element 100: StartTime 0, LocalTotal ~1000
+            Assert.AreEqual(8000f, sprite.GlobalLoopTime, 0.01f);
             sprite.TimeManual = true;
             sprite.OnGfxTick(50f, 1f);
             Assert.IsTrue(sprite.GetComponent<MeshRenderer>().enabled);
