@@ -144,7 +144,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         /// <summary>
         /// Assembles GFX ID 230 ECMPath via EcmModelResolver (SkinModel + AddiSkins),
-        /// same pipeline as map ECModel placement. CoGfx pending; child models / LDType caster absent in Godot too.
+        /// same pipeline as map ECModel placement with CoGfx (ecm_cogfx.gd). Child models / LDType caster absent in Godot too.
         /// </summary>
         public static GameObject TryBuildFromEcm(
             string ecmPath,
@@ -296,6 +296,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     root = AssembledModelUnityBuilder.BuildHierarchy(assembled, "ECModel_GFX");
                 }
+
+                if (root != null && ecmDocument != null)
+                    EcmCoGfxAttacher.Attach(root, ecmDocument, index, warnings);
 
                 return root;
             }

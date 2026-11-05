@@ -84,7 +84,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataIndex index,
             string sourceRelativePath,
             bool fromEcm,
-            string rootName = null)
+            string rootName = null,
+            EcmDocument ecmDocument = null)
         {
             var result = new ExportResult();
             if (model == null)
@@ -220,6 +221,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                 AssignPersistedMeshesAndMaterials(root, model, meshAssets, materialLookup);
                 if (clipAssets.Count > 0)
                     AssembledAnimationClipBuilder.BindClipsToHierarchy(root, clipAssets);
+
+                if (fromEcm && ecmDocument != null)
+                {
+                    var cogfxCount = EcmCoGfxAttacher.Attach(
+                        root, ecmDocument, index, result.Warnings);
+                    if (cogfxCount > 0)
+                        result.Warnings.Add("CoGfx attached: " + cogfxCount);
+                }
 
                 result.PrefabPath = GetPrefabAssetPath(sourceRelativePath, fromEcm);
                 EnsureAssetFolders(Path.GetDirectoryName(result.PrefabPath));

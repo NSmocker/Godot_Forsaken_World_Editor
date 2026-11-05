@@ -653,7 +653,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 var export = AssembledModelAssetExporter.Export(
-                    assembled, index, ecmFile.RelativePath, fromEcm: true);
+                    assembled, index, ecmFile.RelativePath, fromEcm: true,
+                    ecmDocument: ecmDoc);
                 result.Warnings.AddRange(export.Warnings);
                 if (!export.Succeeded)
                 {

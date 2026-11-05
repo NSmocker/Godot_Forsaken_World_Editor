@@ -1585,7 +1585,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     selectedAssembledModel,
                     index,
                     selectedFile.RelativePath,
-                    fromEcm);
+                    fromEcm,
+                    ecmDocument: fromEcm ? selectedEcm : null);
                 if (!result.Succeeded)
                 {
                     status = "Prefab export failed: " + (result.Error ?? "unknown error");
