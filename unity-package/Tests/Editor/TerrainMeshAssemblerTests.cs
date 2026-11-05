@@ -6,6 +6,27 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class TerrainMeshAssemblerTests
     {
         [Test]
+        public void AreaLayerLookupClampsLikeGodotAreaMaterial()
+        {
+            // angelica_terrain._area_material: bad layer index -> {} defaults; texture clampi.
+            var masks = new TerrainMasks
+            {
+                Layers = new[] { new TerrainLayer { TextureIndex = 7, MaskSize = 8, Axis = 0, UScale = 2f, VScale = 3f } },
+                Areas = new TerrainAreaLayer[0][]
+            };
+            var ok = SilverEcho.ForsakenWorld.Editor.TerrainAssetImporter.ResolveLayer(masks, 0);
+            Assert.AreEqual(7, ok.TextureIndex);
+            var bad = SilverEcho.ForsakenWorld.Editor.TerrainAssetImporter.ResolveLayer(masks, 5);
+            Assert.AreEqual(0, bad.TextureIndex);
+            Assert.AreEqual(1, bad.Axis);
+            Assert.AreEqual(1f, bad.UScale);
+            Assert.AreEqual(0, bad.MaskSize);
+            Assert.AreEqual(3, SilverEcho.ForsakenWorld.Editor.TerrainAssetImporter.ClampTextureIndex(7, 4));
+            Assert.AreEqual(0, SilverEcho.ForsakenWorld.Editor.TerrainAssetImporter.ClampTextureIndex(-2, 4));
+            Assert.AreEqual(0, SilverEcho.ForsakenWorld.Editor.TerrainAssetImporter.ClampTextureIndex(5, 0));
+        }
+
+        [Test]
         public void BuildsAreaMeshWithUnityWindingAndSkipsNoRenderBlocks()
         {
             var terrain = CreateParser().Parse(TerrainParserTests.BuildTrn2(), "mesh.trn2");

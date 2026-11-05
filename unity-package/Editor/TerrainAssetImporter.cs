@@ -116,11 +116,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                             continue;
                         }
                         if (meshData.Indices.Length == 0) { result.HiddenAreas++; continue; }
-                        if (masks.Areas[a].Length == 0)
-                        {
-                            result.Warnings.Add(areaName + ": visible terrain has no texture layers");
-                            continue;
-                        }
+                        // Godot _area_material still builds the area with layer_count 0 (black).
                         var mesh = Save(BuildMesh(meshData, areaName), prefix + "_Mesh.asset");
                         var mat = BuildMaterial(t, masks, a, s, layers, shader, prefix, result.Warnings);
                         if (a < lightmaps.Length)
@@ -185,7 +181,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 entries = truncated;
             }
             int size = 1;
-            for (int i = 1; i < entries.Length; i++) size = Math.Max(size, masks.Layers[entries[i].LayerIndex].MaskSize);
+            for (int i = 1; i < entries.Length; i++) size = Math.Max(size, ResolveLayer(masks, entries[i].LayerIndex).MaskSize);
             var array = new Texture2DArray(size, size, Math.Max(1, entries.Length - 1), TextureFormat.RGBA32, true, true)
                 { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear };
             var parameters = new Texture2D(MaxLayers, 1, TextureFormat.RGBAFloat, false, true)
@@ -194,21 +190,25 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 for (int i = 0; i < entries.Length; i++)
                 {
-                    var layer = masks.Layers[entries[i].LayerIndex];
-                    if (layer.TextureIndex < 0 || layer.TextureIndex >= t.Textures.Length)
-                        throw new InvalidDataException(prefix + ": invalid layer texture index " + layer.TextureIndex);
-                    parameters.SetPixel(i, 0, new Color(layer.TextureIndex, layer.UScale, layer.VScale, layer.Axis));
+                    var layer = ResolveLayer(masks, entries[i].LayerIndex);
+                    parameters.SetPixel(i, 0, new Color(
+                        ClampTextureIndex(layer.TextureIndex, t.Textures.Length), layer.UScale, layer.VScale, layer.Axis));
                     if (i == 0) continue;
                     var pixels = new Color32[size * size];
+                    var mask = entries[i].Mask;
+                    // Godot: mask data of the wrong length becomes an empty (black) mask image.
+                    bool validMask = layer.MaskSize > 0 && mask != null && mask.Length == layer.MaskSize * layer.MaskSize;
                     for (int y = 0; y < size; y++)
                         for (int x = 0; x < size; x++)
                         {
-                            byte value = entries[i].Mask[(y * layer.MaskSize / size) * layer.MaskSize + x * layer.MaskSize / size];
+                            byte value = validMask
+                                ? mask[(y * layer.MaskSize / size) * layer.MaskSize + x * layer.MaskSize / size]
+                                : (byte)0;
                             pixels[y * size + x] = new Color32(value, value, value, 255);
                         }
                     array.SetPixels32(pixels, i - 1);
                 }
-                if (entries.Length == 1) array.SetPixels32(new[] { new Color32(0, 0, 0, 255) }, 0);
+                if (entries.Length <= 1) array.SetPixels32(new[] { new Color32(0, 0, 0, 255) }, 0);
                 array.Apply(true, false); parameters.Apply();
                 // Texture assets serialize all layer parameters, unlike Material.SetVectorArray.
                 if (shader == null)
@@ -227,6 +227,22 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
             finally { if (array != null) Object.DestroyImmediate(array); if (parameters != null) Object.DestroyImmediate(parameters); }
         }
+
+        /// <summary>
+        /// Godot _area_material: an out-of-range layer index uses {} (texture 0, u/v scale 1,
+        /// axis 1, no mask).
+        /// </summary>
+        public static TerrainLayer ResolveLayer(TerrainMasks masks, int layerIndex)
+        {
+            if (masks != null && masks.Layers != null && layerIndex >= 0 && layerIndex < masks.Layers.Length &&
+                masks.Layers[layerIndex] != null)
+                return masks.Layers[layerIndex];
+            return new TerrainLayer { TextureIndex = 0, MaskSize = 0, Axis = 1, UScale = 1f, VScale = 1f };
+        }
+
+        /// <summary>Godot: clampi(texture, 0, maxi(0, num_texture - 1)).</summary>
+        public static int ClampTextureIndex(int textureIndex, int textureCount) =>
+            Math.Max(0, Math.Min(textureIndex, Math.Max(0, textureCount - 1)));
 
         private static Texture2DArray BuildLayers(TerrainDocument t, GameDataFile map, GameDataIndex index, List<string> warnings)
         {
