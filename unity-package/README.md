@@ -80,7 +80,7 @@ clips/materials+textures/Prefabs and instantiate an assembled model (including E
 AddiSkins) in the open scene and can import a full map Prefab from `.trn2`+`.ecwld`/`.ecbsd`.
 GFX **core** runtime is ported (CPU clock/keypoints/ctrls + stub elements; visual builders and Particle System meshes come in later slices). CoGfx, GFX Player dock, batch GFX import, and AUI remain later.
 
-GFX **core** (Godot `gfx_data_node` / keypoint / ctrl parity, CPU — not VFX Graph): `GfxHeaderDriver` + `GfxPlayer` (`[ExecuteAlways]`) drive shared time, play/stop/seek, loop, speed, alpha, face-to-viewer, and camera shake; `GfxKeypointEval` / `GfxCurvePath` evaluate keypoints and CtrlTypes 100–111; `GfxRuntimePlanner` / Editor `GfxSceneBuilder` build a `GfxPlayer` root with one child per element (`GfxElementStub` until a family builder is ported; logs each stub ID once). Browser can instantiate a selected `.gfx` into the open scene. Map import parents a built GFX under each effect when the path resolves. Element visuals: **ID 100/101 sprites/decals [~]** via `GfxSpriteDriver` (CPU Mesh + `Forsaken World/Angelica Gfx Sprite` URP shader, billboard modes matching create_id_100 vs 101, UV sheet/tile, DestBlend mix/add, keypoint/ctrl color/scale/pos, TexFile resolve through `GfxTextureResolver` + `AssembledTextureImporter`). Warp screen distortion and MatchGrnd are not ported. Other IDs remain `GfxElementStub`.
+GFX **core** (Godot `gfx_data_node` / keypoint / ctrl parity, CPU — not VFX Graph): `GfxHeaderDriver` + `GfxPlayer` (`[ExecuteAlways]`) drive shared time, play/stop/seek, loop, speed, alpha, face-to-viewer, and camera shake; `GfxKeypointEval` / `GfxCurvePath` evaluate keypoints and CtrlTypes 100–111; `GfxRuntimePlanner` / Editor `GfxSceneBuilder` build a `GfxPlayer` root with one child per element (`GfxElementStub` until a family builder is ported; logs each stub ID once). Browser can instantiate a selected `.gfx` into the open scene. Map import parents a built GFX under each effect when the path resolves. Element visuals: **ID 100/101 sprites/decals [~]** via `GfxSpriteDriver` + `AngelicaGfxSprite`; **ID 110 SpeedTrail [~]** via `GfxSpeedTrailDriver`/`GfxSpeedTrailRibbon` (CPU ribbon, SegLife/FadeLength mask, OrgPos1/2, keypoints/ctrl); **ID 180 LtnTrail [~]** via `GfxLtnTrailDriver`/`GfxLtnTrailEval` (CPU strip, Tick_Ms grid, lt_rnd zigzag, Bind=0 Hist_*). Shared `Forsaken World/Angelica Gfx Trail` URP shader (vertex color alpha). TexFile via `GfxTextureResolver` + `AssembledTextureImporter`. Warp screen distortion not ported; 180 EnableMat/EnablePos follow keypoints only. Other IDs remain `GfxElementStub`.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -90,7 +90,7 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **126**
+standalone harness with temporary Unity API stubs, and **135**
 parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/ecwld/ecbsd/water/pagination/GFX-core
 test cases passed. Standalone-harness real-asset scan (PW-Workshop all branches, not committed):
 previous model/ECM/DDS/BMD numbers unchanged; **no** `.ecwld`/`.ecbsd`/`BSData.dat` or complete

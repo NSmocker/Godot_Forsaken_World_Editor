@@ -61,7 +61,7 @@ namespace SilverEcho.ForsakenWorld
             };
 
         // IDs with a real Unity visual builder in this package.
-        private static readonly string[] DefaultPortedIds = { "100", "101" };
+        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "180" };
 
         private static readonly HashSet<string> PortedIds =
             new HashSet<string>(DefaultPortedIds, StringComparer.Ordinal);
@@ -79,7 +79,7 @@ namespace SilverEcho.ForsakenWorld
                 PortedIds.Add(systemId);
         }
 
-        /// <summary>Resets to the default ported set (currently 100/101).</summary>
+        /// <summary>Resets to the default ported set (currently 100/101/110/180).</summary>
         internal static void ClearPortedForTests()
         {
             PortedIds.Clear();

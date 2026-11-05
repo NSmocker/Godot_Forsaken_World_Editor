@@ -116,6 +116,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachSprite(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "110")
+                {
+                    driver = AttachSpeedTrail(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
+                else if (el.SystemId == "180")
+                {
+                    driver = AttachLtnTrail(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -167,44 +175,90 @@ namespace SilverEcho.ForsakenWorld.Editor
             var sprite = elementGo.AddComponent<GfxSpriteDriver>();
             var spriteParams = GfxSpriteParams.FromProperties(
                 el.Properties, el.SystemId, el.Index);
-            Texture texture = null;
-            if (texResolver != null && !string.IsNullOrEmpty(spriteParams.TexFile))
-            {
-                var resolved = texResolver.Resolve(spriteParams.TexFile);
-                if (resolved != null && resolved.IsResolved)
-                {
-                    try
-                    {
-                        var imported = AssembledTextureImporter.ImportOrUpdate(
-                            resolved.Resource.File.FullPath,
-                            resolved.RequestedRelativePath,
-                            resolved.DdsHeader);
-                        if (imported != null && imported.Texture != null)
-                            texture = imported.Texture;
-                        else if (warnings != null && imported != null &&
-                                 !string.IsNullOrEmpty(imported.Error))
-                            warnings.Add(
-                                "GFX ID " + el.SystemId + " TexFile import: " +
-                                imported.Error);
-                    }
-                    catch (Exception ex)
-                    {
-                        if (warnings != null)
-                            warnings.Add(
-                                "GFX ID " + el.SystemId + " TexFile import failed: " +
-                                ex.Message);
-                    }
-                }
-                else if (warnings != null && resolved != null && resolved.Resource != null &&
-                         !string.IsNullOrEmpty(resolved.Resource.Error))
-                {
-                    warnings.Add(
-                        "GFX ID " + el.SystemId + " TexFile: " + resolved.Resource.Error);
-                }
-            }
-
+            var texture = ResolveElementTexture(
+                spriteParams.TexFile, el.SystemId, texResolver, warnings);
             sprite.Configure(spriteParams, texture, gfx2d, warnings);
             return sprite;
+        }
+
+        private static GfxElementDriver AttachSpeedTrail(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var trail = elementGo.AddComponent<GfxSpeedTrailDriver>();
+            var trailParams = GfxSpeedTrailParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            var texture = ResolveElementTexture(
+                trailParams.TexFile, el.SystemId, texResolver, warnings);
+            // Keypoints must be set before Configure seeds the ribbon.
+            trail.SystemId = el.SystemId;
+            trail.LocalStartTime = el.LocalStartTime;
+            trail.LocalTotalTime = el.LocalTotalTime;
+            trail.SetKeypoints(el.Keypoints);
+            trail.Configure(trailParams, texture, gfx2d, warnings);
+            return trail;
+        }
+
+        private static GfxElementDriver AttachLtnTrail(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var trail = elementGo.AddComponent<GfxLtnTrailDriver>();
+            var trailParams = GfxLtnTrailParams.FromProperties(
+                el.Properties, el.SystemId, el.Index, el.Name);
+            var texture = ResolveElementTexture(
+                trailParams.TexFile, el.SystemId, texResolver, warnings);
+            trail.Configure(trailParams, texture, gfx2d, warnings);
+            return trail;
+        }
+
+        private static Texture ResolveElementTexture(
+            string texFile,
+            string systemId,
+            GfxTextureResolver texResolver,
+            List<string> warnings)
+        {
+            Texture texture = null;
+            if (texResolver == null || string.IsNullOrEmpty(texFile))
+                return texture;
+
+            var resolved = texResolver.Resolve(texFile);
+            if (resolved != null && resolved.IsResolved)
+            {
+                try
+                {
+                    var imported = AssembledTextureImporter.ImportOrUpdate(
+                        resolved.Resource.File.FullPath,
+                        resolved.RequestedRelativePath,
+                        resolved.DdsHeader);
+                    if (imported != null && imported.Texture != null)
+                        texture = imported.Texture;
+                    else if (warnings != null && imported != null &&
+                             !string.IsNullOrEmpty(imported.Error))
+                        warnings.Add(
+                            "GFX ID " + systemId + " TexFile import: " + imported.Error);
+                }
+                catch (Exception ex)
+                {
+                    if (warnings != null)
+                        warnings.Add(
+                            "GFX ID " + systemId + " TexFile import failed: " +
+                            ex.Message);
+                }
+            }
+            else if (warnings != null && resolved != null && resolved.Resource != null &&
+                     !string.IsNullOrEmpty(resolved.Resource.Error))
+            {
+                warnings.Add("GFX ID " + systemId + " TexFile: " + resolved.Resource.Error);
+            }
+
+            return texture;
         }
 
         /// <summary>
