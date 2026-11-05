@@ -200,12 +200,20 @@ namespace SilverEcho.ForsakenWorld
 
         private void EnsureComponents()
         {
+            // Never use ?? with UnityEngine.Object — fake-null bypasses coalescing
+            // and MeshFilter/MeshRenderer setters then throw MissingComponentException.
             if (meshFilter == null)
-                meshFilter = gameObject.GetComponent<MeshFilter>() ??
-                             gameObject.AddComponent<MeshFilter>();
+            {
+                meshFilter = gameObject.GetComponent<MeshFilter>();
+                if (meshFilter == null)
+                    meshFilter = gameObject.AddComponent<MeshFilter>();
+            }
             if (meshRenderer == null)
-                meshRenderer = gameObject.GetComponent<MeshRenderer>() ??
-                               gameObject.AddComponent<MeshRenderer>();
+            {
+                meshRenderer = gameObject.GetComponent<MeshRenderer>();
+                if (meshRenderer == null)
+                    meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            }
         }
     }
 
