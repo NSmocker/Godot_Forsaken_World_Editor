@@ -16,13 +16,30 @@ namespace SilverEcho.ForsakenWorld.Editor
     {
         public const string UrpLitShaderName = "Universal Render Pipeline/Lit";
         public const string UrpUnlitShaderName = "Universal Render Pipeline/Unlit";
+        public const string ArmorReflectShaderName = "Forsaken World/Angelica Armor Reflect";
+        public const string ReflectMapRelativePath = ModelMaterialAssembler.ReflectMapRelativePath;
+        public const string ReflectMapCacheKey = ReflectMapRelativePath;
 
-        public static Material CreateMaterial(AssembledSurfaceMaterial source, Texture albedo = null)
+        public static Material CreateMaterial(
+            AssembledSurfaceMaterial source,
+            Texture albedo = null,
+            Texture reflectMap = null)
         {
             if (source == null)
                 throw new ArgumentNullException(nameof(source));
 
-            var shader = Shader.Find(UrpLitShaderName) ?? Shader.Find(UrpUnlitShaderName);
+            Shader shader;
+            if (source.UsesReflectShader)
+            {
+                shader = Shader.Find(ArmorReflectShaderName) ??
+                    Shader.Find(UrpLitShaderName) ??
+                    Shader.Find(UrpUnlitShaderName);
+            }
+            else
+            {
+                shader = Shader.Find(UrpLitShaderName) ?? Shader.Find(UrpUnlitShaderName);
+            }
+
             if (shader == null)
                 shader = Shader.Find("Sprites/Default");
 
@@ -38,6 +55,22 @@ namespace SilverEcho.ForsakenWorld.Editor
                 diffuse.Length > 2 ? diffuse[2] : 1f,
                 diffuse.Length > 3 ? diffuse[3] : 1f);
 
+            if (source.UsesReflectShader)
+                ApplyReflectMaterial(material, source, color, albedo, reflectMap);
+            else
+                ApplyLitMaterial(material, source, color, albedo);
+
+            ApplyAlphaMode(material, source);
+            ApplyCull(material, source.TwoSided);
+            return material;
+        }
+
+        private static void ApplyLitMaterial(
+            Material material,
+            AssembledSurfaceMaterial source,
+            Color color,
+            Texture albedo)
+        {
             if (material.HasProperty("_BaseColor"))
                 material.SetColor("_BaseColor", color);
             if (material.HasProperty("_Color"))
@@ -79,10 +112,68 @@ namespace SilverEcho.ForsakenWorld.Editor
                     material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
                 }
             }
+        }
 
-            ApplyAlphaMode(material, source);
-            ApplyCull(material, source.TwoSided);
-            return material;
+        private static void ApplyReflectMaterial(
+            Material material,
+            AssembledSurfaceMaterial source,
+            Color color,
+            Texture albedo,
+            Texture reflectMap)
+        {
+            if (material.HasProperty("_AlbedoColor"))
+                material.SetColor("_AlbedoColor", color);
+            if (material.HasProperty("_BaseColor"))
+                material.SetColor("_BaseColor", color);
+            if (material.HasProperty("_Color"))
+                material.SetColor("_Color", color);
+
+            if (albedo != null)
+            {
+                if (material.HasProperty("_Albedo"))
+                    material.SetTexture("_Albedo", albedo);
+                if (material.HasProperty("_BaseMap"))
+                    material.SetTexture("_BaseMap", albedo);
+                if (material.HasProperty("_MainTex"))
+                    material.SetTexture("_MainTex", albedo);
+            }
+
+            if (reflectMap != null && material.HasProperty("_ReflectMap"))
+                material.SetTexture("_ReflectMap", reflectMap);
+
+            if (material.HasProperty("_Specular"))
+                material.SetFloat("_Specular", Mathf.Clamp01(source.SpecularLuminance));
+
+            var emissive = source.Emissive ?? new[] { 0f, 0f, 0f };
+            var emission = new Color(
+                emissive.Length > 0 ? emissive[0] : 0f,
+                emissive.Length > 1 ? emissive[1] : 0f,
+                emissive.Length > 2 ? emissive[2] : 0f,
+                1f);
+            if (material.HasProperty("_EmissionColor"))
+                material.SetColor("_EmissionColor", emission);
+        }
+
+        /// <summary>
+        /// Look up imported armorreflect sphere map (Godot REFLECT_MAP) in a texture cache.
+        /// </summary>
+        public static Texture2D FindReflectMap(IDictionary<string, Texture2D> textures)
+        {
+            if (textures == null)
+                return null;
+            Texture2D tex;
+            if (textures.TryGetValue(ReflectMapCacheKey, out tex))
+                return tex;
+            foreach (var pair in textures)
+            {
+                if (pair.Key != null &&
+                    pair.Key.Replace('\\', '/').EndsWith(
+                        "Textures/reflect/armorreflect.bmp",
+                        StringComparison.OrdinalIgnoreCase))
+                    return pair.Value;
+            }
+
+            return null;
         }
 
         public static List<Material> CreateMaterials(
@@ -97,7 +188,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Texture albedo = null;
                 if (albedoLookup != null)
                     albedo = albedoLookup(slot);
-                materials.Add(CreateMaterial(slot, albedo));
+                materials.Add(CreateMaterial(slot, albedo, null));
             }
 
             return materials;

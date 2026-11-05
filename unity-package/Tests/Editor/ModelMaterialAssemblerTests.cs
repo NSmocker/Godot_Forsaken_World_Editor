@@ -88,5 +88,53 @@ namespace SilverEcho.ForsakenWorld.Tests
                     Directory.Delete(root, true);
             }
         }
+
+        [Test]
+        public void ReflectPrefixSelectsArmorReflectShaderAndUsesSphereMap()
+        {
+            var slot = new AssembledSurfaceMaterial
+            {
+                Name = "blade",
+                TextureName = "r_blade.dds",
+                TextureIndex = 0,
+                MaterialIndex = 0,
+                Diffuse = new[] { 1f, 1f, 1f, 1f },
+                Specular = new[] { 0.4f, 0.4f, 0.4f, 1f },
+                SpecularLuminance = 0.4f,
+                Emissive = new[] { 0f, 0f, 0f },
+                UsesReflectShader = true,
+                AlphaMode = AssembledAlphaMode.Opaque
+            };
+            Assert.IsTrue(slot.TextureName.StartsWith(
+                ModelMaterialAssembler.ReflectTexturePrefix,
+                System.StringComparison.OrdinalIgnoreCase));
+
+            var albedo = new Texture2D(2, 2);
+            var reflect = new Texture2D(2, 2);
+            var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo, reflect);
+            Assert.AreEqual(AssembledUrpMaterialBuilder.ArmorReflectShaderName, material.shader.name);
+            Assert.IsTrue(material.HasProperty("_ReflectMap"));
+            Assert.AreEqual(reflect, material.GetTexture("_ReflectMap"));
+            Assert.AreEqual(albedo, material.GetTexture("_Albedo"));
+
+            var cache = new System.Collections.Generic.Dictionary<string, Texture2D>(
+                System.StringComparer.OrdinalIgnoreCase)
+            {
+                { AssembledUrpMaterialBuilder.ReflectMapCacheKey, reflect }
+            };
+            Assert.AreEqual(reflect, AssembledUrpMaterialBuilder.FindReflectMap(cache));
+            Assert.AreEqual(
+                "Textures/reflect/armorreflect.bmp",
+                ModelMaterialAssembler.ReflectMapRelativePath);
+        }
+
+        [Test]
+        public void AssemblerMarksRPrefixTexturesAsReflect()
+        {
+            Assert.AreEqual("r_", ModelMaterialAssembler.ReflectTexturePrefix);
+            Assert.IsTrue("r_sword.dds".StartsWith(
+                ModelMaterialAssembler.ReflectTexturePrefix,
+                System.StringComparison.OrdinalIgnoreCase));
+        }
     }
 }

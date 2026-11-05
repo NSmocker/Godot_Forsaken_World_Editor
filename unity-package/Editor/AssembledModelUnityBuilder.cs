@@ -187,7 +187,8 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         public static Material[] CreateSurfaceMaterials(
             AssembledSkin skin,
-            Func<AssembledSurfaceMaterial, Texture> albedoLookup = null)
+            Func<AssembledSurfaceMaterial, Texture> albedoLookup = null,
+            Texture reflectMap = null)
         {
             if (skin == null)
                 return Array.Empty<Material>();
@@ -199,7 +200,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Texture albedo = null;
                 if (albedoLookup != null)
                     albedo = albedoLookup(slot);
-                slotMaterials[key] = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo);
+                var reflect = slot.UsesReflectShader ? reflectMap : null;
+                slotMaterials[key] = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo, reflect);
             }
 
             var materials = new Material[skin.Surfaces.Count];

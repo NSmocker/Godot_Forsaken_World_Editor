@@ -10,6 +10,8 @@ namespace SilverEcho.ForsakenWorld
     public sealed class ModelMaterialAssembler
     {
         public const string ReflectTexturePrefix = "r_";
+        /// <summary>Godot REFLECT_MAP — sphere map for r_ weapon textures.</summary>
+        public const string ReflectMapRelativePath = "Textures/reflect/armorreflect.bmp";
         public const float AlphaClipThreshold = 84f / 255f;
 
         private readonly SkiTextureResolver textureResolver;
@@ -143,9 +145,7 @@ namespace SilverEcho.ForsakenWorld
                     baseName.StartsWith(ReflectTexturePrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     slot.UsesReflectShader = true;
-                    model.Warnings.Add(
-                        PathFile(skin.SourcePath) + ": reflect texture " + textureName +
-                        " mapped to URP Lit (armorreflect path is a later polish step).");
+                    // Shader selection happens in AssembledUrpMaterialBuilder (Angelica Armor Reflect).
                 }
             }
 

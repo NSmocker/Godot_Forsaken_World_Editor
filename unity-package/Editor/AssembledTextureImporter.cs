@@ -192,7 +192,80 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
             }
 
+            EnsureReflectMapImported(model, index, cache, ref created, ref updated, ref missing, errors);
             return cache;
+        }
+
+        /// <summary>
+        /// Godot REFLECT_MAP: Textures/reflect/armorreflect.bmp for r_ weapon materials.
+        /// </summary>
+        public static void EnsureReflectMapImported(
+            AssembledModel model,
+            GameDataIndex index,
+            Dictionary<string, Texture2D> cache,
+            ref int created,
+            ref int updated,
+            ref int missing,
+            List<string> errors)
+        {
+            if (model == null || cache == null)
+                return;
+            var needsReflect = false;
+            foreach (var skin in model.Skins)
+            {
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    if (slot != null && slot.UsesReflectShader)
+                    {
+                        needsReflect = true;
+                        break;
+                    }
+                }
+
+                if (needsReflect)
+                    break;
+            }
+
+            if (!needsReflect)
+                return;
+
+            var key = AssembledUrpMaterialBuilder.ReflectMapCacheKey;
+            if (cache.ContainsKey(key))
+                return;
+
+            if (index == null)
+            {
+                missing++;
+                if (errors != null)
+                    errors.Add(key + ": game data index unavailable.");
+                return;
+            }
+
+            GameDataFile file;
+            string resolveError;
+            if (!index.TryResolve(key, out file, out resolveError, allowUniqueSuffixMatch: true))
+            {
+                missing++;
+                if (errors != null)
+                    errors.Add(key + ": " + (resolveError ?? "not found"));
+                return;
+            }
+
+            var import = ImportOrUpdate(file.FullPath, file.RelativePath, header: null);
+            if (import.Texture != null)
+            {
+                cache[key] = import.Texture;
+                if (import.Created)
+                    created++;
+                if (import.Updated)
+                    updated++;
+            }
+            else
+            {
+                missing++;
+                if (errors != null && !string.IsNullOrEmpty(import.Error))
+                    errors.Add(key + ": " + import.Error);
+            }
         }
 
         private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath)

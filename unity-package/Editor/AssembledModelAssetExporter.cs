@@ -157,7 +157,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                                 out albedo);
                         }
 
-                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo);
+                        var reflect = slot.UsesReflectShader
+                            ? AssembledUrpMaterialBuilder.FindReflectMap(textures)
+                            : null;
+                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo, reflect);
                         var materialPath = AssembledUrpMaterialBuilder.GetMaterialAssetPath(
                             skin.SourcePath,
                             slot);
