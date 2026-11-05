@@ -140,7 +140,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return;
             }
 
-            var root = AngelicaUiBuilder.BuildDialog(dialog);
+            var loader = new AuiSurfaceLoader();
+            var root = AngelicaUiBuilder.BuildDialog(dialog, ui, loader);
             if (root == null)
             {
                 status = "Build failed for " + selectedFile;
@@ -149,7 +150,10 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             Undo.RegisterCreatedObjectUndo(root, "AUI Preview " + selectedFile);
             Selection.activeGameObject = root;
-            status = "Built " + root.name + " (" + dialog.Controls.Count + " controls)";
+            var warn = loader.Warnings.Count > 0
+                ? (" · " + loader.Warnings.Count + " surface warn")
+                : string.Empty;
+            status = "Built " + root.name + " (" + dialog.Controls.Count + " controls)" + warn;
         }
 
         private string[] BuildLayoutLabels()

@@ -9,6 +9,7 @@
   },
   "unityRelease": "60f1",
   "dependencies": {
-    "com.unity.render-pipelines.universal": "17.0.4"
+    "com.unity.render-pipelines.universal": "17.0.4",
+    "com.unity.ugui": "2.0.0"
   }
 }

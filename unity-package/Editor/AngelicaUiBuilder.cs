@@ -2,17 +2,25 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace SilverEcho.ForsakenWorld.Editor
 {
     /// <summary>
     /// Godot angelica_ui_builder.gd [~]: dialog → GameObject tree with visual specs
     /// (nine-slice margins, fonts from .stf defaults, IMAGEPICTURE frames, tooltips,
-    /// command / Esc meta). Full uGUI Image/Text wiring stays host-side when textures load.
+    /// command / Esc meta, Gfx* path meta, SUBDIALOG embed) and optional uGUI Image/Text
+    /// sprite binding when surfaces load (<see cref="BindVisuals"/>).
     /// </summary>
     public static class AngelicaUiBuilder
     {
-        public static GameObject BuildDialog(AuiDialog dialog, AngelicaUi ui = null)
+        public const int MaxSubDepth = 4;
+
+        public static GameObject BuildDialog(
+            AuiDialog dialog,
+            AngelicaUi ui = null,
+            AuiSurfaceLoader surfaces = null,
+            int depth = 0)
         {
             if (dialog == null)
                 return null;
@@ -62,7 +70,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Frame" };
             foreach (var c in dialog.Controls)
             {
-                var node = BuildControl(c, ui, defaults);
+                var node = BuildControl(c, ui, defaults, depth);
                 if (node == null)
                     continue;
                 var n = Sanitize(string.IsNullOrEmpty(c.Name) ? c.Type : c.Name);
@@ -78,11 +86,17 @@ namespace SilverEcho.ForsakenWorld.Editor
                 node.transform.SetParent(root.transform, false);
             }
 
+            if (surfaces != null)
+                BindVisuals(root, surfaces);
+
             return root;
         }
 
         public static GameObject BuildControl(
-            AuiControl c, AngelicaUi ui = null, Dictionary<string, object> defaults = null)
+            AuiControl c,
+            AngelicaUi ui = null,
+            Dictionary<string, object> defaults = null,
+            int depth = 0)
         {
             if (c == null)
                 return null;
@@ -100,6 +114,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             info.Sound = c.Sound ?? string.Empty;
             info.Hint = c.Hint ?? string.Empty;
             info.Tooltip = AuiTextUtil.Plain(c.Hint ?? string.Empty);
+            info.DialogFile = c.DialogFile ?? string.Empty;
 
             int v;
             if (c.IntProps.TryGetValue("align", out v))
@@ -125,8 +140,105 @@ namespace SilverEcho.ForsakenWorld.Editor
             ApplyText(info, c.Text, defaults, ui);
             ApplyResources(info, c);
 
+            if (string.Equals(c.Type, "SUBDIALOG", StringComparison.OrdinalIgnoreCase))
+                EmbedSubDialog(go, info, ui, depth);
+
             go.SetActive(c.Show);
             return go;
+        }
+
+        /// <summary>
+        /// Godot <c>_texture</c> / Image / Label: load surfaces into Sprite + uGUI Image,
+        /// and wire Text (rich when markup). Skips Gfx* resources (meta-only; no 3D SubViewport).
+        /// </summary>
+        public static void BindVisuals(GameObject root, AuiSurfaceLoader loader)
+        {
+            if (root == null || loader == null)
+                return;
+            var infos = root.GetComponentsInChildren<AuiElementInfo>(true);
+            foreach (var info in infos)
+            {
+                if (info == null)
+                    continue;
+                BindSurface(info, loader);
+                BindText(info);
+            }
+        }
+
+        private static void BindSurface(AuiElementInfo info, AuiSurfaceLoader loader)
+        {
+            if (string.IsNullOrEmpty(info.ResourcePath))
+                return;
+            var tex = loader.Load(info.ResourcePath);
+            if (tex == null)
+                return;
+            ApplyTextureMargins(info, tex.width, tex.height);
+            var sprite = loader.CreateSprite(tex, info.FrameMode);
+            info.BoundTexture = tex;
+            info.BoundSprite = sprite;
+
+            var image = info.gameObject.GetComponent<Image>();
+            if (image == null)
+                image = info.gameObject.AddComponent<Image>();
+            image.sprite = sprite;
+            image.type = (info.BorderLeft > 0 || info.BorderRight > 0 ||
+                          info.BorderTop > 0 || info.BorderBottom > 0)
+                ? Image.Type.Sliced
+                : Image.Type.Simple;
+            image.color = new Color(1f, 1f, 1f, info.Alpha);
+        }
+
+        private static void BindText(AuiElementInfo info)
+        {
+            if (string.IsNullOrEmpty(info.Text) && string.IsNullOrEmpty(info.RichText))
+                return;
+            // Frame / IMAGEPICTURE keep Image only; labels and buttons may carry text.
+            var type = info.AuiType ?? string.Empty;
+            if (string.Equals(type, "FRAME", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "IMAGEPICTURE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "WINDOWPICTURE", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var text = info.gameObject.GetComponent<Text>();
+            if (text == null)
+                text = info.gameObject.AddComponent<Text>();
+            text.supportRichText = info.HasMarkup;
+            text.text = info.HasMarkup && !string.IsNullOrEmpty(info.RichText)
+                ? info.RichText
+                : (info.Text ?? string.Empty);
+            text.fontSize = info.FontSizePixels > 0 ? info.FontSizePixels : 13;
+            text.color = info.FontColor;
+            text.alignment = AlignToAnchor(info.Align);
+        }
+
+        private static TextAnchor AlignToAnchor(int align)
+        {
+            if (align == 1)
+                return TextAnchor.UpperCenter;
+            if (align == 2)
+                return TextAnchor.UpperRight;
+            return TextAnchor.UpperLeft;
+        }
+
+        /// <summary>Godot <c>_sub_dialog</c>: embed nested dialog under the control.</summary>
+        private static void EmbedSubDialog(
+            GameObject box, AuiElementInfo info, AngelicaUi ui, int depth)
+        {
+            var file = info.DialogFile ?? string.Empty;
+            if (string.IsNullOrEmpty(file) || ui == null)
+                return;
+            if (depth >= MaxSubDepth)
+            {
+                // Match Godot warn path; leave empty box with dialog_file meta.
+                return;
+            }
+            var sub = ui.ReadDialog(file);
+            if (sub == null)
+                return;
+            var child = BuildDialog(sub, ui, surfaces: null, depth: depth + 1);
+            if (child == null)
+                return;
+            child.transform.SetParent(box.transform, false);
         }
 
         private static void ApplyText(
@@ -201,8 +313,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 c.Resources.TryGetValue("FrameUpImage", out frame))
             {
                 info.ResourceFile = frame.File;
-                info.ResourcePath = frame.Path;
-                ApplyNineSlice(info, frame, c.Rect.Width, c.Rect.Height);
+                info.ResourcePath = frame.IsGfx ? string.Empty : frame.Path;
+                if (!frame.IsGfx)
+                    ApplyNineSlice(info, frame, c.Rect.Width, c.Rect.Height);
                 ApplyAnim(info, frame);
             }
 
@@ -219,11 +332,31 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (c.Resources.TryGetValue("FrameDisabledImage", out disabled))
                 info.ResourceDisabledFile = disabled.File;
 
-            // IMAGEPICTURE: frames as horizontal strips (Godot _image_picture).
+            // Godot: Gfx* resources → meta only (no texture / no 3D SubViewport yet).
+            ApplyGfxMeta(info, c);
+
             if (string.Equals(c.Type, "IMAGEPICTURE", StringComparison.OrdinalIgnoreCase) &&
                 c.Resources.TryGetValue("FrameImage", out frame))
             {
                 ApplyAnim(info, frame);
+            }
+        }
+
+        private static void ApplyGfxMeta(AuiElementInfo info, AuiControl c)
+        {
+            foreach (var kv in c.Resources)
+            {
+                var res = kv.Value;
+                if (res == null || !res.IsGfx || string.IsNullOrEmpty(res.File))
+                    continue;
+                var path = !string.IsNullOrEmpty(res.Path) ? res.Path : res.File;
+                var key = kv.Key ?? string.Empty;
+                if (string.Equals(key, "Gfx", StringComparison.OrdinalIgnoreCase))
+                    info.GfxPath = path;
+                else if (string.Equals(key, "GfxDown", StringComparison.OrdinalIgnoreCase))
+                    info.GfxDownPath = path;
+                else if (string.Equals(key, "GfxOnHover", StringComparison.OrdinalIgnoreCase))
+                    info.GfxOnHoverPath = path;
             }
         }
 
@@ -233,7 +366,6 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return;
             var modeInt = 0;
             res.Extras.TryGetValue("frame_mode", out modeInt);
-            // Keep declared FrameMode; borders need the real texture size (Godot _frame_margins).
             info.FrameMode = AuiNineSlice.FromInt(modeInt);
             info.SourceWidth = elemW;
             info.SourceHeight = elemH;
@@ -277,7 +409,6 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (arr != null && arr.Length >= 3)
             {
                 var a = arr.Length >= 4 ? arr[3] : 1f;
-                // ColorValue stores 0-255 channels when from XML; shadow alpha path uses 0-1.
                 if (arr[0] > 1f || arr[1] > 1f || arr[2] > 1f || a > 1f)
                     return new Color(arr[0] / 255f, arr[1] / 255f, arr[2] / 255f, a > 1f ? a / 255f : a);
                 return new Color(arr[0], arr[1], arr[2], a);

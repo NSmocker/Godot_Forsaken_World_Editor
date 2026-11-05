@@ -4,7 +4,7 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// Metadata + visual specs on AUI preview nodes (Godot Control meta aui_type / command / …,
-    /// nine-slice margins, font, IMAGEPICTURE frames).
+    /// nine-slice margins, font, IMAGEPICTURE frames, Gfx* path meta, SUBDIALOG file).
     /// </summary>
     public sealed class AuiElementInfo : MonoBehaviour
     {
@@ -29,6 +29,16 @@ namespace SilverEcho.ForsakenWorld
         public string ResourceDownFile = string.Empty;
         public string ResourceHoverFile = string.Empty;
         public string ResourceDisabledFile = string.Empty;
+
+        /// <summary>Godot meta "gfx" (Gfx resource path).</summary>
+        public string GfxPath = string.Empty;
+        /// <summary>Godot meta "gfx_down".</summary>
+        public string GfxDownPath = string.Empty;
+        /// <summary>Godot meta "gfx_on_hover".</summary>
+        public string GfxOnHoverPath = string.Empty;
+
+        /// <summary>SUBDIALOG DialogFile (Godot meta "dialog_file").</summary>
+        public string DialogFile = string.Empty;
 
         public int Align;
         public int TextOffsetX;
@@ -63,5 +73,10 @@ namespace SilverEcho.ForsakenWorld
         public int IntervalMs;
         public int Degree;
         public bool HasMarkup;
+
+        /// <summary>Bound surface texture (after AngelicaUiBuilder.BindVisuals).</summary>
+        public Texture2D BoundTexture;
+        /// <summary>Bound sliced/simple Sprite for uGUI Image.</summary>
+        public Sprite BoundSprite;
     }
 }
