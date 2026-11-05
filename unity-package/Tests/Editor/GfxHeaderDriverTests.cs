@@ -6,6 +6,28 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxHeaderDriverTests
     {
         [Test]
+        public void HeaderConfigUsesGodotAsBoolAndFloatTruncatedInts()
+        {
+            // gfx_data_node._read_cfg: _as_bool → only "1"/"true"; int(f.call(...)) parses float.
+            var cfg = GfxHeaderConfig.FromHeader(new System.Collections.Generic.Dictionary<string, string>
+            {
+                { "ShakeByDistance", "2" },
+                { "FaceToViewer", "TRUE" },
+                { "ShakePeriod", "100.0" },
+                { "OctaveNum", "3.9" },
+                { "ShakeDamp", "2.0" },
+            });
+            Assert.IsFalse(cfg.ShakeByDistance);
+            Assert.IsTrue(cfg.FaceToViewer);
+            Assert.AreEqual(100, cfg.ShakePeriod);
+            Assert.AreEqual(3, cfg.ShakeOctaves);
+            Assert.AreEqual(2, cfg.ShakeDamp);
+            var defaults = GfxHeaderConfig.FromHeader(new System.Collections.Generic.Dictionary<string, string>());
+            Assert.IsTrue(defaults.ShakeByDistance);
+            Assert.AreEqual(5, defaults.ShakeOctaves);
+        }
+
+        [Test]
         public void ActualSpeedMultipliesFileAndSetPlaySpeed()
         {
             var driver = new GfxHeaderDriver();

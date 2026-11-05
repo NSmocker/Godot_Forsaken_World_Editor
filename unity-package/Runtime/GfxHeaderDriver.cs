@@ -36,9 +36,9 @@ namespace SilverEcho.ForsakenWorld
 
             cfg.PlaySpeed = GfxPropertyValues.Float(header, "PlaySpeed", 1f);
             cfg.DefaultAlpha = GfxPropertyValues.Float(header, "DefaultAlpha", 1f);
-            cfg.FaceToViewer = GfxPropertyValues.Bool(header, "FaceToViewer");
-            cfg.FadeByDist = GfxPropertyValues.Bool(header, "FadeByDist");
-            cfg.NoChangeDir = GfxPropertyValues.Bool(header, "NoChangeDir");
+            cfg.FaceToViewer = GodotAsBool(header, "FaceToViewer", "0");
+            cfg.FadeByDist = GodotAsBool(header, "FadeByDist", "0");
+            cfg.NoChangeDir = GodotAsBool(header, "NoChangeDir", "0");
             cfg.FadeStart = GfxPropertyValues.Float(header, "FadeStart", 10f);
             cfg.FadeEnd = GfxPropertyValues.Float(header, "FadeEnd", 0f);
 
@@ -51,12 +51,24 @@ namespace SilverEcho.ForsakenWorld
             cfg.ShakeAmplitude = GfxPropertyValues.Float(header, "Amplitude", 2f);
             cfg.ShakeWaveLen = GfxPropertyValues.Float(header, "WaveLen", 1f);
             cfg.ShakePersistence = GfxPropertyValues.Float(header, "Persistence", 0.25f);
-            cfg.ShakeOctaves = GfxPropertyValues.Int(header, "OctaveNum", 5);
-            cfg.ShakePeriod = GfxPropertyValues.Int(header, "ShakePeriod", 0);
-            cfg.ShakeByDistance = GfxPropertyValues.Bool(header, "ShakeByDistance", true);
+            // Godot int(f.call(key, def)): float parse then truncate ("100.0" -> 100).
+            cfg.ShakeOctaves = (int)GfxPropertyValues.Float(header, "OctaveNum", 5f);
+            cfg.ShakePeriod = (int)GfxPropertyValues.Float(header, "ShakePeriod", 0f);
+            cfg.ShakeByDistance = GodotAsBool(header, "ShakeByDistance", "1");
             cfg.ShakeAttenu = GfxPropertyValues.Float(header, "ShakeCamAttenu", 30f);
-            cfg.ShakeDamp = GfxPropertyValues.Int(header, "ShakeDamp", 0);
+            cfg.ShakeDamp = (int)GfxPropertyValues.Float(header, "ShakeDamp", 0f);
             return cfg;
+        }
+
+        /// <summary>
+        /// Godot gfx_data_node._as_bool(d.get(key, def)): lower-cased "1"/"true" → true,
+        /// anything else present (e.g. "2", "yes") → false; absent → default string.
+        /// </summary>
+        public static bool GodotAsBool(IDictionary<string, string> header, string key, string def)
+        {
+            var raw = GfxPropertyValues.Get(header, key, def) ?? def;
+            var s = raw.Trim().ToLowerInvariant();
+            return s == "1" || s == "true";
         }
     }
 
