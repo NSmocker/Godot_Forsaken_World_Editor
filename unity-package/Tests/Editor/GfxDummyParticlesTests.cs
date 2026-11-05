@@ -111,6 +111,66 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.IsFalse(driver.transform.GetChild(1).gameObject.activeSelf);
         }
 
+
+        [Test]
+        public void DummyDriverUsesRenderMeshInstancedWhenTemplateHasMesh()
+        {
+            var header = new GameObject("GFX");
+            var particleGo = new GameObject("P");
+            particleGo.transform.SetParent(header.transform, false);
+
+            var dummy = new GameObject("Mark");
+            dummy.transform.SetParent(header.transform, false);
+            var container = dummy.AddComponent<GfxContainerDriver>();
+            var sub = new GameObject(GfxContainerDriver.SubGfxNodeName);
+            sub.transform.SetParent(dummy.transform, false);
+            sub.AddComponent<GfxPlayer>();
+            var mf = sub.AddComponent<MeshFilter>();
+            mf.sharedMesh = new Mesh();
+            var mr = sub.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = new Material(new Shader());
+            container.Configure(
+                new GfxContainerParams
+                {
+                    ElementName = "Mark",
+                    IsDummy = true,
+                    PlaySpeed = 1f,
+                    DummyUseGScale = true
+                },
+                sub, 1f, 1f, null);
+
+            var host = new GameObject(GfxDummyParticlesDriver.NodeName);
+            host.transform.SetParent(particleGo.transform, false);
+            var driver = host.AddComponent<GfxDummyParticlesDriver>();
+            driver.Configure("Mark", 3);
+            driver.EnsureBuilt();
+            Assert.IsTrue(string.IsNullOrEmpty(driver.BuildError));
+            Assert.IsTrue(driver.UsesInstancing);
+            Assert.AreEqual(0, driver.SlotCount);
+            Assert.AreEqual(1, driver.BatchCount);
+
+            Graphics.LastRenderMeshInstancedCount = -1;
+            var slots = new[]
+            {
+                new GfxParticleSlot
+                {
+                    Alive = true, Age = 0.25f, Size = 1f, KeyScale = 1f, KeyAlpha = 1f,
+                    Pos = new[] { 4f, 5f, 6f }, Color = new[] { 1f, 1f, 1f, 1f },
+                    Move = new[] { 0f, 0f, 1f }, Rot = new[] { 0f, 0f, 0f, 1f }
+                },
+                new GfxParticleSlot { Alive = false },
+                new GfxParticleSlot { Alive = false }
+            };
+            driver.Tick(slots, 1f, false);
+            Assert.AreEqual(3, Graphics.LastRenderMeshInstancedCount);
+            Assert.IsNotNull(Graphics.LastRenderMeshInstancedMesh);
+
+            driver.ForceNodes = true;
+            driver.EnsureBuilt();
+            Assert.IsFalse(driver.UsesInstancing);
+            Assert.AreEqual(3, driver.SlotCount);
+        }
+
         [Test]
         public void ParticleParamsStillParseDummyEle()
         {
@@ -127,5 +187,6 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual("X", p.DummyEle);
             Assert.IsFalse(p.IsDummy);
         }
+
     }
 }

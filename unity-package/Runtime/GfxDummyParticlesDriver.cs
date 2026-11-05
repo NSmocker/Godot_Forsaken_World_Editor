@@ -8,7 +8,9 @@ namespace SilverEcho.ForsakenWorld
     /// Godot <c>gfx_dummy_particles.gd</c> node-copy path: when a particle element names
     /// a sibling with <c>IsDummy</c> via DummyEle, quads are suppressed and each live
     /// particle slot hosts a copy of the dummy (container Sub_GFX or the element itself).
-    /// MultiMesh instance path is not ported (Godot <c>force_nodes</c> equivalent).
+    /// MultiMesh-equivalent path uses <see cref="Graphics.RenderMeshInstanced"/> when the
+    /// DummyEle template has MeshFilter/MeshRenderer geometry and no per-node Face/Fade/Shake
+    /// flags; otherwise falls back to node copies (Godot <c>force_nodes</c> / <c>_slots</c>).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxDummyParticlesDriver : MonoBehaviour
@@ -30,6 +32,10 @@ namespace SilverEcho.ForsakenWorld
         private GameObject template;
         private bool built;
         private string buildError;
+        private bool forceNodes;
+        private bool useInstancing;
+        private readonly System.Collections.Generic.List<GfxDummyInstancedBatch> batches =
+            new System.Collections.Generic.List<GfxDummyInstancedBatch>();
 
         private sealed class Slot
         {
@@ -53,6 +59,13 @@ namespace SilverEcho.ForsakenWorld
         public string BuildError => buildError;
         public int SlotCount => slots.Count;
         public Kind ResolvedKind => kind;
+        public bool UsesInstancing => useInstancing;
+        public int BatchCount => batches.Count;
+        public bool ForceNodes
+        {
+            get => forceNodes;
+            set { if (forceNodes != value) { forceNodes = value; built = false; } }
+        }
 
         public void Configure(string dummyName, int pool)
         {
@@ -72,7 +85,14 @@ namespace SilverEcho.ForsakenWorld
         public void Tick(GfxParticleSlot[] parts, float gfxAlpha, bool facing)
         {
             EnsureBuilt();
-            if (kind == Kind.None || slots.Count == 0)
+            if (kind == Kind.None)
+                return;
+            if (useInstancing)
+            {
+                TickInstances(parts, gfxAlpha, facing);
+                return;
+            }
+            if (slots.Count == 0)
                 return;
 
             var parentScale = 1f;
@@ -199,6 +219,19 @@ namespace SilverEcho.ForsakenWorld
             }
 
             template = templateGo;
+            batches.Clear();
+            useInstancing = false;
+            if (!forceNodes && kind != Kind.Static &&
+                GfxDummyInstancing.TryCollect(template.transform, batches) && batches.Count > 0)
+            {
+                useInstancing = true;
+                for (var b = 0; b < batches.Count; b++)
+                    batches[b].EnsureCapacity(poolSize);
+                HideRenderers(template.transform);
+                return;
+            }
+            batches.Clear();
+
             for (var i = 0; i < poolSize; i++)
             {
                 var slotGo = new GameObject("Dummy_" + i);
@@ -263,6 +296,73 @@ namespace SilverEcho.ForsakenWorld
                     DestroyImmediate(s.Node);
             }
             slots.Clear();
+            batches.Clear();
+            useInstancing = false;
+        }
+
+        private void TickInstances(GfxParticleSlot[] parts, float gfxAlpha, bool facing)
+        {
+            var parentScale = 1f;
+            if (transform.parent != null)
+                parentScale = transform.parent.lossyScale.x;
+
+            for (var b = 0; b < batches.Count; b++)
+            {
+                var batch = batches[b];
+                batch.EnsureCapacity(poolSize);
+                for (var i = 0; i < poolSize; i++)
+                {
+                    GfxParticleSlot p = null;
+                    if (parts != null && i < parts.Length)
+                        p = parts[i];
+                    if (p == null || !p.Alive)
+                    {
+                        batch.ClearSlot(i);
+                        continue;
+                    }
+
+                    var ageMs = p.Age * 1000f * playSpeed;
+                    var alpha = Mathf.Clamp01(p.Color[3] * p.KeyAlpha * gfxAlpha);
+                    var size = p.Size;
+                    Quaternion rot;
+                    float scale;
+                    if (facing)
+                    {
+                        rot = BuildFacing(p.Move);
+                        scale = size * p.KeyScale;
+                    }
+                    else
+                    {
+                        rot = Quat(p.Rot);
+                        scale = p.Bind ? size * p.KeyScale : size;
+                    }
+                    var pos = new Vector3(p.Pos[0], p.Pos[1], p.Pos[2]);
+                    if (kind == Kind.Container)
+                    {
+                        var sGfx = size * subScale;
+                        if (!useGScale && System.Math.Abs(parentScale) > 0.000001f)
+                            sGfx /= parentScale;
+                        batch.SetSlot(i, pos, rot, Vector3.one * sGfx, ageMs, alpha);
+                    }
+                    else
+                        batch.SetSlot(i, pos, rot, Vector3.one * scale, ageMs, alpha);
+                }
+                batch.Render();
+            }
+        }
+
+        private static void HideRenderers(Transform root)
+        {
+            if (root == null)
+                return;
+            var mrs = root.gameObject.GetComponentsInChildren<MeshRenderer>(true);
+            if (mrs == null)
+                return;
+            for (var i = 0; i < mrs.Length; i++)
+            {
+                if (mrs[i] != null)
+                    mrs[i].enabled = false;
+            }
         }
 
         /// <summary>
