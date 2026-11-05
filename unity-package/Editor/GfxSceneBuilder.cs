@@ -165,6 +165,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachGrid(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "220")
+                {
+                    driver = AttachPhys(el, elementGo, texResolver, gfx2d, plan.SourcePath, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -574,6 +578,23 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
 
+
+
+        private static GfxElementDriver AttachPhys(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            string gfxSourcePath,
+            List<string> warnings)
+        {
+            var phys = elementGo.AddComponent<GfxPhysDriver>();
+            var pp = GfxPhysParams.FromProperties(
+                el.Properties, el.SystemId, el.Index, el.Name, gfxSourcePath, warnings);
+            var texture = ResolveElementTexture(pp.TexFile, el.SystemId, texResolver, warnings);
+            phys.Configure(pp, texture, gfx2d, warnings);
+            return phys;
+        }
 
         private static GfxElementDriver AttachGrid(
             GfxElementPlan el,

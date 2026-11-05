@@ -103,7 +103,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             GfxElementRegistry.ClearPortedForTests();
             Assert.IsTrue(GfxElementRegistry.IsPorted("210"));
             Assert.IsTrue(GfxElementRegistry.IsPorted("211"));
-            Assert.IsFalse(GfxElementRegistry.IsPorted("220"));
+            Assert.IsFalse(GfxElementRegistry.IsPorted("230"));
         }
 
         [Test]
