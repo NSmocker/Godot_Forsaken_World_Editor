@@ -3,7 +3,8 @@
   "rootNamespace": "SilverEcho.ForsakenWorld.Editor",
   "references": [
     "ForsakenWorld.Core",
-    "UnityEngine.UI"
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [
     "Editor"

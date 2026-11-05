@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -32,6 +33,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             public int UnusedBuildings;
             public int Effects;
             public int Models;
+            public int Trees;
             public int Sounds;
             public int Water;
             public bool HasLight;
@@ -114,9 +116,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                     objects.AddComponent<WorldObjectsController>();
                     var effects = Group(objects, "Effects");
                     var models = Group(objects, "Models");
+                    var trees = Group(objects, "Trees");
                     var sounds = Group(objects, "Sounds");
                     result.Effects = PlaceEffects(world.Document.Effects, effects, index, decoder, result);
                     result.Models = PlaceModels(world.Document.Models, models, index, decoder, result, showProgress);
+                    result.Trees = PlaceTrees(world.Document.Trees, world.Document.TreeTypes, trees, result);
                     result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result);
                 }
 
@@ -330,8 +334,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(imported.PrefabPath);
                 var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
                 if (instance == null)
-                    instance = new GameObject(Sanitize(file.Name));
-                instance.name = Sanitize(file.Name);
+                    instance = new GameObject(Sanitize(file.DisplayName));
+                instance.name = Sanitize(file.DisplayName);
                 instance.transform.SetParent(group, false);
                 result.Buildings++;
                 result.BuildingPaths.Add(imported.PrefabPath);
@@ -688,6 +692,54 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 host.BaseActions = bases.ToArray();
+                count++;
+            }
+
+            return count;
+        }
+
+        private static int PlaceTrees(
+            IList<EcwldTree> trees,
+            Dictionary<uint, string> treeTypes,
+            GameObject parent,
+            Result result)
+        {
+            var count = 0;
+            foreach (var tree in trees)
+            {
+                var go = new GameObject("дерефа");
+                go.transform.SetParent(parent.transform, false);
+
+                // TextMeshPro text showing the tree name.
+                var tmp = go.AddComponent<TextMeshPro>();
+                tmp.text = "дерефа";
+                tmp.fontSize = 2f;
+                tmp.alignment = TextAlignmentOptions.Center;
+                // Billboard: no shadows, text faces upright.
+                var meshRenderer = go.GetComponent<MeshRenderer>();
+                if (meshRenderer != null)
+                {
+                    meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
+                    meshRenderer.receiveShadows = false;
+                }
+
+                // Position from the tree record (X is always stored, Y/Z available in v12).
+                go.transform.localPosition = new Vector3(tree.Pos[0], tree.Pos[1], tree.Pos[2]);
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = Vector3.one;
+
+                // Script with path to the tree (.spt file resolved from tree type ID).
+                var placeholder = go.AddComponent<WorldTreePlaceholder>();
+                placeholder.TreeTypeId = tree.Type;
+                string sptPath;
+                if (treeTypes != null && treeTypes.TryGetValue(tree.Type, out sptPath))
+                    placeholder.TreeRelativePath = sptPath;
+                else
+                {
+                    placeholder.TreeRelativePath = "trees/unknown_type_" + tree.Type + ".spt";
+                    result.Warnings.Add("Tree type " + tree.Type + " has no resolved .spt path; using fallback.");
+                }
+
                 count++;
             }
 

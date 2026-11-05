@@ -13,10 +13,19 @@ namespace SilverEcho.ForsakenWorld
         public readonly List<EcwldEffect> Effects = new List<EcwldEffect>();
         public readonly List<EcwldModel> Models = new List<EcwldModel>();
         public readonly List<EcwldSound> Sounds = new List<EcwldSound>();
+        public readonly List<EcwldTree> Trees = new List<EcwldTree>();
+        /// <summary>Tree type ID → relative path to the .spt SpeedTree file.</summary>
+        public readonly Dictionary<uint, string> TreeTypes = new Dictionary<uint, string>();
         /// <summary>Export-ID → byte offset into the sibling .ecbsd.</summary>
         public readonly Dictionary<uint, uint> WaterRefs = new Dictionary<uint, uint>();
         public readonly Dictionary<uint, uint> OrnamentRefs = new Dictionary<uint, uint>();
         public readonly Dictionary<uint, uint> BoxRefs = new Dictionary<uint, uint>();
+    }
+
+    public sealed class EcwldTree
+    {
+        public uint Type;
+        public float[] Pos = new float[3];
     }
 
     public sealed class EcwldEffect

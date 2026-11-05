@@ -49,6 +49,11 @@ namespace SilverEcho.ForsakenWorld
             if (HeaderSize + (long)numBlock * 4 > data.Length)
                 throw new InvalidDataException(sourceName + ": Block-Tabelle abgeschnitten");
 
+            reader.Seek(36);
+            var treeOffset = reader.ReadUInt32LittleEndian();
+            reader.Seek(44);
+            var numTreeType = reader.ReadInt32LittleEndian();
+
             var blockOffsets = new uint[numBlock];
             reader.Seek(HeaderSize);
             for (var i = 0; i < numBlock; i++)
@@ -59,6 +64,21 @@ namespace SilverEcho.ForsakenWorld
                 SourcePath = sourceName ?? string.Empty,
                 Version = version
             };
+
+            // Parse tree type data (type ID → .spt path) stored at dwTreeOff after all blocks.
+            if (treeOffset > 0 && numTreeType > 0 && treeOffset < (uint)data.Length)
+            {
+                var treeTypeReader = new BinaryDataReader(data, sourceName);
+                treeTypeReader.Seek((int)treeOffset);
+                for (var i = 0; i < numTreeType; i++)
+                {
+                    var typeId = treeTypeReader.ReadUInt32LittleEndian();
+                    var sptPath = ReadATreeString(treeTypeReader);
+                    var compMapPath = ReadATreeString(treeTypeReader);
+                    if (!document.TreeTypes.ContainsKey(typeId))
+                        document.TreeTypes[typeId] = sptPath;
+                }
+            }
 
             var seenEffects = new HashSet<uint>();
             var seenModels = new HashSet<uint>();
@@ -81,8 +101,26 @@ namespace SilverEcho.ForsakenWorld
                         throw new InvalidDataException(sourceName + ": invalid object count in block " + i);
                 }
 
-                // PW stores ECWDFILETREE5 (type + XYZ), not a BSD data reference.
-                reader.Skip(checked(counts[0] * (version == 12 ? 16 : 8)));
+                // Trees stored inline in each block: ECWDFILETREE5 (type DWORD + XYZ float[3] = 16 bytes)
+                // for PW v12. For FW v13-14 the existing parser skipped 8 bytes per tree; we match that
+                // stride to keep block alignment, reading type + X position only (Y/Z default to 0).
+                var treeStride = version == 12 ? 16 : 8;
+                for (var k = 0; k < counts[0]; k++)
+                {
+                    if (reader.Remaining < treeStride)
+                        throw new InvalidDataException(sourceName + ": Block " + i + " tree record truncated");
+                    var tree = new EcwldTree
+                    {
+                        Type = reader.ReadUInt32LittleEndian(),
+                        Pos = new[] { reader.ReadSingleLittleEndian(), 0f, 0f }
+                    };
+                    if (version == 12)
+                    {
+                        tree.Pos[1] = reader.ReadSingleLittleEndian();
+                        tree.Pos[2] = reader.ReadSingleLittleEndian();
+                    }
+                    document.Trees.Add(tree);
+                }
 
                 // Water refs.
                 for (var k = 0; k < counts[1]; k++)
@@ -190,6 +228,16 @@ namespace SilverEcho.ForsakenWorld
             var length = reader.ReadInt32LittleEndian();
             if (length < 0 || length > 1 << 20)
                 throw new InvalidDataException("invalid AString length " + length);
+            if (length == 0)
+                return string.Empty;
+            return decoder.DecodeGbk(reader.ReadBytes(length));
+        }
+
+        private string ReadATreeString(BinaryDataReader reader)
+        {
+            var length = reader.ReadInt32LittleEndian();
+            if (length < 0 || length > 1 << 20)
+                throw new InvalidDataException("invalid tree string length " + length);
             if (length == 0)
                 return string.Empty;
             return decoder.DecodeGbk(reader.ReadBytes(length));

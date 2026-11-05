@@ -118,7 +118,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 Progress(showProgress, "Saving prefab", 0.8f);
-                root = new GameObject(Sanitize(file.Name));
+                root = new GameObject(Sanitize(file.DisplayName));
                 root.transform.localPosition = new Vector3(
                     assembled.LocalPosition[0],
                     assembled.LocalPosition[1],
@@ -182,7 +182,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                         surface.Normals[v * 3 + 2]));
                     uvs.Add(new Vector2(
                         surface.Uvs[v * 2],
-                        surface.Uvs[v * 2 + 1]));
+                        AngelicaGeometry.UnityTextureV(surface.Uvs[v * 2 + 1])));
                     var cr = surface.Colors.Length > v * 3 ? surface.Colors[v * 3] : 1f;
                     var cg = surface.Colors.Length > v * 3 + 1 ? surface.Colors[v * 3 + 1] : 1f;
                     var cb = surface.Colors.Length > v * 3 + 2 ? surface.Colors[v * 3 + 2] : 1f;

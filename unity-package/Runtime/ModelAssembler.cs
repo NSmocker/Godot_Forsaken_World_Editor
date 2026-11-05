@@ -134,7 +134,11 @@ namespace SilverEcho.ForsakenWorld
                     LocalScale = scale,
                     LocalMatrix = local,
                     BindMatrix = bind,
-                    BindPoseMatrix = AngelicaGeometry.InvertUnityColumnMajor(bind)
+                    // A3DBone::m_matBoneInit already maps mesh space into bone space
+                    // (A3DSkinModel blends BoneInit * boneTM). Unity bindposes are that
+                    // same inverse bind. Inverting again applies the bone scale on top
+                    // of authored vertices — the "scaled skeleton, untouched mesh" look.
+                    BindPoseMatrix = bind
                 });
             }
 
@@ -314,7 +318,7 @@ namespace SilverEcho.ForsakenWorld
                 {
                     Name = bone.Name,
                     SkeletonBoneIndex = skeletonBoneIndex,
-                    // Unity Mesh.bindposes expect the inverse bind matrix.
+                    // Already the inverse bind (matBoneInit), which Unity bindposes expect.
                     BindPoseMatrix = (float[])bone.BindPoseMatrix.Clone()
                 });
             }

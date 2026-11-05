@@ -180,7 +180,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     for (var i = 0; i < pageFiles.Count; i++)
                     {
                         var file = pageFiles[i];
-                        var label = file.RelativePath;
+                        var label = string.IsNullOrEmpty(file.DisplayRelativePath)
+                            ? file.RelativePath
+                            : file.DisplayRelativePath;
                         if (GUILayout.Toggle(
                             selectedFile == file,
                             label,
@@ -342,7 +344,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        EditorGUILayout.LabelField(selectedFile.RelativePath, EditorStyles.boldLabel);
+                        EditorGUILayout.LabelField(
+                            string.IsNullOrEmpty(selectedFile.DisplayRelativePath)
+                                ? selectedFile.RelativePath
+                                : selectedFile.DisplayRelativePath,
+                            EditorStyles.boldLabel);
                         if (GUILayout.Button("Reveal", GUILayout.Width(70)))
                             EditorUtility.RevealInFinder(selectedFile.FullPath);
                     }
@@ -718,7 +724,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 index.ReplaceFromRelativePaths(snapshot.RelativePaths);
                 scanTime = snapshot.ScanTime ?? string.Empty;
                 index.ScanTime = scanTime;
+                if (index.RepairedPathCount > 0)
+                    SaveScanCache();
                 status = "Loaded cache: " + index.Files.Count + " files" +
+                    (index.RepairedPathCount > 0
+                        ? "  ·  repaired " + index.RepairedPathCount + " mojibake paths"
+                        : string.Empty) +
                     (string.IsNullOrEmpty(scanTime) ? "." : "  ·  scanned " + scanTime);
                 UpdateVisibleFiles();
             }
@@ -756,7 +767,9 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             var paths = new List<string>(visibleFiles.Count);
             for (var i = 0; i < visibleFiles.Count; i++)
-                paths.Add(visibleFiles[i].RelativePath);
+                paths.Add(string.IsNullOrEmpty(visibleFiles[i].DisplayRelativePath)
+                    ? visibleFiles[i].RelativePath
+                    : visibleFiles[i].DisplayRelativePath);
             folderTree = GameDataFolderTree.Build(paths, string.Empty, searchText);
             if (folderTree.ExpandAll)
             {
@@ -1906,7 +1919,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 var incomplete = new AssembledModel
                 {
-                    SourceSmdPath = smdFile.RelativePath
+                    SourceSmdPath = DisplayPath(smdFile)
                 };
                 incomplete.Errors.AddRange(resolution.Errors);
                 incomplete.Warnings.AddRange(resolution.Warnings);
@@ -1926,14 +1939,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                     continue;
                 var skinBytes = File.ReadAllBytes(skinRef.File.FullPath);
                 skins.Add(new SkiParser(decoder).Parse(skinBytes, skinRef.File.RelativePath));
-                skinPaths.Add(skinRef.File.RelativePath);
+                skinPaths.Add(DisplayPath(skinRef.File));
             }
 
             var model = new ModelAssembler().Assemble(
                 smd,
-                smdFile.RelativePath,
+                DisplayPath(smdFile),
                 skeleton,
-                resolution.Skeleton.File.RelativePath,
+                DisplayPath(resolution.Skeleton.File),
                 skins,
                 skinPaths,
                 resolution);
@@ -1956,7 +1969,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 var failed = new AssembledModel
                 {
-                    SourceSmdPath = file.RelativePath
+                    SourceSmdPath = DisplayPath(file)
                 };
                 failed.Errors.Add("Assemble failed: " + exception.Message);
                 return failed;
@@ -2289,7 +2302,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     root = AssembledModelUnityBuilder.BuildHierarchyWithAnimations(
                         selectedAssembledModel,
                         selectedAssembledModel.Animations,
-                        null,
+                        selectedFile != null ? selectedFile.DisplayName : null,
                         albedoLookup,
                         previewAnimationClipIndex);
                 }
@@ -2297,7 +2310,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     root = AssembledModelUnityBuilder.BuildHierarchy(
                         selectedAssembledModel,
-                        null,
+                        selectedFile != null ? selectedFile.DisplayName : null,
                         albedoLookup);
                 }
 
@@ -2339,6 +2352,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                                 : "Models";
             var outputPath = ImportRoot + "/" + typeFolder + "/" + string.Join("/", pathParts);
             return Path.ChangeExtension(outputPath, ".asset").Replace('\\', '/');
+        }
+
+        private static string DisplayPath(GameDataFile file)
+        {
+            if (file == null)
+                return string.Empty;
+            return string.IsNullOrEmpty(file.DisplayRelativePath)
+                ? file.RelativePath
+                : file.DisplayRelativePath;
         }
 
         private static string SanitizeAssetName(string name)

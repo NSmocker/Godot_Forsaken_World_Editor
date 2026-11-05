@@ -12,13 +12,20 @@ namespace SilverEcho.ForsakenWorld
         {
             FullPath = fullPath;
             RelativePath = relativePath;
+            DisplayRelativePath = relativePath;
             Extension = Path.GetExtension(relativePath).TrimStart('.').ToLowerInvariant();
         }
 
         public string FullPath { get; }
+        /// <summary>Path as stored on disk. May be GBK bytes misread as UTF-8 (女 → Ů).</summary>
         public string RelativePath { get; }
+        /// <summary>RelativePath with reversible GBK-as-UTF-8 runs restored to CJK.</summary>
+        public string DisplayRelativePath { get; internal set; }
         public string Extension { get; }
+        /// <summary>On-disk file name. Use <see cref="DisplayName"/> in the UI.</summary>
         public string Name => Path.GetFileNameWithoutExtension(RelativePath);
+        public string DisplayName => Path.GetFileNameWithoutExtension(
+            string.IsNullOrEmpty(DisplayRelativePath) ? RelativePath : DisplayRelativePath);
     }
 
     public sealed class GameDataIndex
@@ -124,9 +131,13 @@ namespace SilverEcho.ForsakenWorld
             progress?.Invoke(scannedDirectories, files.Count);
         }
 
+        /// <summary>Cached paths rewritten to the on-disk name (Ůnpc21 → 女npc21).</summary>
+        public int RepairedPathCount { get; private set; }
+
         /// <summary>
         /// Rebuild index entries from cached relative paths (Godot ecm_gfx_index3 load).
-        /// Does not touch the filesystem beyond composing FullPath under Root.
+        /// A cache written with GBK-as-UTF-8 names (女 stored as Ů) is remapped to the
+        /// real file when that repaired path exists.
         /// </summary>
         public void ReplaceFromRelativePaths(IEnumerable<string> relativePaths)
         {
@@ -137,6 +148,7 @@ namespace SilverEcho.ForsakenWorld
             filesByRelativePath.Clear();
             filesByName.Clear();
             filesByAlias.Clear(); aliasesByName.Clear(); canonicalPaths.Clear();
+            RepairedPathCount = 0;
             foreach (var raw in relativePaths)
             {
                 if (string.IsNullOrWhiteSpace(raw))
@@ -144,8 +156,22 @@ namespace SilverEcho.ForsakenWorld
                 var relativePath = raw.Replace('\\', '/').Trim().TrimStart('/');
                 if (relativePath.Length == 0)
                     continue;
-                var fullPath = Path.GetFullPath(
-                    Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+                var fullPath = ComposeFullPath(relativePath);
+                if (!File.Exists(fullPath))
+                {
+                    var repaired = CanonicalPath(relativePath);
+                    if (!string.Equals(repaired, relativePath, StringComparison.Ordinal))
+                    {
+                        var repairedFull = ComposeFullPath(repaired);
+                        if (File.Exists(repairedFull))
+                        {
+                            relativePath = repaired;
+                            fullPath = repairedFull;
+                            RepairedPathCount++;
+                        }
+                    }
+                }
+
                 var entry = new GameDataFile(fullPath, relativePath);
                 files.Add(entry);
                 IndexFileName(entry);
@@ -171,7 +197,9 @@ namespace SilverEcho.ForsakenWorld
                     (normalizedExtension.Length == 0 ||
                         string.Equals(file.Extension, normalizedExtension, StringComparison.OrdinalIgnoreCase)) &&
                     (normalizedQuery.Length == 0 ||
-                        file.RelativePath.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0))
+                        file.RelativePath.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        (file.DisplayRelativePath != null &&
+                            file.DisplayRelativePath.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0)))
                 .ToArray();
         }
 
@@ -229,6 +257,7 @@ namespace SilverEcho.ForsakenWorld
                 filesByName[name] = list = new List<GameDataFile>();
             list.Add(file);
             string canonical = CanonicalPath(file.RelativePath);
+            file.DisplayRelativePath = canonical;
             canonicalPaths[file] = canonical;
             if (!filesByAlias.TryGetValue(canonical, out var aliases))
                 filesByAlias[canonical] = aliases = new List<GameDataFile>();
@@ -254,6 +283,12 @@ namespace SilverEcho.ForsakenWorld
                 result.Append(!string.IsNullOrEmpty(decoded) && decoded.All(c => c >= 0x3400 && c <= 0x9fff) ? decoded : run);
             }
             return result.ToString();
+        }
+
+        private string ComposeFullPath(string relativePath)
+        {
+            return Path.GetFullPath(
+                Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         }
 
         private bool IsUnderRoot(string fullPath)

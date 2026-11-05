@@ -16,10 +16,42 @@ namespace SilverEcho.ForsakenWorld.Tests
             index.ReplaceFromRelativePaths(new[] { "models/Ůnpc/Ůnpc.bon" });
             Assert.IsTrue(index.TryResolve("models/Ůnpc/女npc.bon", out var file, out var error), error);
             Assert.AreEqual("models/Ůnpc/Ůnpc.bon", file.RelativePath);
+            Assert.AreEqual("models/女npc/女npc.bon", file.DisplayRelativePath);
+            Assert.AreEqual("女npc", file.DisplayName);
             Assert.IsTrue(index.TryResolve("女npc.bon", out file, out error, true), error);
             index.ReplaceFromRelativePaths(new[] { "models/Ůnpc.bon", "other/Ůnpc.bon" });
             Assert.IsFalse(index.TryResolve("女npc.bon", out file, out error, true));
             StringAssert.Contains("ambiguous", error);
+        }
+
+        [Test]
+        public void CacheLoadRemapsMojibakePathToExistingCjkFile()
+        {
+            var table = new byte[126 * 191 * 2];
+            int offset = ((0xc5 - 0x81) * 191 + 0xae - 0x40) * 2;
+            table[offset] = 0x73;
+            table[offset + 1] = 0x59; // GBK C5 AE -> 女
+            var folder = Path.Combine(Path.GetTempPath(), "fw-mojibake-" + Guid.NewGuid().ToString("N"));
+            var realDir = Path.Combine(folder, "models", "女npc21");
+            Directory.CreateDirectory(realDir);
+            var realFile = Path.Combine(realDir, "女npc21.smd");
+            File.WriteAllText(realFile, "smd");
+            try
+            {
+                var index = new GameDataIndex(folder, new GfxTextDecoder(null, table));
+                index.ReplaceFromRelativePaths(new[] { "models/Ůnpc21/Ůnpc21.smd" });
+                Assert.AreEqual(1, index.RepairedPathCount);
+                Assert.AreEqual(1, index.Files.Count);
+                Assert.AreEqual("models/女npc21/女npc21.smd", index.Files[0].RelativePath);
+                Assert.IsTrue(File.Exists(index.Files[0].FullPath));
+                Assert.IsTrue(index.TryResolve("models/女npc21/女npc21.smd", out var resolved, out var error), error);
+                Assert.AreEqual(index.Files[0].FullPath, resolved.FullPath);
+            }
+            finally
+            {
+                if (Directory.Exists(folder))
+                    Directory.Delete(folder, true);
+            }
         }
 
         private string root;

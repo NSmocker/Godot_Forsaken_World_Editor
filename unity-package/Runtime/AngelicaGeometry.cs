@@ -19,6 +19,16 @@ namespace SilverEcho.ForsakenWorld
         public const string WindingPolicy =
             "Preserve on-disk triangle winding for Unity; Godot swaps indices 1/2 per triangle.";
 
+        /// <summary>
+        /// Angelica/DirectX stores V = 0 at the top of the texture. Unity samples V = 0
+        /// at the bottom, and its DDS importer keeps that file orientation. Without this
+        /// flip the face island is read from the clothing region of the atlas.
+        /// </summary>
+        public static float UnityTextureV(float directXVertical)
+        {
+            return 1f - directXVertical;
+        }
+
         public static float[] ToUnityColumnMajorMatrix(AngelicaMatrix matrix)
         {
             if (matrix == null)

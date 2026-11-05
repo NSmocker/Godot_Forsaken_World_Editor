@@ -152,7 +152,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                         surface.Normals[v * 3 + 2]));
                     uvs.Add(new Vector2(
                         surface.Uvs[v * 2],
-                        surface.Uvs[v * 2 + 1]));
+                        AngelicaGeometry.UnityTextureV(surface.Uvs[v * 2 + 1])));
                     boneWeights.Add(new BoneWeight
                     {
                         boneIndex0 = surface.BoneIndices[v * 4],

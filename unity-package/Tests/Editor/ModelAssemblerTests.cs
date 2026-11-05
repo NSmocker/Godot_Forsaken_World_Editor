@@ -30,6 +30,43 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void BindPoseKeepsBoneInitScaleInsteadOfInvertingIt()
+        {
+            var init = new float[16];
+            init[0] = 2f;
+            init[5] = 0.5f;
+            init[10] = 1f;
+            init[15] = 1f;
+            init[12] = 3f;
+            init[13] = 4f;
+            init[14] = 5f;
+            var relative = new float[16];
+            relative[0] = relative[5] = relative[10] = relative[15] = 1f;
+            var skeleton = new BonDocument();
+            skeleton.Bones.Add(new BonBone
+            {
+                Name = "root",
+                ParentIndex = -1,
+                RelativeMatrix = new AngelicaMatrix(relative),
+                InitMatrix = new AngelicaMatrix(init)
+            });
+
+            var model = new ModelAssembler().Assemble(
+                new SmdDocument { Version = 8 },
+                "npc.smd",
+                skeleton,
+                "npc.bon",
+                new SkiDocument[0],
+                new string[0]);
+
+            var expected = AngelicaGeometry.ToUnityColumnMajorMatrix(skeleton.Bones[0].InitMatrix);
+            var inverted = AngelicaGeometry.InvertUnityColumnMajor(expected);
+            CollectionAssert.AreEqual(expected, model.Bones[0].BindPoseMatrix);
+            Assert.AreEqual(2f, model.Bones[0].BindPoseMatrix[0], 1e-4f);
+            Assert.AreNotEqual(inverted[0], model.Bones[0].BindPoseMatrix[0]);
+        }
+
+        [Test]
         public void AssemblesBonesSurfacesAndPreservesSourceWinding()
         {
             var decoder = new GfxTextDecoder(() => Encoding.GetEncoding(28591));
@@ -55,6 +92,10 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(1, model.Skins[0].Surfaces[0].Indices[1]);
             Assert.AreEqual(2, model.Skins[0].Surfaces[0].Indices[2]);
             Assert.AreEqual("root", model.Skins[0].BindBones[0].Name);
+            // matBoneInit is already mesh-to-bone. Bind pose must not be inverted again.
+            var init = AngelicaGeometry.ToUnityColumnMajorMatrix(bon.Bones[0].InitMatrix);
+            CollectionAssert.AreEqual(init, model.Bones[0].BindPoseMatrix);
+            CollectionAssert.AreEqual(init, model.Skins[0].BindBones[0].BindPoseMatrix);
             Assert.AreEqual(0, model.Skins[0].BindBones[0].SkeletonBoneIndex);
             Assert.AreEqual(1.0f, model.Skins[0].Surfaces[0].BoneWeights[0] +
                 model.Skins[0].Surfaces[0].BoneWeights[1] +

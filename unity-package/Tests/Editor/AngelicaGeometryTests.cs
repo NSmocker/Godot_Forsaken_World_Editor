@@ -28,6 +28,13 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void FlipsDirectXTextureVForUnitySampling()
+        {
+            Assert.AreEqual(0.97f, AngelicaGeometry.UnityTextureV(0.03f), 1e-5f);
+            Assert.AreEqual(0.40f, AngelicaGeometry.UnityTextureV(0.60f), 1e-5f);
+        }
+
+        [Test]
         public void PreservesUnityWindingAndDocumentsGodotSwap()
         {
             var source = new[] { 0, 1, 2, 3, 4, 5 };
