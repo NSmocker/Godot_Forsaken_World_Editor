@@ -24,11 +24,14 @@ namespace SilverEcho.ForsakenWorld
                 return false;
             }
 
+            if (header.Compression == DdsCompression.UncompressedRgb)
+                return TryDecodeUncompressedTopMip(ddsBytes, header, out rgba, out error);
+
             if (header.Compression != DdsCompression.Dxt1 &&
                 header.Compression != DdsCompression.Dxt3 &&
                 header.Compression != DdsCompression.Dxt5)
             {
-                error = "Only DXT1/3/5 top mips can be decoded.";
+                error = "Only DXT1/3/5 and uncompressed RGB(A) top mips can be decoded.";
                 return false;
             }
 
@@ -55,6 +58,76 @@ namespace SilverEcho.ForsakenWorld
                 error = exception.Message;
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Mask-based uncompressed top mip (A8R8G8B8, X8R8G8B8, R8G8B8, A1R5G5B5, X1R5G5B5,
+        /// R5G6B5, A4R4G4B4 …) → RGBA8. Godot's own DDS loader reads these; Unity 6's
+        /// IHVImageFormatImporter rejects some (e.g. X8R8G8B8 / X1R5G5B5 in surfaces .pck),
+        /// so the importer's decode fallback must cover them. Missing alpha mask → 255.
+        /// </summary>
+        private static bool TryDecodeUncompressedTopMip(
+            byte[] data, DdsDocument header, out byte[] rgba, out string error)
+        {
+            rgba = null;
+            error = null;
+            var bits = header.RgbBitCount;
+            if (bits != 16 && bits != 24 && bits != 32)
+            {
+                error = "Unsupported uncompressed DDS bit count " + bits + ".";
+                return false;
+            }
+
+            var bpp = bits / 8;
+            var w = header.Width;
+            var h = header.Height;
+            var pitch = w * bpp;
+            if ((header.HeaderFlags & DdsHeaderParser.DdsdPitch) != 0 &&
+                header.PitchOrLinearSize >= pitch)
+                pitch = header.PitchOrLinearSize;
+            var offset = header.HeaderByteSize;
+            if ((long)offset + (long)pitch * (h - 1) + (long)w * bpp > data.Length)
+            {
+                error = "DDS payload is truncated for the top mip.";
+                return false;
+            }
+
+            rgba = new byte[w * h * 4];
+            for (var y = 0; y < h; y++)
+            {
+                var row = offset + y * pitch;
+                for (var x = 0; x < w; x++)
+                {
+                    var p = row + x * bpp;
+                    uint v = data[p];
+                    if (bpp > 1) v |= (uint)data[p + 1] << 8;
+                    if (bpp > 2) v |= (uint)data[p + 2] << 16;
+                    if (bpp > 3) v |= (uint)data[p + 3] << 24;
+                    var o = (y * w + x) * 4;
+                    rgba[o] = ExtractChannel(v, header.RedMask);
+                    rgba[o + 1] = ExtractChannel(v, header.GreenMask);
+                    rgba[o + 2] = ExtractChannel(v, header.BlueMask);
+                    rgba[o + 3] = header.AlphaMask == 0 ? (byte)255 : ExtractChannel(v, header.AlphaMask);
+                }
+            }
+
+            return true;
+        }
+
+        private static byte ExtractChannel(uint value, uint mask)
+        {
+            if (mask == 0)
+                return 0;
+            var shift = 0;
+            while (((mask >> shift) & 1u) == 0)
+                shift++;
+            var m = mask >> shift;
+            var width = 0;
+            while (((m >> width) & 1u) != 0 && width < 32)
+                width++;
+            var raw = (value & mask) >> shift;
+            var max = width >= 32 ? uint.MaxValue : (1u << width) - 1u;
+            return (byte)(((ulong)raw * 255ul + max / 2u) / max);
         }
 
         public static bool TryDetectDxt1OneBitAlpha(byte[] ddsBytes, DdsDocument header)

@@ -17,6 +17,7 @@ namespace SilverEcho.ForsakenWorld
         public const uint DdsdLinearSize = 0x80000;
         public const uint DdpfFourCC = 0x4;
         public const uint DdpfRgb = 0x40;
+        public const uint DdpfAlphaPixels = 0x1;
         public const uint DdsCaps2Volume = 0x200000;
 
         public DdsDocument Parse(byte[] bytes, string sourceName = "DDS data")
@@ -71,7 +72,13 @@ namespace SilverEcho.ForsakenWorld
                 document.PixelFormatFlags = reader.ReadUInt32LittleEndian();
                 var fourCcBytes = reader.ReadBytes(4);
                 document.FourCC = Encoding.ASCII.GetString(fourCcBytes).TrimEnd('\0');
-                reader.Skip(20); // RGB bit counts / masks
+                document.RgbBitCount = reader.ReadInt32LittleEndian();
+                document.RedMask = reader.ReadUInt32LittleEndian();
+                document.GreenMask = reader.ReadUInt32LittleEndian();
+                document.BlueMask = reader.ReadUInt32LittleEndian();
+                document.AlphaMask = reader.ReadUInt32LittleEndian();
+                if ((document.PixelFormatFlags & DdpfAlphaPixels) == 0)
+                    document.AlphaMask = 0; // X8R8G8B8 / X1R5G5B5: alpha bits unused
                 reader.Skip(4); // caps
                 document.Caps2 = reader.ReadUInt32LittleEndian();
                 reader.Skip(8); // caps3/4 + reserved2
@@ -204,7 +211,8 @@ namespace SilverEcho.ForsakenWorld
                         return checked(document.PitchOrLinearSize * document.Height);
                     }
 
-                    return checked(document.Width * document.Height * 4);
+                    return checked(document.Width * document.Height *
+                        Math.Max(1, (document.RgbBitCount > 0 ? document.RgbBitCount : 32) / 8));
                 default:
                     return 0;
             }

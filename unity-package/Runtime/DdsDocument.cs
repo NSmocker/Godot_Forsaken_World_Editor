@@ -16,6 +16,11 @@ namespace SilverEcho.ForsakenWorld
         public uint HeaderFlags { get; internal set; }
         public uint PixelFormatFlags { get; internal set; }
         public string FourCC { get; internal set; } = string.Empty;
+        public int RgbBitCount { get; internal set; }
+        public uint RedMask { get; internal set; }
+        public uint GreenMask { get; internal set; }
+        public uint BlueMask { get; internal set; }
+        public uint AlphaMask { get; internal set; }
         public uint Caps2 { get; internal set; }
         public DdsCompression Compression { get; internal set; }
         public bool IsVolume { get; internal set; }

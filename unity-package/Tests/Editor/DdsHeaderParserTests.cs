@@ -112,6 +112,69 @@ namespace SilverEcho.ForsakenWorld.Tests
             return bytes.ToArray();
         }
 
+        [Test]
+        public void DecodesX8R8G8B8AndX1R5G5B5TopMipsUnityRejects()
+        {
+            // surfaces .pck/ingame/*.dds are X8R8G8B8 (no DDPF_ALPHAPIXELS) and a facedata hair
+            // texture is X1R5G5B5; Unity 6 IHV import yields no Texture2D for them, Godot reads both.
+            var x8 = BuildMaskedRgb(2, 1, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000,
+                alphaPixels: false,
+                new byte[] { 0x30, 0x20, 0x10, 0x00, 0xFF, 0x00, 0x80, 0x00 });
+            var doc = new DdsHeaderParser().Parse(x8, "x8r8g8b8.dds");
+            Assert.AreEqual(DdsCompression.UncompressedRgb, doc.Compression);
+            Assert.AreEqual(32, doc.RgbBitCount);
+            Assert.AreEqual(0u, doc.AlphaMask);
+            byte[] rgba;
+            string error;
+            Assert.IsTrue(DdsDxtDecoder.TryDecodeTopMipRgba(x8, doc, out rgba, out error));
+            Assert.AreEqual("102030FF8000FFFF", BitConverter.ToString(rgba).Replace("-", ""));
+
+            // X1R5G5B5: pure red 0x7C00, pure blue 0x001F
+            var x1 = BuildMaskedRgb(2, 1, 16, 0x7C00, 0x03E0, 0x001F, 0x8000,
+                alphaPixels: false,
+                new byte[] { 0x00, 0x7C, 0x1F, 0x00 });
+            doc = new DdsHeaderParser().Parse(x1, "x1r5g5b5.dds");
+            Assert.AreEqual(4, doc.TopMipByteSize);
+            Assert.IsTrue(DdsDxtDecoder.TryDecodeTopMipRgba(x1, doc, out rgba, out error));
+            Assert.AreEqual("FF0000FF0000FFFF", BitConverter.ToString(rgba).Replace("-", ""));
+
+            // A1R5G5B5 with alpha flag keeps the alpha bit.
+            var a1 = BuildMaskedRgb(1, 1, 16, 0x7C00, 0x03E0, 0x001F, 0x8000,
+                alphaPixels: true, new byte[] { 0x00, 0x7C });
+            doc = new DdsHeaderParser().Parse(a1, "a1r5g5b5.dds");
+            Assert.IsTrue(DdsDxtDecoder.TryDecodeTopMipRgba(a1, doc, out rgba, out error));
+            Assert.AreEqual(0, rgba[3]);
+        }
+
+        internal static byte[] BuildMaskedRgb(int width, int height, int bits,
+            uint r, uint g, uint b, uint a, bool alphaPixels, byte[] payload)
+        {
+            var bytes = new List<byte>();
+            AddAscii(bytes, "DDS ");
+            AddInt32(bytes, 124);
+            AddInt32(bytes, 0x1 | 0x2 | 0x4 | 0x1000 | 0x8);
+            AddInt32(bytes, height);
+            AddInt32(bytes, width);
+            AddInt32(bytes, width * bits / 8);
+            AddInt32(bytes, 0);
+            AddInt32(bytes, 1);
+            for (var i = 0; i < 11; i++)
+                AddInt32(bytes, 0);
+            AddInt32(bytes, 32);
+            AddInt32(bytes, 0x40 | (alphaPixels ? 0x1 : 0));
+            AddInt32(bytes, 0);
+            AddInt32(bytes, bits);
+            AddInt32(bytes, unchecked((int)r));
+            AddInt32(bytes, unchecked((int)g));
+            AddInt32(bytes, unchecked((int)b));
+            AddInt32(bytes, unchecked((int)a));
+            AddInt32(bytes, 0x1000);
+            while (bytes.Count < 128)
+                bytes.Add(0);
+            bytes.AddRange(payload);
+            return bytes.ToArray();
+        }
+
         internal static byte[] BuildUncompressedRgba(int width, int height, bool useLinearSize)
         {
             var payload = width * height * 4;
