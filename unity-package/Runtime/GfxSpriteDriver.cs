@@ -23,7 +23,6 @@ namespace SilverEcho.ForsakenWorld
         private MeshRenderer meshRenderer;
         private Material runtimeMaterial;
         private GfxSpriteParams cachedParams;
-        private bool isId101;
         private bool header2dRender;
 
         public GfxSpriteParams Params => cachedParams ?? (cachedParams = paramsSerial.ToParams());
@@ -39,7 +38,6 @@ namespace SilverEcho.ForsakenWorld
 
             cachedParams = spriteParams;
             paramsSerial = GfxSpriteParamsSerial.FromParams(spriteParams);
-            isId101 = spriteParams.IsFullBillboardDefault;
             header2dRender = gfx2dRender;
             SystemId = spriteParams.SystemId;
 
@@ -166,12 +164,12 @@ namespace SilverEcho.ForsakenWorld
                 transform.position.z
             };
             var rot = GfxSpriteBillboard.ComputeRotation(
-                isId101,
-                p.RotFromView,
+                p.IsFullBillboardDefault,
+                p.SystemId != "102" && p.RotFromView,
                 state.Dir,
                 elemPos,
                 camPos,
-                state.Rad);
+                p.SystemId == "102" ? 0f : state.Rad);
             transform.localRotation = new Quaternion(rot[0], rot[1], rot[2], rot[3]);
 
             var s = Math.Max(0f, state.Scale);
@@ -230,13 +228,13 @@ namespace SilverEcho.ForsakenWorld
 
         private void BuildMesh(GfxSpriteParams spriteParams)
         {
-            var data = GfxSpriteQuad.Build(
+            var data = spriteParams.SystemId == "102" ? GfxSpriteQuad.BuildCross(spriteParams.Width, spriteParams.Height) : GfxSpriteQuad.Build(
                 spriteParams.Width, spriteParams.Height,
                 spriteParams.OrgPt1, spriteParams.OrgPt2);
             var mesh = new Mesh { name = "GfxSprite_" + spriteParams.SystemId };
-            var verts = new Vector3[4];
-            var uvs = new Vector2[4];
-            for (var i = 0; i < 4; i++)
+            var verts = new Vector3[data.Positions.Length / 3];
+            var uvs = new Vector2[verts.Length];
+            for (var i = 0; i < verts.Length; i++)
             {
                 verts[i] = new Vector3(
                     data.Positions[i * 3],

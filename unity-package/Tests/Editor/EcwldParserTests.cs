@@ -9,6 +9,18 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class EcwldParserTests
     {
         [Test]
+        public void ParsesPw12ModelsWithoutShowTypeAndKeepsFollowingSoundAligned()
+        {
+            var d = CreateParser().Parse(BuildEcwld(12, true), "pw12.ecwld");
+            Assert.AreEqual(12, d.Version);
+            Assert.AreEqual(1, d.Models.Count);
+            Assert.AreEqual(0, d.Models[0].ShowType);
+            Assert.AreEqual("models/npc.ecm", d.Models[0].Path);
+            Assert.AreEqual("Stand", d.Models[0].Action);
+            Assert.AreEqual("ambience/wind.wav", d.Sounds[0].Path);
+            Assert.AreEqual("fx/test.gfx", d.Effects[0].Path);
+        }
+        [Test]
         public void ParsesVersion13BlockWithDedupedObjects()
         {
             var document = CreateParser().Parse(BuildEcwld(version: 13, duplicateSecondBlock: true), "fixture.ecwld");
@@ -89,9 +101,11 @@ namespace SilverEcho.ForsakenWorld.Tests
             w.Write((ushort)0); // row
             w.Write((ushort)0); // col
             // counts: trees, water, grass, buildings, boxes, effects, models, critters, bezier, sounds
-            int[] n = { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1 };
+            int[] n = { version == 12 ? 1 : 0, 1, 0, 1, 1, 1, 1, 0, 0, 1 };
             foreach (var c in n)
                 w.Write(c);
+
+            if (version == 12) { w.Write(123u); WriteVec3(w, 1, 2, 3); }
 
             // water ref
             w.Write(exportId);
@@ -120,7 +134,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             WriteVec3(w, 4, 5, 6);
             WriteVec3(w, 0, 0, 1);
             WriteVec3(w, 0, 1, 0);
-            w.Write(2); // show_type
+            if (version >= 13) w.Write(2); // show_type was not present in PW v12
             WriteAString(w, "models/npc.ecm");
             WriteAString(w, "Stand");
 

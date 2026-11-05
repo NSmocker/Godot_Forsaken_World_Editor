@@ -101,6 +101,8 @@ namespace SilverEcho.ForsakenWorld
 
             foreach (var action in smd.Actions)
             {
+                // Old SMD actions use the tracks embedded in BON, assembled after the skeleton is read.
+                if (smd.Version < 7) continue;
                 var track = new ResolvedActionTrack
                 {
                     ActionName = action.Name,

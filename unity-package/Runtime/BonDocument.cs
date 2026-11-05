@@ -4,6 +4,8 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class BonDocument
     {
+        public uint Version { get; internal set; } = 6;
+        public StckDocument EmbeddedTracks { get; internal set; }
         public int FramesPerSecond { get; internal set; }
         public List<BonBone> Bones { get; } = new List<BonBone>();
         public List<int> JointTypes { get; } = new List<int>();

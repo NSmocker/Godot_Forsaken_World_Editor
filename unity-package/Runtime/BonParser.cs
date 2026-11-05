@@ -6,7 +6,6 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class BonParser
     {
-        private const uint SupportedVersion = 6;
         private const int MaximumStringLength = 65536;
         private const int HeaderReservedLength = 64;
 
@@ -23,14 +22,19 @@ namespace SilverEcho.ForsakenWorld
                 throw new ArgumentNullException(nameof(bytes));
 
             var reader = new BinaryDataReader(bytes, sourceName);
-            reader.ReadVersionedHeader("MOXBEKSA", new HashSet<uint> { SupportedVersion });
+            var version = reader.ReadVersionedHeader("MOXBEKSA", new HashSet<uint> { 5, 6 });
             var boneCount = ReadCount(reader, "bone");
             var jointCount = ReadCount(reader, "joint");
             var hookCount = ReadCount(reader, "hook");
-            reader.Skip(8);
+            int start = reader.ReadInt32LittleEndian(), end = reader.ReadInt32LittleEndian();
             var document = new BonDocument
             {
+                Version = version,
                 FramesPerSecond = reader.ReadInt32LittleEndian()
+            };
+            if (version < 6) document.EmbeddedTracks = new StckDocument
+            {
+                AnimationStart = start, AnimationEnd = end, FramesPerSecond = document.FramesPerSecond
             };
             reader.Skip(HeaderReservedLength);
 
@@ -64,6 +68,13 @@ namespace SilverEcho.ForsakenWorld
                     ParentBoneIndex = reader.ReadInt32LittleEndian(),
                     ChildBoneIndex = reader.ReadInt32LittleEndian(),
                     SiblingJointIndex = reader.ReadInt32LittleEndian()
+                });
+                // A3DSkeleton::Load <6: each joint is followed by its position and rotation tracks.
+                if (version < 6) document.EmbeddedTracks.Tracks.Add(new StckJointTrack
+                {
+                    JointIndex = i,
+                    Position = StckParser.ReadChannel(reader, false, sourceName),
+                    Rotation = StckParser.ReadChannel(reader, true, sourceName)
                 });
             }
 

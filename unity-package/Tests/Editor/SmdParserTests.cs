@@ -32,7 +32,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         {
             var parser = new SmdParser(new GfxTextDecoder(() => Encoding.GetEncoding(28591)));
             var unsupported = BuildFixture();
-            WriteInt32(unsupported, 8, 7);
+            WriteInt32(unsupported, 8, 9);
             var error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(unsupported, "unsupported.smd"));
             StringAssert.Contains("unsupported version", error.Message);
@@ -59,6 +59,45 @@ namespace SilverEcho.ForsakenWorld.Tests
             error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(impossible, "impossible-count.smd"));
             StringAssert.Contains("exceeds", error.Message);
+        }
+
+        [TestCase(5)]
+        [TestCase(6)]
+        [TestCase(7)]
+        public void ParsesLegacyActionsWithoutReadingNonexistentTrackFolder(int version)
+        {
+            var bytes = new List<byte>();
+            AddAscii(bytes, "MOXBDMSA");
+            AddInt32(bytes, version);
+            AddInt32(bytes, 1);
+            AddInt32(bytes, 1);
+            AddInt32(bytes, 0);
+            bytes.AddRange(new byte[64]);
+            AddString(bytes, "Skeleton.bon");
+            AddString(bytes, "Body.ski");
+            AddString(bytes, "");
+            AddString(bytes, "Run");
+            if (version == 5)
+            {
+                AddInt32(bytes, 0); // action group
+                AddInt32(bytes, 1); // joint actions
+                AddInt32(bytes, 0); // flags
+                AddInt32(bytes, 0); // joint index
+            }
+            AddSingle(bytes, 1.5f);
+            AddSingle(bytes, 24f);
+            if (version == 5)
+            {
+                AddInt32(bytes, 1); // loops
+                AddSingle(bytes, 1f); // playback speed
+            }
+            if (version >= 7) AddString(bytes, "Run.stck");
+            var doc = new SmdParser().Parse(bytes.ToArray(), "models/hero.smd");
+            Assert.AreEqual(version, doc.Version);
+            Assert.AreEqual(version == 7 ? "tcks_hero" : "", doc.TrackCollectionPath);
+            Assert.AreEqual(1.5f, doc.Actions[0].StartFrame);
+            Assert.AreEqual(24f, doc.Actions[0].EndFrame);
+            Assert.AreEqual(version == 7 ? "Run.stck" : "", doc.Actions[0].TrackPath);
         }
 
         internal static byte[] BuildFixture()

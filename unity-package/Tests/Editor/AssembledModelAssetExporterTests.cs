@@ -29,6 +29,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void ExportWritesPrefabAndMeshThroughAssetDatabase()
         {
+            var testPath = "__tests/" + System.Guid.NewGuid().ToString("N");
             var decoder = new GfxTextDecoder(() => Encoding.GetEncoding(28591));
             var ski = new SkiParser(decoder).Parse(
                 SkiParserTests.BuildFixture(),
@@ -37,11 +38,11 @@ namespace SilverEcho.ForsakenWorld.Tests
             var bon = new BonParser(decoder).Parse(BonParserTests.BuildFixture());
             var model = new ModelAssembler().Assemble(
                 smd,
-                "models/npc/Guard.smd",
+                testPath + "/Guard.smd",
                 bon,
                 "models/npc/Skeleton.bon",
                 new[] { ski },
-                new[] { "models/npc/Body.ski" });
+                new[] { testPath + "/Body.ski" });
             Assert.IsTrue(model.IsValid);
 
             // Minimal temp index so texture import reports missing rather than throwing.
@@ -54,7 +55,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 var result = AssembledModelAssetExporter.Export(
                     model,
                     index,
-                    "models/npc/Guard.smd",
+                    testPath + "/Guard.smd",
                     fromEcm: false,
                     rootName: "Guard");
 
@@ -62,7 +63,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                     Assert.Fail(result.Error ?? "(export failed with empty error)");
                 Assert.IsTrue(string.IsNullOrEmpty(result.Error));
                 Assert.AreEqual(
-                    "Assets/ForsakenWorld/Imported/Models/models/npc/Guard_model.prefab",
+                    AssembledModelAssetExporter.GetPrefabAssetPath(testPath + "/Guard.smd", false),
                     result.PrefabPath);
                 Assert.Greater(result.MeshPaths.Count, 0);
                 Assert.IsTrue(result.PrefabCreated || result.PrefabUpdated);
@@ -72,6 +73,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             }
             finally
             {
+                foreach (var category in new[] { "Models", "Meshes", "Materials", "Animations" })
+                    AssetDatabase.DeleteAsset("Assets/ForsakenWorld/Imported/" + category + "/" + testPath);
                 if (Directory.Exists(root))
                     Directory.Delete(root, true);
             }

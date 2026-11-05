@@ -7,7 +7,6 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class SmdParser
     {
-        private const uint SupportedVersion = 8;
         private const int MaximumStringLength = 65536;
         private const int HeaderReservedLength = 64;
 
@@ -26,9 +25,7 @@ namespace SilverEcho.ForsakenWorld
             var reader = new BinaryDataReader(bytes, sourceName);
             var version = reader.ReadVersionedHeader(
                 "MOXBDMSA",
-                new HashSet<uint> { SupportedVersion });
-            if (version != SupportedVersion)
-                throw new InvalidDataException(sourceName + ": unsupported SMD version.");
+                new HashSet<uint> { 5, 6, 7, 8 });
 
             var skinCount = ReadCount(reader, "skin");
             var actionCount = ReadCount(reader, "action");
@@ -37,6 +34,7 @@ namespace SilverEcho.ForsakenWorld
 
             var document = new SmdDocument
             {
+                Version = version,
                 SkeletonPath = ReadString(reader, "skeleton path", sourceName),
                 HangerCount = hangerCount
             };
@@ -46,17 +44,36 @@ namespace SilverEcho.ForsakenWorld
                 document.SkinPaths.Add(ReadString(reader, "skin path", sourceName));
 
             document.PhysicsPath = ReadString(reader, "physics path", sourceName);
-            document.TrackCollectionPath = ReadString(reader, "track collection path", sourceName);
-            EnsureCountFits(reader, actionCount, 16, "action", sourceName);
+            // A3DSkinModelMan: only v8 stores the track folder. v7 derives it from the SMD name.
+            document.TrackCollectionPath = version >= 8
+                ? ReadString(reader, "track collection path", sourceName)
+                : (version == 7 ? "tcks_" + Path.GetFileNameWithoutExtension(sourceName) : string.Empty);
+            EnsureCountFits(reader, actionCount, 12, "action", sourceName);
             for (var i = 0; i < actionCount; i++)
             {
-                document.Actions.Add(new SmdAction
+                var action = new SmdAction { Name = ReadString(reader, "action name", sourceName) };
+                if (version < 6)
                 {
-                    Name = ReadString(reader, "action name", sourceName),
-                    StartFrame = reader.ReadSingleLittleEndian(),
-                    EndFrame = reader.ReadSingleLittleEndian(),
-                    TrackPath = ReadString(reader, "action track path", sourceName)
-                });
+                    reader.Skip(4); // action group
+                    int joints = ReadCount(reader, "action joint");
+                    reader.Skip(4); // flags
+                    EnsureCountFits(reader, joints, 20, "action joint", sourceName);
+                    // A3DSkinModelActionCore uses the first FILEJOINTACTION's frame range.
+                    for (int j = 0; j < joints; j++)
+                    {
+                        reader.Skip(4);
+                        float start = reader.ReadSingleLittleEndian(), end = reader.ReadSingleLittleEndian();
+                        reader.Skip(8);
+                        if (j == 0) { action.StartFrame = start; action.EndFrame = end; }
+                    }
+                }
+                else
+                {
+                    action.StartFrame = reader.ReadSingleLittleEndian();
+                    action.EndFrame = reader.ReadSingleLittleEndian();
+                }
+                if (version >= 7) action.TrackPath = ReadString(reader, "action track path", sourceName);
+                document.Actions.Add(action);
             }
 
             return document;

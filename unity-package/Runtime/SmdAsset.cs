@@ -36,6 +36,7 @@ namespace SilverEcho.ForsakenWorld
     public sealed class SmdAsset : ScriptableObject
     {
         [SerializeField] private string sourceRelativePath;
+        [SerializeField] private uint version;
         [SerializeField] private string skeletonPath;
         [SerializeField] private string[] skinPaths = Array.Empty<string>();
         [SerializeField] private string physicsPath;
@@ -44,6 +45,7 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private SmdActionAsset[] actions = Array.Empty<SmdActionAsset>();
 
         public string SourceRelativePath => sourceRelativePath;
+        public uint Version => version;
         public string SkeletonPath => skeletonPath;
         public string[] SkinPaths => skinPaths;
         public string PhysicsPath => physicsPath;
@@ -60,6 +62,7 @@ namespace SilverEcho.ForsakenWorld
 
             var asset = CreateInstance<SmdAsset>();
             asset.sourceRelativePath = relativePath;
+            asset.version = document.Version;
             asset.skeletonPath = document.SkeletonPath;
             asset.skinPaths = document.SkinPaths.ToArray();
             asset.physicsPath = document.PhysicsPath;

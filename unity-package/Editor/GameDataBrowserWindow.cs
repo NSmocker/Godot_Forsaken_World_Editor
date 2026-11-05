@@ -19,9 +19,14 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static readonly string[] PageSizeLabels = { "50", "100", "250", "500" };
         private static GfxTextDecoder gameDataDecoder;
         private static readonly string[] FileTypes =
-            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps", "Buildings" };
+            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps", "Buildings", "Textures", "Audio", "UI XML" };
         private static readonly string[] Extensions =
-            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2", "bmd" };
+            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2", "bmd", "@textures", "@audio", "xml" };
+
+        private static readonly HashSet<string> TextureExtensions = new HashSet<string>
+            { "dds", "bmp", "tga", "png", "jpg", "jpeg" };
+        private UnityEngine.Object selectedNativeAsset;
+        private readonly Dictionary<string, int> folderFileLimits = new Dictionary<string, int>();
 
         private string rootPath;
         private string searchText = string.Empty;
@@ -87,8 +92,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void OnGUI()
         {
             EditorGUILayout.HelpBox(
-                "Browse extracted .ecm, .gfx, .smd, .bon, .ski, .stck, .trn2, .ecwld, .ecbsd, and .bmd files. Supported text, " +
-                "model, terrain, and building files can be inspected and imported as Unity assets/prefabs.",
+                "Browse extracted models, effects, maps, buildings, textures, audio and UI XML. " +
+                "Select a file to inspect it and import it into Unity.",
                 MessageType.Info);
 
             DrawRootPicker();
@@ -217,9 +222,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             // Godot: depth 0 open; expand_all opens everything; else lazy via Foldout.
             var forceOpen = folderTree != null && folderTree.ExpandAll;
-            var open = forceOpen || expandedFolders.Contains(rel) || depth == 0;
-            if (depth == 0)
-                expandedFolders.Add(rel);
+            var open = forceOpen || expandedFolders.Contains(rel);
 
             EditorGUI.BeginChangeCheck();
             open = EditorGUILayout.Foldout(open, name + "  (" + node.Count + ")", true);
@@ -247,7 +250,8 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private void DrawFolderFiles(GameDataFolderTree.FolderNode node, string rel, int depth)
         {
-            for (var i = 0; i < node.Files.Count; i++)
+            int limit = folderFileLimits.TryGetValue(rel, out var shownLimit) ? shownLimit : pageSize;
+            for (var i = 0; i < Math.Min(node.Files.Count, limit); i++)
             {
                 var fileName = node.Files[i];
                 var relative = string.IsNullOrEmpty(rel) ? fileName : rel + "/" + fileName;
@@ -256,13 +260,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (index != null)
                     index.TryResolve(relative, out file, out error);
                 var selected = file != null && selectedFile == file;
-                var shown = Path.GetFileNameWithoutExtension(fileName);
+                var shown = fileName;
                 if (GUILayout.Toggle(selected, shown, "Button", GUILayout.ExpandWidth(true)))
                 {
                     if (file != null && selectedFile != file)
                         SelectFile(file);
                 }
             }
+            if (node.Files.Count > limit && GUILayout.Button("Show more (" + (node.Files.Count - limit) + " remaining)"))
+                folderFileLimits[rel] = limit + pageSize;
         }
 
         private void DrawPaginationControls()
@@ -446,6 +452,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                         DrawWorldDetails(selectedEcwld, selectedEcbsd, selectedWorldStatus);
                     else if (selectedBuilding != null)
                         DrawBuildingDetails(selectedBuilding, selectedAssembledBuilding);
+                    else if (IsNativeResource(selectedFile))
+                        DrawNativeResource();
+                    else if (selectedFile.Extension == "xml")
+                    {
+                        if (GUILayout.Button("Open in AUI XML browser"))
+                            AuiXmlPanel.OpenFile(rootPath, selectedFile.FullPath);
+                    }
                     else
                         EditorGUILayout.HelpBox(
                             "Selected " + selectedFile.Extension.ToUpperInvariant() +
@@ -701,7 +714,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 GameDataScanCache.Snapshot snapshot;
                 if (!GameDataScanCache.TryLoad(cachePath, rootPath, out snapshot))
                     return;
-                index = new GameDataIndex(rootPath);
+                index = new GameDataIndex(rootPath, GetGameDataDecoder());
                 index.ReplaceFromRelativePaths(snapshot.RelativePaths);
                 scanTime = snapshot.ScanTime ?? string.Empty;
                 index.ScanTime = scanTime;
@@ -779,9 +792,10 @@ namespace SilverEcho.ForsakenWorld.Editor
             scannedFiles = 0;
             lastReportedDirectoryCount = 0;
             EditorPrefs.SetString(RootPreference, requestedRoot);
+            var decoder = GetGameDataDecoder();
             scanTask = Task.Run(() =>
             {
-                var newIndex = new GameDataIndex(requestedRoot);
+                var newIndex = new GameDataIndex(requestedRoot, decoder);
                 newIndex.Scan((directories, files) =>
                 {
                     Interlocked.Exchange(ref scannedDirectories, directories);
@@ -860,7 +874,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return;
             }
 
-            visibleFiles = index.Search(searchText, Extensions[selectedFileType]);
+            var filter = Extensions[Mathf.Clamp(selectedFileType, 0, Extensions.Length - 1)];
+            visibleFiles = filter == "@textures"
+                ? index.Search(searchText).Where(f => TextureExtensions.Contains(f.Extension)).ToArray()
+                : filter == "@audio"
+                    ? index.Search(searchText).Where(f => AssembledAudioImporter.IsSupportedExtension("." + f.Extension)).ToArray()
+                    : index.Search(searchText, filter);
             RebuildFolderTree();
             pageIndex = 0;
             RefreshPagination();
@@ -890,6 +909,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private void SelectFile(GameDataFile file)
         {
             selectedFile = file;
+            selectedNativeAsset = null;
             selectedGfx = null;
             selectedEcm = null;
             selectedSmd = null;
@@ -1226,10 +1246,52 @@ namespace SilverEcho.ForsakenWorld.Editor
             return gameDataDecoder;
         }
 
+        private static bool IsNativeResource(GameDataFile file)
+        {
+            return file != null && (TextureExtensions.Contains(file.Extension) ||
+                AssembledAudioImporter.IsSupportedExtension("." + file.Extension));
+        }
+
+        private void DrawNativeResource()
+        {
+            EditorGUILayout.HelpBox("Import this resource to view it in Unity's Inspector. Audio playback is available in the AudioClip preview.", MessageType.Info);
+            if (selectedNativeAsset != null)
+            {
+                EditorGUILayout.ObjectField("Imported asset", selectedNativeAsset, typeof(UnityEngine.Object), false);
+                if (selectedNativeAsset is Texture2D texture)
+                {
+                    EditorGUILayout.LabelField(texture.width + " × " + texture.height);
+                    var rect = GUILayoutUtility.GetRect(100, 300, GUILayout.ExpandWidth(true));
+                    EditorGUI.DrawPreviewTexture(rect, texture, null, ScaleMode.ScaleToFit);
+                }
+            }
+        }
+
+        private void ImportNativeResource()
+        {
+            try
+            {
+                string error;
+                if (TextureExtensions.Contains(selectedFile.Extension))
+                {
+                    var result = AssembledTextureImporter.ImportOrUpdate(selectedFile.FullPath, selectedFile.RelativePath);
+                    selectedNativeAsset = result.Texture; error = result.Error;
+                }
+                else
+                {
+                    var result = AssembledAudioImporter.ImportGameDataFile(selectedFile);
+                    selectedNativeAsset = result.Clip; error = result.Error;
+                }
+                status = selectedNativeAsset != null ? "Opened " + selectedFile.RelativePath : "Import failed: " + error;
+                if (selectedNativeAsset != null) { Selection.activeObject = selectedNativeAsset; EditorGUIUtility.PingObject(selectedNativeAsset); }
+            }
+            catch (Exception e) { status = "Import failed: " + e.Message; }
+        }
+
         private bool CanImportSelectedFile()
         {
             return selectedFile != null &&
-                ((selectedFile.Extension == "gfx" && selectedGfx != null) ||
+                (IsNativeResource(selectedFile) || (selectedFile.Extension == "gfx" && selectedGfx != null) ||
                     (selectedFile.Extension == "ecm" &&
                         selectedEcm != null &&
                         string.IsNullOrEmpty(selectedEcm.Error)) ||
@@ -1243,6 +1305,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             if (!CanImportSelectedFile())
                 return;
+
+            if (IsNativeResource(selectedFile)) { ImportNativeResource(); return; }
 
             UnityEngine.Object newAsset = null;
             try

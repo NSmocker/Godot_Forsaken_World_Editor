@@ -36,7 +36,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         {
             var parser = new BonParser(new GfxTextDecoder(() => Encoding.GetEncoding(28591)));
             var unsupported = BuildFixture();
-            WriteInt32(unsupported, 8, 5);
+            WriteInt32(unsupported, 8, 7);
             var error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(unsupported, "unsupported.bon"));
             StringAssert.Contains("unsupported version", error.Message);
@@ -69,6 +69,38 @@ namespace SilverEcho.ForsakenWorld.Tests
             error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(impossible, "impossible-count.bon"));
             StringAssert.Contains("exceeds", error.Message);
+        }
+
+        [Test]
+        public void ParsesEmbeddedVersionFiveTracksAndFollowingHooks()
+        {
+            var bytes = new List<byte>(BuildFixture());
+            var channels = new List<byte>();
+            foreach (int components in new[] { 3, 4 })
+            {
+                AddInt32(channels, 1);
+                AddInt32(channels, 1);
+                AddInt32(channels, 30);
+                for (int i = 0; i < components; i++) AddSingle(channels, i == components - 1 ? 1f : 0f);
+                AddInt32(channels, 0);
+                AddInt32(channels, 1000);
+                AddInt32(channels, 0);
+                AddInt32(channels, 0);
+            }
+            bytes.InsertRange(bytes.Count - 80, channels);
+            var data = bytes.ToArray();
+            WriteInt32(data, 8, 5);
+            WriteInt32(data, 28, 30);
+            var document = new BonParser().Parse(data, "legacy.bon");
+            Assert.AreEqual(5, document.Version);
+            Assert.AreEqual(30, document.EmbeddedTracks.AnimationEnd);
+            Assert.AreEqual(1, document.EmbeddedTracks.Tracks.Count);
+            Assert.AreEqual(1f, document.EmbeddedTracks.Tracks[0].Position.Keys[2]);
+            Assert.AreEqual(1f, document.EmbeddedTracks.Tracks[0].Rotation.Keys[3]);
+            Assert.AreEqual("hand", document.Hooks[0].Name);
+            var asset = BonAsset.CreateFrom("legacy.bon", document);
+            try { Assert.AreEqual(1f, asset.EmbeddedTracks[0].Rotation.Keys[3]); }
+            finally { UnityEngine.Object.DestroyImmediate(asset); }
         }
 
         internal static byte[] BuildFixture()

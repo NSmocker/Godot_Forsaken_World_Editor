@@ -4,6 +4,7 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class SkiDocument
     {
+        public uint Version { get; internal set; } = 9;
         public float MinimumWeight { get; internal set; }
         public int SkeletonBoneCount { get; internal set; }
         public List<string> BoneNames { get; } = new List<string>();

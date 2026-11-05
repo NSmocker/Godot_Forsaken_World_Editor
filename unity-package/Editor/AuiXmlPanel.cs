@@ -15,8 +15,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private const string PrefRoot = "ForsakenWorld.Aui.Root";
         private const string PrefLang = "ForsakenWorld.Aui.Lang";
 
-        private static readonly string[] LanguageLabels = { "Deutsch", "Englisch", "Französisch" };
-        private static readonly string[] LanguageCodes = { "Deu", "Eng", "Franz" };
+        private static readonly string[] LanguageLabels = { "Deutsch", "Englisch", "Französisch", "Root / PW", "Русский" };
+        private static readonly string[] LanguageCodes = { "Deu", "Eng", "Franz", "", "Rus" };
 
         private string rootPath = string.Empty;
         private int languageIndex;
@@ -32,6 +32,19 @@ namespace SilverEcho.ForsakenWorld.Editor
         public static void Open()
         {
             GetWindow<AuiXmlPanel>("AUI-XML");
+        }
+
+        public static void OpenFile(string dataRoot, string path)
+        {
+            var window = GetWindow<AuiXmlPanel>("AUI-XML");
+            window.rootPath = dataRoot;
+            window.languageIndex = 3;
+            EditorPrefs.SetString(PrefRoot, dataRoot);
+            EditorPrefs.SetInt(PrefLang, window.languageIndex);
+            window.RebuildUi();
+            window.selectedFile = path;
+            window.status = "Selected " + Path.GetFileName(path);
+            window.Repaint();
         }
 
         private void OnEnable()

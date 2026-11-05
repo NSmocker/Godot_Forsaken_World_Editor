@@ -113,13 +113,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
             try
             {
-                var ext = (Path.GetExtension(path) ?? string.Empty).ToLowerInvariant();
+                var ext = TextureFileFormat.DetectFile(path);
                 if (ext == ".dds")
                     return TerrainTextureBuilder.DecodeDds(File.ReadAllBytes(path), path);
 
                 var imported = AssembledTextureImporter.ImportOrUpdate(path, path);
                 if (imported.Texture != null)
-                    return imported.Texture;
+                    return TerrainTextureBuilder.Readback(imported.Texture,
+                        imported.Texture.width, imported.Texture.height, true);
 
                 Warn("Bild " + Path.GetFileName(path) + " nicht lesbar" +
                      (string.IsNullOrEmpty(imported.Error) ? "" : (": " + imported.Error)));

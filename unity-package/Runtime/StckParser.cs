@@ -42,7 +42,7 @@ namespace SilverEcho.ForsakenWorld
             return document;
         }
 
-        private static StckChannel ReadChannel(
+        internal static StckChannel ReadChannel(
             BinaryDataReader reader,
             bool quaternion,
             string sourceName)

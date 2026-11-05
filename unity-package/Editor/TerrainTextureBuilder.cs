@@ -47,7 +47,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         public static Texture2D LoadSource(GameDataFile file)
         {
-            if (file.Extension == "dds") return DecodeDds(File.ReadAllBytes(file.FullPath), file.RelativePath);
+            if (TextureFileFormat.DetectFile(file.FullPath) == ".dds") return DecodeDds(File.ReadAllBytes(file.FullPath), file.RelativePath);
             // Unity imports BMP/TGA as well as PNG/JPEG. Read back as gamma RGB and
             // reverse Unity's image orientation to the file-row convention used by DDS/masks.
             var imported = AssembledTextureImporter.ImportOrUpdate(file.FullPath, file.RelativePath);
@@ -87,7 +87,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             finally { UnityEngine.Object.DestroyImmediate(resized); }
         }
 
-        private static Texture2D Readback(Texture source, int width, int height, bool encodeSrgb)
+        public static Texture2D Readback(Texture source, int width, int height, bool encodeSrgb)
         {
             var previous = RenderTexture.active;
             bool write = GL.sRGBWrite;

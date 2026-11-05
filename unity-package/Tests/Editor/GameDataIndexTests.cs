@@ -6,6 +6,22 @@ namespace SilverEcho.ForsakenWorld.Tests
 {
     public sealed class GameDataIndexTests
     {
+        [Test]
+        public void ResolvesUnpackerEncodingAliasesWithoutChangingRealPaths()
+        {
+            var table = new byte[126 * 191 * 2];
+            int offset = ((0xc5 - 0x81) * 191 + 0xae - 0x40) * 2;
+            table[offset] = 0x73; table[offset + 1] = 0x59; // GBK C5 AE -> 女
+            var index = new GameDataIndex(Path.GetTempPath(), new GfxTextDecoder(null, table));
+            index.ReplaceFromRelativePaths(new[] { "models/Ůnpc/Ůnpc.bon" });
+            Assert.IsTrue(index.TryResolve("models/Ůnpc/女npc.bon", out var file, out var error), error);
+            Assert.AreEqual("models/Ůnpc/Ůnpc.bon", file.RelativePath);
+            Assert.IsTrue(index.TryResolve("女npc.bon", out file, out error, true), error);
+            index.ReplaceFromRelativePaths(new[] { "models/Ůnpc.bon", "other/Ůnpc.bon" });
+            Assert.IsFalse(index.TryResolve("女npc.bon", out file, out error, true));
+            StringAssert.Contains("ambiguous", error);
+        }
+
         private string root;
 
         [SetUp]

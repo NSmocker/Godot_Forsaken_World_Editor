@@ -173,6 +173,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             var mesh = new Mesh();
+            if (positions.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.name = Sanitize(skin.SourcePath, "AssembledSkin");
             mesh.SetVertices(positions);
             mesh.SetNormals(normals);

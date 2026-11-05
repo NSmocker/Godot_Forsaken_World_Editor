@@ -7,6 +7,27 @@ namespace SilverEcho.ForsakenWorld.Tests
 {
     public sealed class GfxSpriteTests
     {
+        [Test]
+        public void CrossDecalUsesTwoCenteredPlanesAndARealDriver()
+        {
+            var doc = new GfxParser().Parse("MOXTVersion: 92\nGFXELEMENTID: 102\nWidth: 2\nHeight: 3\nKEYPOINTCOUNT: 0\n");
+            var plan = GfxRuntimePlanner.Build(doc);
+            Assert.IsFalse(plan.Elements[0].IsStub);
+            var go = new GameObject("cross-test");
+            try
+            {
+                var driver = go.AddComponent<GfxSpriteDriver>();
+                driver.Configure(GfxSpriteParams.FromProperties(doc.Elements[0].Properties, "102"), null, false, new List<string>());
+                var mesh = go.GetComponent<MeshFilter>().sharedMesh;
+                Assert.AreEqual(8, mesh.vertexCount);
+                Assert.AreEqual(12, mesh.triangles.Length);
+                Assert.AreEqual(new Vector3(4, 6, 4), mesh.bounds.size);
+                Assert.AreEqual(0f, mesh.vertices[0].z);
+                Assert.AreEqual(0f, mesh.vertices[4].x);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         private const string SpriteGfx =
             "MOXTVersion: 92\n" +
             "DedaultScale: 1\n" +

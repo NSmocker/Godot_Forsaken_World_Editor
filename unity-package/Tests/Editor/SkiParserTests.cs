@@ -41,7 +41,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         {
             var parser = new SkiParser(new GfxTextDecoder(() => Encoding.GetEncoding(28591)));
             var unsupported = BuildFixture();
-            WriteInt32(unsupported, 8, 8);
+            WriteInt32(unsupported, 8, 10);
             var error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(unsupported, "unsupported.ski"));
             StringAssert.Contains("unsupported version", error.Message);
@@ -76,6 +76,21 @@ namespace SilverEcho.ForsakenWorld.Tests
             error = Assert.Throws<InvalidDataException>(
                 () => parser.Parse(badIndex, "bad-index.ski"));
             StringAssert.Contains("outside the vertex range", error.Message);
+        }
+
+        [Test]
+        public void ParsesVersionEightWithoutNamedBonePalette()
+        {
+            var bytes = new List<byte>(BuildFixture());
+            bytes.RemoveRange(108, 8); // v9 length-prefixed "root" palette entry
+            var data = bytes.ToArray();
+            WriteInt32(data, 8, 8);
+            var doc = new SkiParser().Parse(data, "legacy.ski");
+            Assert.AreEqual(8, doc.Version);
+            Assert.IsEmpty(doc.BoneNames);
+            Assert.AreEqual("body.dds", doc.TexturePaths[0]);
+            Assert.AreEqual(2, doc.SkinMeshes[0].BoneIndices[2]);
+            Assert.AreEqual("rigid", doc.RigidMeshes[0].Name);
         }
 
         internal static byte[] BuildFixture()

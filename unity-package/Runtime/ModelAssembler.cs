@@ -87,6 +87,26 @@ namespace SilverEcho.ForsakenWorld
                 }
             }
 
+            if (smd.Version < 7 && skeleton.EmbeddedTracks != null)
+            {
+                var sources = new List<ActionAnimationSource>();
+                foreach (var action in smd.Actions)
+                {
+                    sources.Add(new ActionAnimationSource
+                    {
+                        ActionName = action.Name, StartFrame = action.StartFrame, EndFrame = action.EndFrame,
+                        TrackSourcePath = skeletonRelativePath, Track = skeleton.EmbeddedTracks
+                    });
+                    if (resolution != null) model.Actions.Add(new AssembledActionReference
+                    {
+                        Name = action.Name, StartFrame = action.StartFrame, EndFrame = action.EndFrame,
+                        TrackSourcePath = skeletonRelativePath, TrackResolved = true
+                    });
+                }
+                new ModelAnimationAssembler().Build(model, sources);
+            }
+            else if (smd.Version < 7 && smd.Actions.Count > 0)
+                model.Warnings.Add("Legacy SMD actions require embedded BON tracks; this skeleton has none.");
             return model;
         }
 
@@ -155,7 +175,9 @@ namespace SilverEcho.ForsakenWorld
             for (var i = 0; i < model.Bones.Count; i++)
                 skeletonByName[model.Bones[i].Name] = i;
 
-            var skinBoneToSkeleton = new int[ski.BoneNames.Count];
+            var skinBoneToSkeleton = new int[ski.Version < 9 ? ski.SkeletonBoneCount : ski.BoneNames.Count];
+            if (ski.Version < 9)
+                for (int i = 0; i < skinBoneToSkeleton.Length; i++) skinBoneToSkeleton[i] = i < model.Bones.Count ? i : -1;
             for (var i = 0; i < ski.BoneNames.Count; i++)
             {
                 int skeletonIndex;

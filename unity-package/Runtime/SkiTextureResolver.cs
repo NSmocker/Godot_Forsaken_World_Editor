@@ -134,6 +134,7 @@ namespace SilverEcho.ForsakenWorld
 
             try
             {
+                if (TextureFileFormat.DetectFile(result.Resource.File.FullPath) != ".dds") return;
                 result.DdsHeader = new DdsHeaderParser().ParseFile(result.Resource.File.FullPath);
             }
             catch (Exception exception)

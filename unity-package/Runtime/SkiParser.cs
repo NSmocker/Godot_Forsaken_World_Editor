@@ -6,7 +6,6 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class SkiParser
     {
-        private const uint SupportedVersion = 9;
         private const int MaximumStringLength = 65536;
         private const int HeaderReservedLength = 52;
         private const int SkinVertexStride = 48;
@@ -25,7 +24,7 @@ namespace SilverEcho.ForsakenWorld
                 throw new ArgumentNullException(nameof(bytes));
 
             var reader = new BinaryDataReader(bytes, sourceName);
-            reader.ReadVersionedHeader("MOXBIKSA", new HashSet<uint> { SupportedVersion });
+            var version = reader.ReadVersionedHeader("MOXBIKSA", new HashSet<uint> { 8, 9 });
             var skinMeshCount = ReadCount(reader, "skin mesh", sourceName);
             var rigidMeshCount = ReadCount(reader, "rigid mesh", sourceName);
             var morphMeshCount = ReadCount(reader, "morph mesh", sourceName);
@@ -49,11 +48,14 @@ namespace SilverEcho.ForsakenWorld
 
             var document = new SkiDocument
             {
+                Version = version,
                 MinimumWeight = minimumWeight,
                 SkeletonBoneCount = skeletonBoneCount
             };
-            EnsureCountFits(reader, boneCount, 4, "bone", sourceName);
-            for (var i = 0; i < boneCount; i++)
+            // A3DSkin::Load: the palette of named bones was added in v9.
+            int namedBones = version >= 9 ? boneCount : 0;
+            EnsureCountFits(reader, namedBones, 4, "bone", sourceName);
+            for (var i = 0; i < namedBones; i++)
                 document.BoneNames.Add(ReadLengthPrefixedString(reader, "bone name", sourceName));
 
             EnsureCountFits(reader, textureCount, 4, "texture", sourceName);

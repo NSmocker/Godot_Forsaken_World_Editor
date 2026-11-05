@@ -4,6 +4,7 @@ namespace SilverEcho.ForsakenWorld
 {
     public sealed class SmdDocument
     {
+        public uint Version { get; internal set; } = 8;
         public string SkeletonPath { get; set; } = string.Empty;
         public List<string> SkinPaths { get; } = new List<string>();
         public string PhysicsPath { get; set; } = string.Empty;

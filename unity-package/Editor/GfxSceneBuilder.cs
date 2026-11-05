@@ -115,7 +115,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                         "GFX element ID " + el.SystemId +
                         " stubbed (visual builder not ported yet).");
                 }
-                else if (el.SystemId == "100" || el.SystemId == "101")
+                else if (el.SystemId == "100" || el.SystemId == "101" || el.SystemId == "102")
                 {
                     driver = AttachSprite(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }

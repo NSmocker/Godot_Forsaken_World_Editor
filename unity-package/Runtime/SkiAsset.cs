@@ -102,6 +102,7 @@ namespace SilverEcho.ForsakenWorld
     public sealed class SkiAsset : ScriptableObject
     {
         [SerializeField] private string sourceRelativePath;
+        [SerializeField] private uint version;
         [SerializeField] private float minimumWeight;
         [SerializeField] private int skeletonBoneCount;
         [SerializeField] private string[] boneNames = Array.Empty<string>();
@@ -111,6 +112,7 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private SkiMeshAsset[] rigidMeshes = Array.Empty<SkiMeshAsset>();
 
         public string SourceRelativePath => sourceRelativePath;
+        public uint Version => version;
         public float MinimumWeight => minimumWeight;
         public int SkeletonBoneCount => skeletonBoneCount;
         public string[] BoneNames => boneNames;
@@ -128,6 +130,7 @@ namespace SilverEcho.ForsakenWorld
 
             var asset = CreateInstance<SkiAsset>();
             asset.sourceRelativePath = relativePath;
+            asset.version = document.Version;
             asset.minimumWeight = document.MinimumWeight;
             asset.skeletonBoneCount = document.SkeletonBoneCount;
             asset.boneNames = document.BoneNames.ToArray();

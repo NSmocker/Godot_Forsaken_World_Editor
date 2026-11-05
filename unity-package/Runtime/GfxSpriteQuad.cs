@@ -8,6 +8,27 @@ namespace SilverEcho.ForsakenWorld
     /// </summary>
     public static class GfxSpriteQuad
     {
+        /// <summary>A3DDecalEx::Update_Billboard (ID 102): two centered, perpendicular planes.</summary>
+        public static Data BuildCross(float width, float height)
+        {
+            var plane = Build(width, height, 0.5f, 0.5f);
+            var result = new Data { Positions = new float[24], Uvs = new float[16], Triangles = new int[12] };
+            Array.Copy(plane.Positions, result.Positions, 12);
+            Array.Copy(plane.Uvs, result.Uvs, 8);
+            Array.Copy(plane.Uvs, 0, result.Uvs, 8, 8);
+            for (int i = 0; i < 4; i++)
+            {
+                result.Positions[12 + i * 3 + 1] = plane.Positions[i * 3 + 1];
+                result.Positions[12 + i * 3 + 2] = -plane.Positions[i * 3];
+            }
+            for (int i = 0; i < 6; i++)
+            {
+                result.Triangles[i] = plane.Triangles[i];
+                result.Triangles[6 + i] = plane.Triangles[i] + 4;
+            }
+            return result;
+        }
+
         public sealed class Data
         {
             public float[] Positions = Array.Empty<float>(); // xyz * 4

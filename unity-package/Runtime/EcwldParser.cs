@@ -5,8 +5,7 @@ using System.IO;
 namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
-    /// Parses Angelica .ecwld world files (versions 13 / 14) matching
-    /// gfx_importer/angelica_world.gd read_world. Runtime-only, Unity-free.
+    /// Reads PW v12 (PW_ClientSource/EC_WorldFile.h) and FW v13/v14 world records.
     /// </summary>
     public sealed class EcwldParser
     {
@@ -17,7 +16,7 @@ namespace SilverEcho.ForsakenWorld
         public const int EcModelSize = 44;
 
         private static readonly Dictionary<uint, int> SoundSizeByVersion =
-            new Dictionary<uint, int> { { 13u, 32 }, { 14u, 52 } };
+            new Dictionary<uint, int> { { 12u, 32 }, { 13u, 32 }, { 14u, 52 } };
 
         private readonly GfxTextDecoder decoder;
 
@@ -41,7 +40,7 @@ namespace SilverEcho.ForsakenWorld
             var version = reader.ReadUInt32LittleEndian();
             if (!SoundSizeByVersion.ContainsKey(version))
                 throw new InvalidDataException(
-                    sourceName + ": Version " + version + " wird nicht unterstützt (nur 13 / 14)");
+                    sourceName + ": unsupported world version " + version + " (supported: 12, 13, 14)");
 
             reader.Seek(24);
             var numBlock = reader.ReadInt32LittleEndian();
@@ -76,10 +75,14 @@ namespace SilverEcho.ForsakenWorld
                 reader.Skip(4); // row/col WORDs
                 var counts = new int[10];
                 for (var k = 0; k < 10; k++)
+                {
                     counts[k] = reader.ReadInt32LittleEndian();
+                    if (counts[k] < 0 || counts[k] > reader.Length / 4)
+                        throw new InvalidDataException(sourceName + ": invalid object count in block " + i);
+                }
 
-                // Skip trees (n[0] * 8).
-                SkipRefs(reader, counts[0]);
+                // PW stores ECWDFILETREE5 (type + XYZ), not a BSD data reference.
+                reader.Skip(checked(counts[0] * (version == 12 ? 16 : 8)));
 
                 // Water refs.
                 for (var k = 0; k < counts[1]; k++)
@@ -130,7 +133,7 @@ namespace SilverEcho.ForsakenWorld
 
                 for (var k = 0; k < counts[6]; k++)
                 {
-                    if (reader.Remaining < EcModelSize + 8)
+                    if (reader.Remaining < (version == 12 ? 40 : EcModelSize) + 8)
                         throw new InvalidDataException(sourceName + ": Block " + i + " abgeschnitten");
                     var model = new EcwldModel
                     {
@@ -138,7 +141,7 @@ namespace SilverEcho.ForsakenWorld
                         Pos = ReadVec3(reader),
                         Dir = ReadVec3(reader),
                         Up = ReadVec3(reader),
-                        ShowType = reader.ReadInt32LittleEndian()
+                        ShowType = version >= 13 ? reader.ReadInt32LittleEndian() : 0
                     };
                     model.Path = ReadAString(reader);
                     model.Action = ReadAString(reader);

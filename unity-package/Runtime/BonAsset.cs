@@ -96,6 +96,10 @@ namespace SilverEcho.ForsakenWorld
     {
         [SerializeField] private string sourceRelativePath;
         [SerializeField] private int framesPerSecond;
+        [SerializeField] private uint version;
+        [SerializeField] private int animationStart;
+        [SerializeField] private int animationEnd;
+        [SerializeField] private StckJointTrackAsset[] embeddedTracks = Array.Empty<StckJointTrackAsset>();
         [SerializeField] private BonBoneAsset[] bones = Array.Empty<BonBoneAsset>();
         [SerializeField] private int[] jointTypes = Array.Empty<int>();
         [SerializeField] private BonJointAsset[] joints = Array.Empty<BonJointAsset>();
@@ -103,6 +107,10 @@ namespace SilverEcho.ForsakenWorld
 
         public string SourceRelativePath => sourceRelativePath;
         public int FramesPerSecond => framesPerSecond;
+        public uint Version => version;
+        public int AnimationStart => animationStart;
+        public int AnimationEnd => animationEnd;
+        public StckJointTrackAsset[] EmbeddedTracks => embeddedTracks;
         public BonBoneAsset[] Bones => bones;
         public int[] JointTypes => jointTypes;
         public BonJointAsset[] Joints => joints;
@@ -118,6 +126,13 @@ namespace SilverEcho.ForsakenWorld
             var asset = CreateInstance<BonAsset>();
             asset.sourceRelativePath = relativePath;
             asset.framesPerSecond = document.FramesPerSecond;
+            asset.version = document.Version;
+            if (document.EmbeddedTracks != null)
+            {
+                asset.animationStart = document.EmbeddedTracks.AnimationStart;
+                asset.animationEnd = document.EmbeddedTracks.AnimationEnd;
+                asset.embeddedTracks = document.EmbeddedTracks.Tracks.Select(StckJointTrackAsset.FromTrack).ToArray();
+            }
             asset.bones = document.Bones.Select(BonBoneAsset.FromBone).ToArray();
             asset.jointTypes = document.JointTypes.ToArray();
             asset.joints = document.Joints.Select(BonJointAsset.FromJoint).ToArray();

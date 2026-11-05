@@ -67,6 +67,16 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             var extension = Path.GetExtension(sourceFullPath) ?? string.Empty;
+            var detected = TextureFileFormat.DetectFile(sourceFullPath);
+            if (detected != null && !extension.Equals(detected, StringComparison.OrdinalIgnoreCase) &&
+                !(extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) && detected == ".jpg"))
+            {
+                // Keep the original filename as part of the destination so foo.dds (TGA)
+                // cannot overwrite an unrelated foo.tga. Never rename the source data.
+                sourceRelativePath += detected;
+                extension = detected;
+                header = null;
+            }
             var isDds = extension.Equals(".dds", StringComparison.OrdinalIgnoreCase);
             var preferNative = !isDds || header == null || header.LikelyUnityNativeImport;
 
@@ -272,7 +282,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             var result = new ImportResult
             {
-                UsedNativeDds = (Path.GetExtension(sourceFullPath) ?? string.Empty)
+                UsedNativeDds = (Path.GetExtension(sourceRelativePath) ?? string.Empty)
                     .Equals(".dds", StringComparison.OrdinalIgnoreCase),
                 AssetPath = GetTextureAssetPath(sourceRelativePath, decodedAsset: false)
             };

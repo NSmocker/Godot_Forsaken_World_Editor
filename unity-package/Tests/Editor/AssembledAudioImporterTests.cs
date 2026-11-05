@@ -29,6 +29,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void ImportOrUpdateCopiesWavAndLoadsAudioClip()
         {
+            var relative = "__tests/" + System.Guid.NewGuid().ToString("N") + "/bang.wav";
             var srcDir = Path.Combine(Path.GetTempPath(), "fw-audio-import-" + Path.GetRandomFileName());
             Directory.CreateDirectory(srcDir);
             try
@@ -44,12 +45,12 @@ namespace SilverEcho.ForsakenWorld.Tests
                     0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
                 });
 
-                var result = AssembledAudioImporter.ImportOrUpdate(src, "sfx/bang.wav");
+                var result = AssembledAudioImporter.ImportOrUpdate(src, relative);
                 Assert.IsNotNull(result.Clip);
                 Assert.IsTrue(string.IsNullOrEmpty(result.Error));
                 Assert.IsTrue(result.Created || result.Updated);
                 Assert.AreEqual(
-                    "Assets/ForsakenWorld/Imported/Sounds/sfx/bang.wav",
+                    AssembledAudioImporter.GetSoundAssetPath(relative),
                     result.AssetPath);
                 Assert.IsTrue(File.Exists(AssembledAudioImporter.AssetPathToAbsolute(result.AssetPath)));
                 Assert.AreEqual(
@@ -58,6 +59,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             }
             finally
             {
+                AssetDatabase.DeleteAsset(AssembledAudioImporter.GetSoundAssetPath(relative));
                 if (Directory.Exists(srcDir))
                     Directory.Delete(srcDir, true);
             }

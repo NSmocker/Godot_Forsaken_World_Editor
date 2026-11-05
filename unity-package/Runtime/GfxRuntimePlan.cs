@@ -62,7 +62,7 @@ namespace SilverEcho.ForsakenWorld
             };
 
         // IDs with a real Unity visual builder in this package.
-        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "120", "121", "122", "123", "124", "125", "130", "140", "150", "151", "152", "160", "170", "180", "190", "200", "210", "211", "220", "230" };
+        private static readonly string[] DefaultPortedIds = { "100", "101", "102", "110", "120", "121", "122", "123", "124", "125", "130", "140", "150", "151", "152", "160", "170", "180", "190", "200", "210", "211", "220", "230" };
 
         private static readonly HashSet<string> PortedIds =
             new HashSet<string>(DefaultPortedIds, StringComparer.Ordinal);

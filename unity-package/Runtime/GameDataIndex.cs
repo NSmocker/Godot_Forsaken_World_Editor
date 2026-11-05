@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace SilverEcho.ForsakenWorld
 {
@@ -27,7 +28,7 @@ namespace SilverEcho.ForsakenWorld
             {
                 ".bmd", ".bon", ".dat", ".ecbsd", ".ecm", ".ecwld", ".gfx", ".ski", ".smd", ".stck", ".trn2", ".t2bk", ".t2mk", ".t2lm", ".wav",
                 // Textures referenced by SKI / materials (DDS policy: Unity-native import).
-                ".dds", ".bmp", ".tga", ".png", ".jpg", ".jpeg"
+                ".dds", ".bmp", ".tga", ".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".xml"
             };
 
         private readonly string root;
@@ -35,13 +36,22 @@ namespace SilverEcho.ForsakenWorld
         private readonly IReadOnlyList<GameDataFile> readOnlyFiles;
         private readonly Dictionary<string, List<GameDataFile>> filesByRelativePath =
             new Dictionary<string, List<GameDataFile>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<GameDataFile>> filesByName =
+            new Dictionary<string, List<GameDataFile>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<GameDataFile>> filesByAlias =
+            new Dictionary<string, List<GameDataFile>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<GameDataFile>> aliasesByName =
+            new Dictionary<string, List<GameDataFile>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<GameDataFile, string> canonicalPaths = new Dictionary<GameDataFile, string>();
+        private readonly GfxTextDecoder pathDecoder;
 
-        public GameDataIndex(string dataRoot)
+        public GameDataIndex(string dataRoot, GfxTextDecoder pathDecoder = null)
         {
             if (string.IsNullOrWhiteSpace(dataRoot))
                 throw new ArgumentException("A game data root is required.", nameof(dataRoot));
 
             root = Path.GetFullPath(dataRoot);
+            this.pathDecoder = pathDecoder ?? new GfxTextDecoder();
             readOnlyFiles = files.AsReadOnly();
         }
 
@@ -56,6 +66,8 @@ namespace SilverEcho.ForsakenWorld
 
             files.Clear();
             filesByRelativePath.Clear();
+            filesByName.Clear();
+            filesByAlias.Clear(); aliasesByName.Clear(); canonicalPaths.Clear();
 
             var pendingDirectories = new Stack<string>();
             pendingDirectories.Push(root);
@@ -64,23 +76,25 @@ namespace SilverEcho.ForsakenWorld
             while (pendingDirectories.Count > 0)
             {
                 var directory = pendingDirectories.Pop();
+                var info = new DirectoryInfo(directory);
                 scannedDirectories++;
-                foreach (var subdirectory in Directory.GetDirectories(directory))
+                foreach (var subdirectory in info.EnumerateDirectories())
                 {
-                    var attributes = File.GetAttributes(subdirectory);
-                    if ((attributes & FileAttributes.ReparsePoint) == 0)
-                        pendingDirectories.Push(subdirectory);
+                    if (subdirectory.Name != ".git" && (subdirectory.Attributes & FileAttributes.ReparsePoint) == 0)
+                        pendingDirectories.Push(subdirectory.FullName);
                 }
 
-                foreach (var filePath in Directory.GetFiles(directory))
+                // FileInfo carries the attributes returned by directory enumeration;
+                // querying File.GetAttributes again costs one filesystem call per asset.
+                foreach (var fileInfo in info.EnumerateFiles())
                 {
-                    if (!SupportedExtensions.Contains(Path.GetExtension(filePath)))
+                    if (!SupportedExtensions.Contains(fileInfo.Extension))
                         continue;
 
-                    if ((File.GetAttributes(filePath) & FileAttributes.ReparsePoint) != 0)
+                    if ((fileInfo.Attributes & FileAttributes.ReparsePoint) != 0)
                         continue;
 
-                    var fullPath = Path.GetFullPath(filePath);
+                    var fullPath = fileInfo.FullName;
                     if (!IsUnderRoot(fullPath))
                         continue;
 
@@ -90,6 +104,7 @@ namespace SilverEcho.ForsakenWorld
                         .Replace(Path.AltDirectorySeparatorChar, '/');
                     var entry = new GameDataFile(fullPath, relativePath);
                     files.Add(entry);
+                    IndexFileName(entry);
 
                     List<GameDataFile> matches;
                     if (!filesByRelativePath.TryGetValue(relativePath, out matches))
@@ -120,6 +135,8 @@ namespace SilverEcho.ForsakenWorld
 
             files.Clear();
             filesByRelativePath.Clear();
+            filesByName.Clear();
+            filesByAlias.Clear(); aliasesByName.Clear(); canonicalPaths.Clear();
             foreach (var raw in relativePaths)
             {
                 if (string.IsNullOrWhiteSpace(raw))
@@ -131,6 +148,7 @@ namespace SilverEcho.ForsakenWorld
                     Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
                 var entry = new GameDataFile(fullPath, relativePath);
                 files.Add(entry);
+                IndexFileName(entry);
 
                 List<GameDataFile> matches;
                 if (!filesByRelativePath.TryGetValue(relativePath, out matches))
@@ -174,6 +192,12 @@ namespace SilverEcho.ForsakenWorld
             if (filesByRelativePath.TryGetValue(normalizedPath, out exactMatches))
                 return SelectUnique(exactMatches, relativePath, out resolved, out error);
 
+            // Some unpackers interpret valid GBK byte pairs as UTF-8 (女 -> Ů,
+            // 水母 -> ˮĸ). Match a unique reversible alias without renaming source files.
+            string canonical = CanonicalPath(normalizedPath);
+            if (filesByAlias.TryGetValue(canonical, out var aliasMatches))
+                return SelectUnique(aliasMatches, relativePath, out resolved, out error);
+
             if (!allowUniqueSuffixMatch)
             {
                 error = "Resource not found: " + relativePath;
@@ -181,9 +205,14 @@ namespace SilverEcho.ForsakenWorld
             }
 
             var suffix = "/" + normalizedPath;
-            var suffixMatches = files.Where(file =>
+            filesByName.TryGetValue(Path.GetFileName(normalizedPath), out var candidates);
+            var suffixMatches = (candidates ?? Enumerable.Empty<GameDataFile>()).Where(file =>
                     file.RelativePath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+            if (aliasesByName.TryGetValue(Path.GetFileName(canonical), out var aliasCandidates))
+                foreach (var file in aliasCandidates)
+                    if (canonicalPaths[file].EndsWith("/" + canonical, StringComparison.OrdinalIgnoreCase) &&
+                        !suffixMatches.Contains(file)) suffixMatches.Add(file);
             if (suffixMatches.Count == 0)
             {
                 error = "Resource not found: " + relativePath;
@@ -191,6 +220,40 @@ namespace SilverEcho.ForsakenWorld
             }
 
             return SelectUnique(suffixMatches, relativePath, out resolved, out error);
+        }
+
+        private void IndexFileName(GameDataFile file)
+        {
+            string name = Path.GetFileName(file.RelativePath);
+            if (!filesByName.TryGetValue(name, out var list))
+                filesByName[name] = list = new List<GameDataFile>();
+            list.Add(file);
+            string canonical = CanonicalPath(file.RelativePath);
+            canonicalPaths[file] = canonical;
+            if (!filesByAlias.TryGetValue(canonical, out var aliases))
+                filesByAlias[canonical] = aliases = new List<GameDataFile>();
+            aliases.Add(file);
+            string canonicalName = Path.GetFileName(canonical);
+            if (!aliasesByName.TryGetValue(canonicalName, out var namedAliases))
+                aliasesByName[canonicalName] = namedAliases = new List<GameDataFile>();
+            namedAliases.Add(file);
+        }
+
+        private string CanonicalPath(string path)
+        {
+            var result = new StringBuilder(path.Length);
+            for (int i = 0; i < path.Length;)
+            {
+                if (path[i] < 0x80 || path[i] >= 0x800) { result.Append(path[i++]); continue; }
+                int start = i;
+                while (i < path.Length && path[i] >= 0x80 && path[i] < 0x800) i++;
+                string run = path.Substring(start, i - start), decoded = null;
+                try { decoded = pathDecoder.DecodeGbk(Encoding.UTF8.GetBytes(run)); }
+                catch (NotSupportedException) { }
+                // Only accept complete CJK results, never a lossy replacement character.
+                result.Append(!string.IsNullOrEmpty(decoded) && decoded.All(c => c >= 0x3400 && c <= 0x9fff) ? decoded : run);
+            }
+            return result.ToString();
         }
 
         private bool IsUnderRoot(string fullPath)
