@@ -847,11 +847,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private static void EnsureFolder(string folder)
         {
-            if (AssetDatabase.IsValidFolder(folder))
-                return;
-            var parent = Path.GetDirectoryName(folder).Replace('\\', '/');
-            EnsureFolder(parent);
-            AssetDatabase.CreateFolder(parent, Path.GetFileName(folder));
+            AngelicaAssetFolders.Ensure(folder);
         }
 
         private static T Save<T>(T value, string path) where T : Object

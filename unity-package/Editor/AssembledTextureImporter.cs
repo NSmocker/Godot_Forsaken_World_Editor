@@ -285,8 +285,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             var existed = File.Exists(absoluteDest) ||
                 AssetDatabase.LoadMainAssetAtPath(result.AssetPath) != null;
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
+            // ImportAsset is enough for LoadAssetAtPath; Refresh() here is O(project)
+            // per texture and must not run inside batch StartAssetEditing loops.
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
-            AssetDatabase.Refresh();
 
             result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
             if (result.Texture == null)
@@ -418,21 +419,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private static void EnsureAssetFolders(string folderPath)
         {
-            var normalizedPath = (folderPath ?? string.Empty).Replace('\\', '/');
-            if (string.IsNullOrEmpty(normalizedPath) ||
-                normalizedPath == "Assets" ||
-                AssetDatabase.IsValidFolder(normalizedPath))
-                return;
-
-            var parent = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');
-            var folderName = Path.GetFileName(normalizedPath);
-            if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(folderName))
-                throw new IOException("Cannot create asset folder: " + folderPath);
-
-            EnsureAssetFolders(parent);
-            if (!AssetDatabase.IsValidFolder(normalizedPath) &&
-                string.IsNullOrEmpty(AssetDatabase.CreateFolder(parent, folderName)))
-                throw new IOException("Could not create asset folder: " + normalizedPath);
+            AngelicaAssetFolders.Ensure(folderPath);
         }
 
         private static string CombineErrors(string prior, string next)

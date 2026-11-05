@@ -148,21 +148,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private static void EnsureAssetFolders(string folderPath)
         {
-            var normalizedPath = (folderPath ?? string.Empty).Replace('\\', '/');
-            if (string.IsNullOrEmpty(normalizedPath) ||
-                normalizedPath == "Assets" ||
-                AssetDatabase.IsValidFolder(normalizedPath))
-                return;
-
-            var parent = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');
-            var folderName = Path.GetFileName(normalizedPath);
-            if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(folderName))
-                throw new IOException("Cannot create asset folder: " + folderPath);
-
-            EnsureAssetFolders(parent);
-            if (!AssetDatabase.IsValidFolder(normalizedPath) &&
-                string.IsNullOrEmpty(AssetDatabase.CreateFolder(parent, folderName)))
-                throw new IOException("Could not create asset folder: " + normalizedPath);
+            AngelicaAssetFolders.Ensure(folderPath);
         }
 
         private static string Sanitize(string name)
