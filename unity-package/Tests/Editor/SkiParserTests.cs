@@ -26,7 +26,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual("skin", document.SkinMeshes[0].Name);
             Assert.AreEqual(0, document.SkinMeshes[0].TextureIndex);
             Assert.AreEqual(3, document.SkinMeshes[0].Positions.Length / 3);
-            Assert.AreEqual(0.4f, document.SkinMeshes[0].Weights[3]);
+            Assert.AreEqual(0.4f, document.SkinMeshes[0].Weights[3], 1e-5f);
             Assert.AreEqual(2, document.SkinMeshes[0].BoneIndices[2]);
             Assert.AreEqual(2, document.SkinMeshes[0].Indices[2]);
 
