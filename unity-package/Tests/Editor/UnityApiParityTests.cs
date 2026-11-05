@@ -44,6 +44,25 @@ namespace SilverEcho.ForsakenWorld.Tests
 
 
         [Test]
+        public void EditorPrefabSavesUseSuccessFlagNotReturnValue()
+        {
+            // Inside AssetDatabase.StartAssetEditing, SaveAsPrefabAsset writes the file
+            // but returns null; exporters must check the out success flag instead.
+            var root = FindPackageRoot();
+            Assert.IsNotNull(root);
+            var bad = new System.Collections.Generic.List<string>();
+            var call = new Regex(@"SaveAsPrefabAsset\s*\(([^;]*)\)\s*;");
+            foreach (var file in Directory.GetFiles(Path.Combine(root, "Editor"), "*.cs", SearchOption.AllDirectories))
+            {
+                foreach (Match m in call.Matches(File.ReadAllText(file)))
+                    if (!m.Groups[1].Value.Contains("out "))
+                        bad.Add(Path.GetFileName(file));
+            }
+            if (bad.Count != 0)
+                Assert.Fail("SaveAsPrefabAsset without out success: " + string.Join(", ", bad));
+        }
+
+        [Test]
         public void AngelicaAnimationUtilSeeksStateTimeNotTopLevel()
         {
             var go = new UnityEngine.GameObject("anim");

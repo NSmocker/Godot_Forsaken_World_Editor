@@ -237,17 +237,19 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EnsureAssetFolders(Path.GetDirectoryName(result.PrefabPath));
                 var existed = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath) != null ||
                     File.Exists(AssetPathToAbsolute(result.PrefabPath));
-                var prefab = PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath);
-                if (prefab == null)
+                // Use the success flag (like Building/Terrain/Map importers): inside
+                // AssetDatabase.StartAssetEditing the prefab file is written but the
+                // returned object is null until import resumes.
+                PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool prefabSaved);
+                if (!prefabSaved)
                     throw new InvalidOperationException(
-                        "PrefabUtility.SaveAsPrefabAsset returned null for " + result.PrefabPath);
+                        "PrefabUtility.SaveAsPrefabAsset failed for " + result.PrefabPath);
                 if (existed)
                     result.PrefabUpdated = true;
                 else
                     result.PrefabCreated = true;
 
                 AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
             }
             catch (Exception exception) when (
                 exception is IOException ||
