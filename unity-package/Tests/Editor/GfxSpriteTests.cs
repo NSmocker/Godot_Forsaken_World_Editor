@@ -57,7 +57,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             "Direction: 0, 0, 0, 1\n" +
             "Rad_2D: 0\n" +
             "CtrlMethodCount: 0\n" +
-            "GFXELEMENTID: 230 ECModel\n" +
+            "GFXELEMENTID: 999 Unknown\n" +
             "StartTime: 0\n" +
             "KEYPOINTCOUNT: 0\n";
 
@@ -191,7 +191,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         {
             Assert.IsTrue(GfxElementRegistry.IsPorted("100"));
             Assert.IsTrue(GfxElementRegistry.IsPorted("101"));
-            Assert.IsFalse(GfxElementRegistry.IsPorted("230"));
+            Assert.IsFalse(GfxElementRegistry.IsPorted("999"));
         }
 
         [Test]
@@ -205,7 +205,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.IsTrue(plan.Elements[2].IsStub);
             Assert.AreEqual("100", plan.Elements[0].SystemId);
             Assert.AreEqual("101", plan.Elements[1].SystemId);
-            Assert.IsTrue(plan.StubbedElementIds.Contains("230"));
+            Assert.IsTrue(plan.StubbedElementIds.Contains("999"));
             Assert.IsFalse(plan.StubbedElementIds.Contains("100"));
         }
 
@@ -225,7 +225,7 @@ namespace SilverEcho.ForsakenWorld.Tests
 
             var stubs = built.Root.GetComponentsInChildren<GfxElementStub>(true);
             Assert.AreEqual(1, stubs.Length);
-            Assert.AreEqual("230", stubs[0].SystemId);
+            Assert.AreEqual("999", stubs[0].SystemId);
 
             built.Player.Tick(50f);
             Assert.Greater(built.Player.TimeMs, 0f);

@@ -26,6 +26,10 @@ namespace SilverEcho.ForsakenWorld
     public sealed class EcmCombinedAction
     {
         public string Name { get; internal set; } = string.Empty;
+        /// <summary>CombineAct LoopCount; -1 = endless (create_id_230.gd pick_action).</summary>
+        public int LoopCount { get; internal set; } = 1;
         public List<string> BaseActionNames { get; } = new List<string>();
+        /// <summary>Per-BaseActName LoopCount / LoopMinNum; parallel to BaseActionNames.</summary>
+        public List<int> BaseLoopCounts { get; } = new List<int>();
     }
 }

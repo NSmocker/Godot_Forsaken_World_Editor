@@ -169,6 +169,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachPhys(el, elementGo, texResolver, gfx2d, plan.SourcePath, result.Warnings);
                 }
+                else if (el.SystemId == "230")
+                {
+                    driver = AttachEcModel(el, elementGo, index, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -579,6 +583,57 @@ namespace SilverEcho.ForsakenWorld.Editor
 
 
 
+
+
+        private static GfxElementDriver AttachEcModel(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GameDataIndex index,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var model = elementGo.AddComponent<GfxModelDriver>();
+            var modelParams = GfxEcModelParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            GameObject instance = null;
+            EcmDocument ecmDoc = null;
+            if (index != null && !string.IsNullOrWhiteSpace(modelParams.ModelPath))
+            {
+                instance = GfxModelSceneFactory.TryBuildFromEcm(
+                    modelParams.ModelPath,
+                    index,
+                    null,
+                    warnings,
+                    out ecmDoc);
+            }
+            else if (warnings != null && !string.IsNullOrWhiteSpace(modelParams.ModelPath))
+            {
+                warnings.Add(
+                    "GFX ID 230 ECMPath not bound (no GameDataIndex): " + modelParams.ModelPath);
+            }
+
+            if (ecmDoc != null && !string.IsNullOrWhiteSpace(modelParams.ModelActName))
+            {
+                int loops;
+                System.Collections.Generic.List<string> bases;
+                if (GfxEcModelParams.TryPickAction(
+                        ecmDoc, modelParams.ModelActName, out loops, out bases))
+                {
+                    modelParams.ActionLoops = loops;
+                    modelParams.BaseActionNames = bases;
+                }
+            }
+
+            if (modelParams.LoaderType != 0 && warnings != null)
+            {
+                warnings.Add(
+                    "GFX ID 230 LDType " + modelParams.LoaderType +
+                    ": caster skin/model not available; showing .ecm (same as Godot).");
+            }
+
+            model.Configure(modelParams, instance, gfx2d, warnings);
+            return model;
+        }
 
         private static GfxElementDriver AttachPhys(
             GfxElementPlan el,

@@ -315,26 +315,34 @@ namespace SilverEcho.ForsakenWorld
             animationPlayer = null;
             matchedClipName = string.Empty;
             matchedClipLength = 0f;
-            if (root == null || string.IsNullOrWhiteSpace(p.ModelActName))
+            if (root == null)
+                return;
+            // 230 may still match via Base_Actions / sole clip when ECMActName is empty.
+            var wantsAction = !string.IsNullOrWhiteSpace(p.ModelActName) ||
+                (p.BaseActionNames != null && p.BaseActionNames.Count > 0) ||
+                p.SystemId == "230";
+            if (!wantsAction)
                 return;
 
             animationPlayer = FindAnimation(root.transform);
             if (animationPlayer == null)
             {
-                if (warnings != null)
+                if (warnings != null && !string.IsNullOrWhiteSpace(p.ModelActName))
                     warnings.Add(
-                        "GFX ID 160 action '" + p.ModelActName +
+                        "GFX ID " + p.SystemId + " action '" + p.ModelActName +
                         "' requested but no Animation component on model.");
                 return;
             }
 
-            matchedClipName = GfxModelEval.MatchAnimationName(
-                animationPlayer.clips.Keys, p.ModelActName) ?? string.Empty;
+            matchedClipName = GfxModelEval.MatchAnimationWithFallbacks(
+                animationPlayer.clips.Keys,
+                p.ModelActName,
+                p.BaseActionNames) ?? string.Empty;
             if (string.IsNullOrEmpty(matchedClipName))
             {
-                if (warnings != null)
+                if (warnings != null && !string.IsNullOrWhiteSpace(p.ModelActName))
                     warnings.Add(
-                        "GFX ID 160 action '" + p.ModelActName +
+                        "GFX ID " + p.SystemId + " action '" + p.ModelActName +
                         "' not found on model " + p.ModelPath);
                 return;
             }
@@ -397,6 +405,8 @@ namespace SilverEcho.ForsakenWorld
         public string ModelPath = string.Empty;
         public string ModelActName = string.Empty;
         public int ActionLoops = 1;
+        public string[] BaseActionNames = System.Array.Empty<string>();
+        public int LoaderType;
         public bool FacingDir;
         public int DestBlend = 6;
         public bool AlphaCompare;
@@ -419,6 +429,8 @@ namespace SilverEcho.ForsakenWorld
                 ModelPath = p.ModelPath,
                 ModelActName = p.ModelActName,
                 ActionLoops = p.ActionLoops,
+                BaseActionNames = CopyNames(p.BaseActionNames),
+                LoaderType = p.LoaderType,
                 FacingDir = p.FacingDir,
                 DestBlend = p.DestBlend,
                 AlphaCompare = p.AlphaCompare,
@@ -442,6 +454,10 @@ namespace SilverEcho.ForsakenWorld
                 ModelPath = ModelPath,
                 ModelActName = ModelActName,
                 ActionLoops = ActionLoops,
+                BaseActionNames = BaseActionNames != null
+                    ? new System.Collections.Generic.List<string>(BaseActionNames)
+                    : new System.Collections.Generic.List<string>(),
+                LoaderType = LoaderType,
                 FacingDir = FacingDir,
                 DestBlend = DestBlend,
                 AlphaCompare = AlphaCompare,
@@ -453,6 +469,16 @@ namespace SilverEcho.ForsakenWorld
                 Priority = Priority,
                 ResetLoopEnd = ResetLoopEnd
             };
+        }
+
+        private static string[] CopyNames(System.Collections.Generic.List<string> names)
+        {
+            if (names == null || names.Count == 0)
+                return System.Array.Empty<string>();
+            var a = new string[names.Count];
+            for (var i = 0; i < names.Count; i++)
+                a[i] = names[i];
+            return a;
         }
     }
 }

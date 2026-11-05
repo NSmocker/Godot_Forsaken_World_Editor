@@ -53,6 +53,7 @@ namespace SilverEcho.ForsakenWorld
             var declaredCoGfxCount = 0;
             EcmCoGfxEvent currentEvent = null;
             EcmCombinedAction currentAction = null;
+            var inBaseAction = false;
             var coGfxSectionOpen = true;
 
             foreach (var rawLine in text.Replace("\r", string.Empty).Split('\n'))
@@ -121,10 +122,37 @@ namespace SilverEcho.ForsakenWorld
                             {
                                 currentAction = new EcmCombinedAction { Name = value };
                                 document.CombinedActions.Add(currentAction);
+                                inBaseAction = false;
                             }
                             else if (key == "BaseActName" && currentAction != null)
                             {
                                 currentAction.BaseActionNames.Add(value);
+                                currentAction.BaseLoopCounts.Add(1);
+                                inBaseAction = true;
+                            }
+                            else if ((key == "LoopCount" || key == "LoopMinNum") &&
+                                     currentAction != null)
+                            {
+                                int loopN;
+                                if (int.TryParse(
+                                        value,
+                                        NumberStyles.Integer,
+                                        CultureInfo.InvariantCulture,
+                                        out loopN))
+                                {
+                                    if (inBaseAction && currentAction.BaseLoopCounts.Count > 0)
+                                        currentAction.BaseLoopCounts[
+                                            currentAction.BaseLoopCounts.Count - 1] = loopN;
+                                    else if (key == "LoopCount")
+                                        currentAction.LoopCount = loopN;
+                                }
+                            }
+                            else if (key == "EventCount" || key == "ScriptCount" ||
+                                     key == "ChildCount" || key == "AddiSkinCount" ||
+                                     key == "CoGfxNum")
+                            {
+                                currentAction = null;
+                                inBaseAction = false;
                             }
 
                             break;

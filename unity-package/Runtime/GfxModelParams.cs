@@ -30,6 +30,10 @@ namespace SilverEcho.ForsakenWorld
         public bool Warp;
         public int Priority;
         public bool ResetLoopEnd;
+        /// <summary>ECM BaseActName fallbacks (GFX 230); empty for 160.</summary>
+        public List<string> BaseActionNames = new List<string>();
+        /// <summary>LDType from GFX 230 (0=.ecm; 1/2 caster skin — shown as .ecm).</summary>
+        public int LoaderType;
 
         public bool IsAdditiveBlend => DestBlend == 2 || DestBlend == 4;
 

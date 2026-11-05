@@ -97,11 +97,12 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
-        public void RegistryPorts220Not230()
+        public void RegistryPorts220And230()
         {
             GfxElementRegistry.ClearPortedForTests();
             Assert.IsTrue(GfxElementRegistry.IsPorted("220"));
-            Assert.IsFalse(GfxElementRegistry.IsPorted("230"));
+            Assert.IsTrue(GfxElementRegistry.IsPorted("230"));
+            Assert.IsFalse(GfxElementRegistry.IsPorted("999"));
         }
 
         [Test]

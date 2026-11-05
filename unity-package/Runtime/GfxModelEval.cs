@@ -168,6 +168,49 @@ namespace SilverEcho.ForsakenWorld
         }
 
         /// <summary>
+        /// GFX 230 (gfx_ecmodel_230.gd _match_animation): act name, then Base_Actions,
+        /// then the sole non-RESET clip when the model has exactly one animation.
+        /// </summary>
+        public static string MatchAnimationWithFallbacks(
+            IEnumerable<string> clipNames,
+            string actName,
+            IList<string> baseActions)
+        {
+            var found = MatchAnimationName(clipNames, actName);
+            if (!string.IsNullOrEmpty(found))
+                return found;
+            if (baseActions != null)
+            {
+                foreach (var b in baseActions)
+                {
+                    found = MatchAnimationName(clipNames, b);
+                    if (!string.IsNullOrEmpty(found))
+                        return found;
+                }
+            }
+
+            if (clipNames == null)
+                return null;
+            string sole = null;
+            var count = 0;
+            foreach (var n in clipNames)
+            {
+                if (n == null) continue;
+                var slash = n.LastIndexOf('/');
+                var leaf = slash >= 0 ? n.Substring(slash + 1) : n;
+                if (string.Equals(leaf, "RESET", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                count++;
+                if (count == 1)
+                    sole = n;
+                else
+                    return null;
+            }
+
+            return count == 1 ? sole : null;
+        }
+
+        /// <summary>
         /// Scale albedo/emission RGB by KP color; multiply alpha (MTL_SCALED).
         /// </summary>
         public static float[] TintColor(float[] baseRgba, float[] kpColor)
