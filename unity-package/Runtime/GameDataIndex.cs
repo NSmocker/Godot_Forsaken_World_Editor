@@ -47,6 +47,7 @@ namespace SilverEcho.ForsakenWorld
 
         public string Root => root;
         public IReadOnlyList<GameDataFile> Files => readOnlyFiles;
+        public string ScanTime { get; set; } = string.Empty;
 
         public void Scan(Action<int, int> progress = null)
         {
@@ -106,6 +107,42 @@ namespace SilverEcho.ForsakenWorld
 
             files.Sort(CompareFiles);
             progress?.Invoke(scannedDirectories, files.Count);
+        }
+
+        /// <summary>
+        /// Rebuild index entries from cached relative paths (Godot ecm_gfx_index3 load).
+        /// Does not touch the filesystem beyond composing FullPath under Root.
+        /// </summary>
+        public void ReplaceFromRelativePaths(IEnumerable<string> relativePaths)
+        {
+            if (relativePaths == null)
+                throw new ArgumentNullException(nameof(relativePaths));
+
+            files.Clear();
+            filesByRelativePath.Clear();
+            foreach (var raw in relativePaths)
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                    continue;
+                var relativePath = raw.Replace('\\', '/').Trim().TrimStart('/');
+                if (relativePath.Length == 0)
+                    continue;
+                var fullPath = Path.GetFullPath(
+                    Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+                var entry = new GameDataFile(fullPath, relativePath);
+                files.Add(entry);
+
+                List<GameDataFile> matches;
+                if (!filesByRelativePath.TryGetValue(relativePath, out matches))
+                {
+                    matches = new List<GameDataFile>();
+                    filesByRelativePath.Add(relativePath, matches);
+                }
+
+                matches.Add(entry);
+            }
+
+            files.Sort(CompareFiles);
         }
 
         public IReadOnlyList<GameDataFile> Search(string query = "", string extension = "")

@@ -54,6 +54,14 @@ namespace SilverEcho.ForsakenWorld.Editor
         private int pageIndex;
         private ListPagination pagination = ListPagination.Create(0, 100, 0);
         private IReadOnlyList<GameDataFile> pageFiles = Array.Empty<GameDataFile>();
+        private GameDataFolderTree.BuildResult folderTree;
+        private readonly HashSet<string> expandedFolders =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> filledFolders =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private Vector2 folderTreeScroll;
+        private bool showFolderTree = true;
+        private string scanTime = string.Empty;
 
         [MenuItem("Tools/Forsaken World/Game Data Browser")]
         private static void Open()
@@ -68,6 +76,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorPrefs.GetInt(PageSizePreference, 100));
             pagination = ListPagination.Create(0, pageSize, 0);
             EditorApplication.update += PollScanTask;
+            TryLoadScanCache();
         }
 
         private void OnDisable()
@@ -145,27 +154,114 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             using (new EditorGUILayout.VerticalScope(GUILayout.MinWidth(240), GUILayout.MaxWidth(420)))
             {
-                EditorGUILayout.LabelField(
-                    "Files (" + visibleFiles.Count + ")",
-                    EditorStyles.boldLabel);
-                DrawPaginationControls();
-                fileListScroll = EditorGUILayout.BeginScrollView(fileListScroll);
-                for (var i = 0; i < pageFiles.Count; i++)
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    var file = pageFiles[i];
-                    var label = file.RelativePath;
-                    if (GUILayout.Toggle(
-                        selectedFile == file,
-                        label,
-                        "Button",
-                        GUILayout.ExpandWidth(true)))
-                    {
-                        if (selectedFile != file)
-                            SelectFile(file);
-                    }
+                    EditorGUILayout.LabelField(
+                        "Files (" + visibleFiles.Count + ")",
+                        EditorStyles.boldLabel);
+                    showFolderTree = GUILayout.Toggle(
+                        showFolderTree,
+                        "Tree",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(48));
                 }
 
-                EditorGUILayout.EndScrollView();
+                if (showFolderTree)
+                    DrawFolderTree();
+                else
+                {
+                    DrawPaginationControls();
+                    fileListScroll = EditorGUILayout.BeginScrollView(fileListScroll);
+                    for (var i = 0; i < pageFiles.Count; i++)
+                    {
+                        var file = pageFiles[i];
+                        var label = file.RelativePath;
+                        if (GUILayout.Toggle(
+                            selectedFile == file,
+                            label,
+                            "Button",
+                            GUILayout.ExpandWidth(true)))
+                        {
+                            if (selectedFile != file)
+                                SelectFile(file);
+                        }
+                    }
+
+                    EditorGUILayout.EndScrollView();
+                }
+            }
+        }
+
+        private void DrawFolderTree()
+        {
+            if (folderTree == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Scan game data (or load cache) to build the folder tree.",
+                    MessageType.None);
+                return;
+            }
+
+            folderTreeScroll = EditorGUILayout.BeginScrollView(folderTreeScroll);
+            foreach (var pair in folderTree.Root.Dirs)
+                DrawFolderNode(pair.Key, pair.Value, pair.Key, 0);
+            DrawFolderFiles(folderTree.Root, string.Empty, 0);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawFolderNode(
+            string name,
+            GameDataFolderTree.FolderNode node,
+            string rel,
+            int depth)
+        {
+            // Godot: depth 0 open; expand_all opens everything; else lazy via Foldout.
+            var forceOpen = folderTree != null && folderTree.ExpandAll;
+            var open = forceOpen || expandedFolders.Contains(rel) || depth == 0;
+            if (depth == 0)
+                expandedFolders.Add(rel);
+
+            EditorGUI.BeginChangeCheck();
+            open = EditorGUILayout.Foldout(open, name + "  (" + node.Count + ")", true);
+            if (EditorGUI.EndChangeCheck() && !forceOpen)
+            {
+                if (open)
+                    expandedFolders.Add(rel);
+                else
+                    expandedFolders.Remove(rel);
+            }
+
+            if (!open && !forceOpen)
+                return;
+
+            EditorGUI.indentLevel++;
+            foreach (var child in node.Dirs)
+            {
+                var childRel = string.IsNullOrEmpty(rel) ? child.Key : rel + "/" + child.Key;
+                DrawFolderNode(child.Key, child.Value, childRel, depth + 1);
+            }
+
+            DrawFolderFiles(node, rel, depth + 1);
+            EditorGUI.indentLevel--;
+        }
+
+        private void DrawFolderFiles(GameDataFolderTree.FolderNode node, string rel, int depth)
+        {
+            for (var i = 0; i < node.Files.Count; i++)
+            {
+                var fileName = node.Files[i];
+                var relative = string.IsNullOrEmpty(rel) ? fileName : rel + "/" + fileName;
+                GameDataFile file = null;
+                string error;
+                if (index != null)
+                    index.TryResolve(relative, out file, out error);
+                var selected = file != null && selectedFile == file;
+                var shown = Path.GetFileNameWithoutExtension(fileName);
+                if (GUILayout.Toggle(selected, shown, "Button", GUILayout.ExpandWidth(true)))
+                {
+                    if (file != null && selectedFile != file)
+                        SelectFile(file);
+                }
             }
         }
 
@@ -594,6 +690,68 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
+
+        private void TryLoadScanCache()
+        {
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+                return;
+            try
+            {
+                var cachePath = GameDataScanCache.DefaultCachePath(Application.dataPath);
+                GameDataScanCache.Snapshot snapshot;
+                if (!GameDataScanCache.TryLoad(cachePath, rootPath, out snapshot))
+                    return;
+                index = new GameDataIndex(rootPath);
+                index.ReplaceFromRelativePaths(snapshot.RelativePaths);
+                scanTime = snapshot.ScanTime ?? string.Empty;
+                index.ScanTime = scanTime;
+                status = "Loaded cache: " + index.Files.Count + " files" +
+                    (string.IsNullOrEmpty(scanTime) ? "." : "  ·  scanned " + scanTime);
+                UpdateVisibleFiles();
+            }
+            catch (Exception exception)
+            {
+                status = "Could not load scan cache: " + exception.Message;
+            }
+        }
+
+        private void SaveScanCache()
+        {
+            if (index == null)
+                return;
+            try
+            {
+                var cachePath = GameDataScanCache.DefaultCachePath(Application.dataPath);
+                var paths = new List<string>(index.Files.Count);
+                for (var i = 0; i < index.Files.Count; i++)
+                    paths.Add(index.Files[i].RelativePath);
+                GameDataScanCache.Save(cachePath, index.Root, scanTime, paths);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Forsaken World: could not save scan cache: " + exception.Message);
+            }
+        }
+
+        private void RebuildFolderTree()
+        {
+            if (index == null)
+            {
+                folderTree = null;
+                return;
+            }
+
+            var paths = new List<string>(visibleFiles.Count);
+            for (var i = 0; i < visibleFiles.Count; i++)
+                paths.Add(visibleFiles[i].RelativePath);
+            folderTree = GameDataFolderTree.Build(paths, string.Empty, searchText);
+            if (folderTree.ExpandAll)
+            {
+                expandedFolders.Clear();
+                filledFolders.Clear();
+            }
+        }
+
         private void StartScan()
         {
             var requestedRoot = rootPath.Trim();
@@ -655,7 +813,11 @@ namespace SilverEcho.ForsakenWorld.Editor
             try
             {
                 index = scanTask.GetAwaiter().GetResult();
-                status = "Indexed " + index.Files.Count + " game data files.";
+                scanTime = GameDataScanCache.FormatScanTime(DateTime.Now);
+                index.ScanTime = scanTime;
+                SaveScanCache();
+                status = "Indexed " + index.Files.Count + " game data files" +
+                    (string.IsNullOrEmpty(scanTime) ? "." : "  ·  scanned " + scanTime);
                 UpdateVisibleFiles();
             }
             catch (DirectoryNotFoundException exception)
@@ -694,10 +856,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (index == null)
             {
                 visibleFiles = Array.Empty<GameDataFile>();
+                folderTree = null;
                 return;
             }
 
             visibleFiles = index.Search(searchText, Extensions[selectedFileType]);
+            RebuildFolderTree();
             pageIndex = 0;
             RefreshPagination();
             if (selectedFile != null && !visibleFiles.Contains(selectedFile))
