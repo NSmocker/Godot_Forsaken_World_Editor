@@ -8,7 +8,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// CPU particle element for GFX IDs 120–125 (create_id_120–125.gd).
     /// Simulates with GfxParticleSim (Godot gfx_particle_eval parity) and pushes
-    /// results into Unity ParticleSystem via SetParticles (Shuriken, not VFX Graph).
+    /// results into Unity ParticleSystem via SetParticles (Shuriken, not VFX Graph). DummyEle → GfxDummyParticlesDriver node copies (gfx_dummy_particles.gd; no MultiMesh).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxParticleDriver : GfxElementDriver
@@ -25,6 +25,8 @@ namespace SilverEcho.ForsakenWorld
         private GfxParticleParams cachedParams;
         private GfxParticleSim sim;
         private ParticleSystem.Particle[] particleBuffer;
+        private GfxDummyParticlesDriver dummyDriver;
+        private bool dummyActive;
         private List<GfxCtrlSpec> affectors = new List<GfxCtrlSpec>();
         private List<GfxCtrlSpec> extraEmitterCtrls = new List<GfxCtrlSpec>();
         private bool header2dRender;
@@ -85,14 +87,20 @@ namespace SilverEcho.ForsakenWorld
                 }
             }
 
-            if (!string.IsNullOrEmpty(particleParams.DummyEle) &&
-                warnings != null && !dummyUnsupportedLogged)
+            if (!string.IsNullOrEmpty(particleParams.DummyEle))
             {
-                dummyUnsupportedLogged = true;
-                warnings.Add(
-                    "GFX ID " + particleParams.SystemId +
-                    " DummyEle='" + particleParams.DummyEle +
-                    "' is not ported (quad/Shuriken particles only).");
+                dummyActive = true;
+                EnsureDummyDriver(particleParams.DummyEle, Math.Max(1, particleParams.PoolSize), warnings);
+                // Godot: empty particle mesh — suppress Shuriken quads.
+                ApplySlots(Array.Empty<GfxParticleSlot>());
+                if (particleRenderer != null)
+                    particleRenderer.enabled = false;
+            }
+            else
+            {
+                dummyActive = false;
+                if (particleRenderer != null)
+                    particleRenderer.enabled = true;
             }
 
             if (texture == null && warnings != null &&
@@ -146,13 +154,57 @@ namespace SilverEcho.ForsakenWorld
             SetVisualActive(visible);
             if (!visible)
             {
+                if (dummyActive && dummyDriver != null)
+                    dummyDriver.Tick(Array.Empty<GfxParticleSlot>(), alpha, false);
                 ApplySlots(Array.Empty<GfxParticleSlot>());
                 return;
             }
 
-            ApplySlots(slots);
+            if (dummyActive)
+            {
+                if (dummyDriver != null)
+                {
+                    dummyDriver.Tick(
+                        slots,
+                        alpha,
+                        Params != null && Params.Facing);
+                }
+                ApplySlots(Array.Empty<GfxParticleSlot>());
+            }
+            else
+            {
+                ApplySlots(slots);
+            }
             if (runtimeMaterial != null && runtimeMaterial.HasProperty("_GfxAlpha"))
                 runtimeMaterial.SetFloat("_GfxAlpha", alpha);
+        }
+
+
+        private void EnsureDummyDriver(string dummyName, int pool, IList<string> warnings)
+        {
+            var existing = transform.Find(GfxDummyParticlesDriver.NodeName);
+            if (existing != null)
+            {
+                dummyDriver = existing.GetComponent<GfxDummyParticlesDriver>();
+                if (dummyDriver == null)
+                    dummyDriver = existing.gameObject.AddComponent<GfxDummyParticlesDriver>();
+            }
+            else
+            {
+                var go = new GameObject(GfxDummyParticlesDriver.NodeName);
+                go.transform.SetParent(transform, false);
+                dummyDriver = go.AddComponent<GfxDummyParticlesDriver>();
+            }
+            dummyDriver.Configure(dummyName, pool);
+            dummyDriver.EnsureBuilt();
+            if (!string.IsNullOrEmpty(dummyDriver.BuildError) &&
+                warnings != null && !dummyUnsupportedLogged)
+            {
+                dummyUnsupportedLogged = true;
+                warnings.Add(
+                    "GFX ID " + (Params != null ? Params.SystemId : "?") +
+                    " DummyEle='" + dummyName + "': " + dummyDriver.BuildError);
+            }
         }
 
         private void RebuildSim()
