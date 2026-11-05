@@ -146,6 +146,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachLtnBolt(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "160")
+                {
+                    driver = AttachModel(el, elementGo, index, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -417,6 +421,31 @@ namespace SilverEcho.ForsakenWorld.Editor
             bolt.SetKeypoints(el.Keypoints);
             bolt.Configure(bp, texture, gfx2d, el.Properties, warnings);
             return bolt;
+        }
+
+
+        private static GfxElementDriver AttachModel(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GameDataIndex index,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var model = elementGo.AddComponent<GfxModelDriver>();
+            var modelParams = GfxModelParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            GameObject instance = null;
+            if (index != null && !string.IsNullOrWhiteSpace(modelParams.ModelPath))
+            {
+                instance = GfxModelSceneFactory.TryBuild(
+                    modelParams.ModelPath,
+                    modelParams.ModelActName,
+                    index,
+                    null,
+                    warnings);
+            }
+            model.Configure(modelParams, instance, gfx2d, warnings);
+            return model;
         }
 
         private static GfxElementDriver AttachRing(

@@ -23,6 +23,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 name = animation.Name,
                 frameRate = Math.Max(1f, animation.SampleFramesPerSecond),
+                length = Math.Max(0f, animation.LengthSeconds),
                 wrapMode = WrapMode.Loop
             };
 
