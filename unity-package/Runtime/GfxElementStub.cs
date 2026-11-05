@@ -14,15 +14,13 @@ namespace SilverEcho.ForsakenWorld
         public static readonly HashSet<string> LoggedIdsThisSession =
             new HashSet<string>();
 
-        public override void OnEnable()
+        public void OnEnable()
         {
-            base.OnEnable();
             LogOnce();
         }
 
-        public override void Start()
+        public void Start()
         {
-            base.Start();
             LogOnce();
         }
 

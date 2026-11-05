@@ -194,7 +194,7 @@ namespace SilverEcho.ForsakenWorld
 
         public void MarkHierarchyDirty() => hierarchyDirty = true;
 
-        public override void OnEnable()
+        public void OnEnable()
         {
             if (!registered.Contains(this))
                 registered.Add(this);
@@ -202,13 +202,13 @@ namespace SilverEcho.ForsakenWorld
             hierarchyDirty = true;
         }
 
-        public override void OnDisable()
+        public void OnDisable()
         {
             registered.Remove(this);
             ClearShake();
         }
 
-        public override void Update()
+        public void Update()
         {
             Tick(Time.deltaTime * 1000f);
         }

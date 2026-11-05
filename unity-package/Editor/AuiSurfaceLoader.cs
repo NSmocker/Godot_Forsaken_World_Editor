@@ -51,7 +51,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var m = AuiNineSlice.ComputeMargins(tex.width, tex.height, mode);
             var border = m.SpriteBorder;
             var rect = new Rect(0, 0, tex.width, tex.height);
-            return Sprite.Create(tex, rect, new Vector2(0.5f, 0.5f), 100f, 0, null, border);
+            return Sprite.Create(tex, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, border);
         }
 
         public Sprite LoadSprite(string path, AuiFrameMode mode)

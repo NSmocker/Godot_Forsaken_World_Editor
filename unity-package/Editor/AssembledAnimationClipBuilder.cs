@@ -19,11 +19,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 throw new InvalidOperationException(
                     "Cannot create an AnimationClip from an invalid assembled animation.");
 
+            // AnimationClip.length is read-only in Unity; duration comes from curve keys.
+            // Legacy Animation component requires legacy clips (mecanim clips are ignored by AddClip/Play).
             var clip = new AnimationClip
             {
                 name = animation.Name,
+                legacy = true,
                 frameRate = Math.Max(1f, animation.SampleFramesPerSecond),
-                length = Math.Max(0f, animation.LengthSeconds),
                 wrapMode = WrapMode.Loop
             };
 
@@ -87,6 +89,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 if (clip == null)
                     continue;
+                if (!clip.legacy)
+                    clip.legacy = true;
                 animation.AddClip(clip, clip.name);
             }
         }

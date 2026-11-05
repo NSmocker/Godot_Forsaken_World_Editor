@@ -36,7 +36,7 @@ namespace SilverEcho.ForsakenWorld
             set { ecmRelativePath = value ?? string.Empty; }
         }
 
-        public override void Start()
+        private void Start()
         {
             Restart();
         }
@@ -59,26 +59,7 @@ namespace SilverEcho.ForsakenWorld
             }
 
             if (string.IsNullOrEmpty(playing))
-            {
-                // Sole non-empty clip fallback like Godot.
-                string only = null;
-                var count = 0;
-                foreach (var pair in player.clips)
-                {
-                    if (string.IsNullOrEmpty(pair.Key) ||
-                        string.Equals(pair.Key, "RESET", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    only = pair.Key;
-                    count++;
-                    if (count > 1)
-                    {
-                        only = null;
-                        break;
-                    }
-                }
-
-                playing = only;
-            }
+                playing = AngelicaAnimationUtil.SoleNonEmptyClip(player);
 
             if (!string.IsNullOrEmpty(playing))
                 player.Play(playing);
@@ -88,14 +69,14 @@ namespace SilverEcho.ForsakenWorld
         {
             if (string.IsNullOrEmpty(actName) || player == null)
                 return null;
-            foreach (var pair in player.clips)
+            foreach (var name in AngelicaAnimationUtil.ClipNames(player))
             {
-                if (string.Equals(pair.Key, actName, StringComparison.OrdinalIgnoreCase))
-                    return pair.Key;
-                var slash = pair.Key.LastIndexOf('/');
-                var leaf = slash >= 0 ? pair.Key.Substring(slash + 1) : pair.Key;
+                if (string.Equals(name, actName, StringComparison.OrdinalIgnoreCase))
+                    return name;
+                var slash = name.LastIndexOf('/');
+                var leaf = slash >= 0 ? name.Substring(slash + 1) : name;
                 if (string.Equals(leaf, actName, StringComparison.OrdinalIgnoreCase))
-                    return pair.Key;
+                    return name;
             }
 
             return null;

@@ -15,7 +15,7 @@ namespace SilverEcho.ForsakenWorld
         public const int MaxStepsPerFrame = 600;
 
         private readonly GfxPhysParams p;
-        private readonly Random rng;
+        private readonly System.Random rng;
         private int steps;
         private int emitted;
         private float[] prevOrigin = GfxMath.Vec3Zero();
@@ -29,7 +29,7 @@ namespace SilverEcho.ForsakenWorld
         public GfxPhysSim(GfxPhysParams parameters)
         {
             p = parameters ?? throw new ArgumentNullException(nameof(parameters));
-            rng = new Random(p.RandomSeed);
+            rng = new System.Random(p.RandomSeed);
             Reset();
         }
 

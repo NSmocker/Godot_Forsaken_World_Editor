@@ -36,12 +36,12 @@ namespace SilverEcho.ForsakenWorld
             set { animateInEditor = value; next = 0f; }
         }
 
-        public override void Start()
+        private void Start()
         {
             ApplyTime();
         }
 
-        public override void Update()
+        private void Update()
         {
             next -= Time.deltaTime;
             if (next > 0f)

@@ -181,8 +181,7 @@ namespace SilverEcho.ForsakenWorld
                 var seek = GfxModelEval.ActionSeekSeconds(
                     actionMs, matchedClipLength, Params.ActionLoops);
                 animationPlayer.Play(matchedClipName);
-                animationPlayer.time = seek;
-                animationPlayer.Sample();
+                AngelicaAnimationUtil.Seek(animationPlayer, matchedClipName, seek);
             }
         }
 
@@ -244,7 +243,13 @@ namespace SilverEcho.ForsakenWorld
                 for (var i = 0; i < mats.Length; i++)
                 {
                     var src = mats[i];
-                    var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                    var lit = Shader.Find("Universal Render Pipeline/Lit")
+                        ?? Shader.Find("Universal Render Pipeline/Unlit")
+                        ?? Shader.Find("Sprites/Default")
+                        ?? Shader.Find("Hidden/InternalErrorShader");
+                    if (lit == null)
+                        continue;
+                    var mat = new Material(lit);
                     if (src != null)
                     {
                         if (src.HasProperty("_BaseColor"))
@@ -334,8 +339,8 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
-            matchedClipName = GfxModelEval.MatchAnimationWithFallbacks(
-                animationPlayer.clips.Keys,
+            matchedClipName = AngelicaAnimationUtil.MatchName(
+                animationPlayer,
                 p.ModelActName,
                 p.BaseActionNames) ?? string.Empty;
             if (string.IsNullOrEmpty(matchedClipName))
@@ -347,9 +352,7 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
-            AnimationClip clip;
-            if (animationPlayer.clips.TryGetValue(matchedClipName, out clip) && clip != null)
-                matchedClipLength = clip.length > 0f ? clip.length : 0f;
+            matchedClipLength = AngelicaAnimationUtil.ClipLength(animationPlayer, matchedClipName);
         }
 
         private static Animation FindAnimation(Transform node)

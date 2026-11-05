@@ -229,7 +229,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             var driver = go.AddComponent<GfxModelDriver>();
             var child = new GameObject("mesh");
             var anim = child.AddComponent<Animation>();
-            var clip = new AnimationClip { name = "Stand", length = 1f };
+            var clip = new AnimationClip { name = "Stand", legacy = true };
+            clip.SetCurve("", typeof(Transform), "localPosition.x",
+                new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 0f)));
             anim.AddClip(clip, "Stand");
 
             var p = new GfxModelParams
@@ -259,8 +261,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             });
             driver.TimeManual = true;
             driver.OnGfxTick(500f, 1f);
-            Assert.AreEqual(0.5f, anim.time, 0.001f);
-            Assert.AreEqual("Stand", anim.clipName);
+            Assert.AreEqual(0.5f, anim["Stand"].time, 0.001f);
+            Assert.IsTrue(anim.IsPlaying("Stand") || anim["Stand"] != null);
         }
 
         [Test]

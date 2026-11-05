@@ -162,7 +162,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 MaxDist = 50f,
                 Loop = false
             };
-            var clip = new AudioClip { name = "a" };
+            var clip = AudioClip.Create("a", 4410, 1, 44100, false);
             driver.LocalStartTime = 0f;
             driver.LocalTotalTime = 1000f;
             driver.GlobalLoopTime = 3000f;
