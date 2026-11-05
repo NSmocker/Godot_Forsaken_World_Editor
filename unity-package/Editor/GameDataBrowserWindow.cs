@@ -370,6 +370,10 @@ namespace SilverEcho.ForsakenWorld.Editor
             DrawProperties(document.Header);
 
             EditorGUILayout.Space();
+            if (GUILayout.Button("Instantiate GFX runtime in scene (core + stubs)"))
+                InstantiateGfxRuntimeInScene(document);
+
+            EditorGUILayout.Space();
             EditorGUILayout.LabelField(
                 "Elements (" + document.Elements.Count + ")",
                 EditorStyles.boldLabel);
@@ -1965,6 +1969,44 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 status = "Material import failed: " + exception.Message;
                 Debug.LogError(status);
+            }
+        }
+
+        private void InstantiateGfxRuntimeInScene(GfxDocument document)
+        {
+            if (document == null || selectedFile == null)
+                return;
+            try
+            {
+                var built = GfxSceneBuilder.Build(
+                    document,
+                    Path.GetFileNameWithoutExtension(selectedFile.Name),
+                    selectedFile.RelativePath);
+                if (built.Root == null)
+                {
+                    EditorUtility.DisplayDialog(
+                        "Forsaken World",
+                        "GFX runtime build returned no root.",
+                        "OK");
+                    return;
+                }
+
+                Undo.RegisterCreatedObjectUndo(built.Root, "Instantiate Forsaken GFX");
+                var stubNote = built.StubbedIds.Count > 0
+                    ? " Stubbed element IDs: " + string.Join(", ", built.StubbedIds) + "."
+                    : "";
+                EditorUtility.DisplayDialog(
+                    "Forsaken World",
+                    "Instantiated GFX runtime root with GfxPlayer. Element visuals are stubs until their family slice is ported." +
+                    stubNote,
+                    "OK");
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog(
+                    "Forsaken World",
+                    "GFX instantiate failed: " + e.Message,
+                    "OK");
             }
         }
 

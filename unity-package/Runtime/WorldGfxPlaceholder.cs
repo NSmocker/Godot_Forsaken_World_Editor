@@ -3,10 +3,9 @@ using UnityEngine;
 namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
-    /// Marker for a map GFX effect whose runtime has not been ported yet.
-    /// Stores the relative gfx\ path and transform params from .ecwld so the
-    /// later GFX slice can replace this node. Matches Godot's effect placement
-    /// data without instantiating a GFX scene.
+    /// Map GFX effect metadata (relative gfx\ path + speed/alpha/scale from .ecwld).
+    /// When the .gfx resolves, MapAssetImporter also parents a GfxPlayer hierarchy
+    /// under the same node; this component remains as path/params fallback.
     /// </summary>
     public sealed class WorldGfxPlaceholder : MonoBehaviour
     {

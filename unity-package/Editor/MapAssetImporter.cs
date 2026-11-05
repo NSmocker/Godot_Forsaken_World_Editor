@@ -15,7 +15,7 @@ namespace SilverEcho.ForsakenWorld.Editor
     /// Imports a full Angelica map from .trn2 + sibling .ecwld/.ecbsd the same way as
     /// gfx_importer/angelica_terrain.gd build + angelica_world.gd / angelica_buildings.gd:
     /// terrain Prefab, buildings filtered by .ecbsd ornaments, water, lights, ECModels,
-    /// sound placeholders, and GFX effect placeholders (GFX runtime TODO).
+    /// sound placeholders, and GFX effects (GfxPlayer hierarchy when .gfx resolves; else WorldGfxPlaceholder).
     /// </summary>
     public static class MapAssetImporter
     {
@@ -115,7 +115,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     var effects = Group(objects, "Effects");
                     var models = Group(objects, "Models");
                     var sounds = Group(objects, "Sounds");
-                    result.Effects = PlaceEffects(world.Document.Effects, effects, result);
+                    result.Effects = PlaceEffects(world.Document.Effects, effects, index, decoder, result);
                     result.Models = PlaceModels(world.Document.Models, models, index, decoder, result, showProgress);
                     result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result);
                 }
@@ -459,7 +459,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             return true;
         }
 
-        private static int PlaceEffects(IList<EcwldEffect> effects, GameObject parent, Result result)
+        private static int PlaceEffects(
+            IList<EcwldEffect> effects,
+            GameObject parent,
+            GameDataIndex index,
+            GfxTextDecoder decoder,
+            Result result)
         {
             var count = 0;
             foreach (var effect in effects)
@@ -478,15 +483,38 @@ namespace SilverEcho.ForsakenWorld.Editor
                 meta.ValidTime = effect.ValidTime;
                 meta.SourcePath = effect.Path;
                 meta.ExportId = effect.Id;
-                var placeholder = go.AddComponent<WorldGfxPlaceholder>();
-                placeholder.GfxRelativePath = effect.Path.Replace('\\', '/');
-                placeholder.PlaySpeed = effect.Speed;
-                placeholder.Alpha = effect.Alpha;
-                placeholder.ScaleFactor = effect.Scale;
-                // TODO(GFX runtime): replace placeholder with imported .gfx scene instance.
-                result.Warnings.Add(
-                    "GFX placeholder for gfx\\" + effect.Path +
-                    " (id " + effect.Id + "); GFX runtime not ported yet.");
+
+                var built = GfxSceneBuilder.TryBuildFromGameData(
+                    effect.Path, index, decoder, result.Warnings);
+                if (built != null && built.Root != null)
+                {
+                    built.Root.name = "GFX";
+                    built.Root.transform.SetParent(go.transform, false);
+                    if (built.Player != null)
+                    {
+                        built.Player.PlaySpeed = effect.Speed;
+                        built.Player.Alpha = effect.Alpha;
+                    }
+                    // Keep path metadata for later reimport / CoGfx.
+                    var placeholder = go.AddComponent<WorldGfxPlaceholder>();
+                    placeholder.GfxRelativePath = effect.Path.Replace('\\', '/');
+                    placeholder.PlaySpeed = effect.Speed;
+                    placeholder.Alpha = effect.Alpha;
+                    placeholder.ScaleFactor = effect.Scale;
+                    result.Warnings.AddRange(built.Warnings);
+                }
+                else
+                {
+                    var placeholder = go.AddComponent<WorldGfxPlaceholder>();
+                    placeholder.GfxRelativePath = effect.Path.Replace('\\', '/');
+                    placeholder.PlaySpeed = effect.Speed;
+                    placeholder.Alpha = effect.Alpha;
+                    placeholder.ScaleFactor = effect.Scale;
+                    result.Warnings.Add(
+                        "GFX placeholder for gfx\\" + effect.Path +
+                        " (id " + effect.Id + "); .gfx unresolved or failed to build.");
+                }
+
                 count++;
             }
 

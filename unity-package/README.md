@@ -42,7 +42,7 @@ texture × 2, alpha test 84/255, optional two-sided). Full map import (Godot `im
 water), filters buildings by ornament lists, and builds a map Prefab under
 `Assets/ForsakenWorld/Imported/Maps` with water (`Angelica Water` URP shader), lights,
 ECModels (existing ECM Prefab path), AudioSource sound placeholders, day/night + load-radius
-controller, and GFX effect placeholders (GFX runtime TODO).
+controller, and GFX effects (`GfxSceneBuilder` → `GfxPlayer` hierarchy when `.gfx` resolves; else `WorldGfxPlaceholder`).
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton
@@ -78,7 +78,9 @@ under `Assets/ForsakenWorld/Imported/Textures`, and Godot-parity persistence of 
 `Imported/ECM/...prefab`) with GUID-preserving reimport. The browser can import
 clips/materials+textures/Prefabs and instantiate an assembled model (including ECM SkinModel +
 AddiSkins) in the open scene and can import a full map Prefab from `.trn2`+`.ecwld`/`.ecbsd`.
-CoGfx, GFX runtime (world effect placeholders stay until then), and AUI remain later.
+GFX **core** runtime is ported (CPU clock/keypoints/ctrls + stub elements; visual builders and Particle System meshes come in later slices). CoGfx, GFX Player dock, batch GFX import, and AUI remain later.
+
+GFX **core** (Godot `gfx_data_node` / keypoint / ctrl parity, CPU — not VFX Graph): `GfxHeaderDriver` + `GfxPlayer` (`[ExecuteAlways]`) drive shared time, play/stop/seek, loop, speed, alpha, face-to-viewer, and camera shake; `GfxKeypointEval` / `GfxCurvePath` evaluate keypoints and CtrlTypes 100–111; `GfxRuntimePlanner` / Editor `GfxSceneBuilder` build a `GfxPlayer` root with one child per element (`GfxElementStub` until a family builder is ported; logs each stub ID once). Browser can instantiate a selected `.gfx` into the open scene. Map import parents a built GFX under each effect when the path resolves. Element visuals (sprites, particles via Shuriken, trails, lights, …) are not in this slice.
 
 **Render pipeline:** URP on Unity 2022.3. Host projects must enable Universal RP; this package
 does not embed the URP UPM dependency.
@@ -88,11 +90,11 @@ to develop the parser or index, but one is required to run Unity EditMode tests 
 Editor UI, AssetDatabase imports, and rendering.
 
 **Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **97**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/ecwld/ecbsd/water/pagination
-test cases passed. Standalone-harness real-asset scan (PW-Workshop branch `Models-Database`,
-`assets`, not committed): previous model/ECM/DDS/BMD numbers unchanged; **no** `.ecwld`/`.ecbsd`/
-`BSData.dat` or complete `.trn2`+`.t2bk`+`.t2mk` map sets were present (only `.hmap` and orphan/raw
-`.t2mk` under `assets/maps`); `Building/textures` mostly absent. Prefab/AssetDatabase/terrain/
-building/map import and browser pagination remain unverified in a real Unity Editor. This does
-not validate Unity compilation, the Test Runner, Editor UI, or live AssetDatabase behavior.
+standalone harness with temporary Unity API stubs, and **114**
+parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/ecwld/ecbsd/water/pagination/GFX-core
+test cases passed. Standalone-harness real-asset scan (PW-Workshop all branches, not committed):
+previous model/ECM/DDS/BMD numbers unchanged; **no** `.ecwld`/`.ecbsd`/`BSData.dat` or complete
+`.trn2`+`.t2bk`+`.t2mk` map sets; **0** `.gfx` files (element-ID histogram unavailable);
+`Building/textures` mostly absent. Prefab/AssetDatabase/terrain/building/map/GFX scene tick and
+browser pagination remain unverified in a real Unity Editor. This does not validate Unity
+compilation, the Test Runner, Editor UI, or live AssetDatabase behavior.
