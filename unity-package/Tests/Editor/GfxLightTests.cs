@@ -143,7 +143,8 @@ namespace SilverEcho.ForsakenWorld.Tests
         public void RegistryMarks130Ported()
         {
             Assert.IsTrue(GfxElementRegistry.IsPorted("130"));
-            Assert.IsFalse(GfxElementRegistry.IsPorted("140"));
+            Assert.IsTrue(GfxElementRegistry.IsPorted("140"));
+            Assert.IsTrue(GfxElementRegistry.IsPorted("190"));
         }
 
         [Test]

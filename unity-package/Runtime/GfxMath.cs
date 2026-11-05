@@ -124,11 +124,25 @@ namespace SilverEcho.ForsakenWorld
 
         public static float[] RotateVec3(float[] q, float[] v)
         {
-            // q * (0,v) * q^-1
+            // q * (0,v) * q^-1 — raw Hamilton product (do not NormalizeQuat:
+            // pure-vector quaternions are not unit-length, and normalizing
+            // would collapse |v| to 1).
             var qv = new[] { v[0], v[1], v[2], 0f };
             var qInv = new[] { -q[0], -q[1], -q[2], q[3] };
-            var r = MulQuat(MulQuat(q, qv), qInv);
+            var r = MulQuatRaw(MulQuatRaw(q, qv), qInv);
             return new[] { r[0], r[1], r[2] };
+        }
+
+        /// <summary>Hamilton product without renormalizing (for RotateVec3 sandwich).</summary>
+        public static float[] MulQuatRaw(float[] a, float[] b)
+        {
+            return new[]
+            {
+                a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+                a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+                a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+                a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+            };
         }
 
         public static float[] SlerpQuat(float[] a, float[] b, float t)

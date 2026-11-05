@@ -134,6 +134,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachLight(el, elementGo, result.Warnings);
                 }
+                else if (el.SystemId == "140" || el.SystemId == "190")
+                {
+                    driver = AttachRing(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -326,6 +330,23 @@ namespace SilverEcho.ForsakenWorld.Editor
                 el.Properties, el.SystemId, el.Index);
             light.Configure(lightParams, warnings);
             return light;
+        }
+
+
+        private static GfxElementDriver AttachRing(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var ring = elementGo.AddComponent<GfxRingDriver>();
+            var ringParams = GfxRingParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            var texture = ResolveElementTexture(
+                ringParams.TexFile, el.SystemId, texResolver, warnings);
+            ring.Configure(ringParams, texture, gfx2d, warnings);
+            return ring;
         }
 
         private static Texture ResolveElementTexture(
