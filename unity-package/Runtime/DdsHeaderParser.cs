@@ -6,7 +6,7 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// Defensive DDS header reader (DX9 DDS_HEADER). Documents / enforces the package DDS policy:
-    /// Unity 2022.3 IHVImageFormatImporter natively imports DXT1/DXT3/DXT5 (and common
+    /// Unity 6000.0 (Unity 6) IHVImageFormatImporter natively imports DXT1/DXT3/DXT5 (and common
     /// uncompressed) Texture2D DDS; volume/incomplete-mip and exotic FourCCs are flagged.
     /// </summary>
     public sealed class DdsHeaderParser
@@ -227,7 +227,7 @@ namespace SilverEcho.ForsakenWorld
             {
                 document.LikelyUnityNativeImport = true;
                 document.UnityImportNotes =
-                    "Unity 2022.3 IHVImageFormatImporter can import this Texture2D DDS; " +
+                    "Unity 6000.0 (Unity 6) IHVImageFormatImporter can import this Texture2D DDS; " +
                     "prefer copying the file into Assets and letting Unity import it.";
                 if (!document.HasCompleteMipChain)
                 {

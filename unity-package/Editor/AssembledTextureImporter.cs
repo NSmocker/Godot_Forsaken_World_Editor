@@ -9,7 +9,7 @@ namespace SilverEcho.ForsakenWorld.Editor
     /// <summary>
     /// Host-side DDS/texture binding for assembled URP materials.
     /// Prefer copying the original .dds under Assets/ForsakenWorld/Imported/Textures so
-    /// Unity 2022.3 IHVImageFormatImporter imports DXT1/3/5 (and common uncompressed DDS)
+    /// Unity 6000.0 (Unity 6) IHVImageFormatImporter imports DXT1/3/5 (and common uncompressed DDS)
     /// natively. Reimport overwrites the file in place so the .meta GUID is preserved.
     /// Falls back to Runtime DXT→RGBA8 decode + Texture2D .asset only when the DDS header
     /// is marked not LikelyUnityNativeImport or native load fails.

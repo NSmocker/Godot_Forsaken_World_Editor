@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 namespace SilverEcho.ForsakenWorld.Editor
 {
     /// <summary>
-    /// Maps AssembledSurfaceMaterial to URP Lit materials (Unity 2022.3).
+    /// Maps AssembledSurfaceMaterial to URP Lit materials (Unity 6000.0 (Unity 6)).
     /// Host projects must use URP; this package does not embed the URP package dependency—
     /// Shader.Find("Universal Render Pipeline/Lit") is resolved in the host. Falls back to
     /// Unlit/Color only when URP Lit is missing (standalone stubs / misconfigured hosts).

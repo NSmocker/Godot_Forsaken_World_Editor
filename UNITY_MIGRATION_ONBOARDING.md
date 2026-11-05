@@ -2,7 +2,10 @@
 
 **Last verified:** 2026-11-05 (latest standalone validation)
 **Audience:** coding agents continuing the Godot-to-Unity editor migration
-**Current package:** `unity-package/` — local Unity Package Manager package targeting Unity 2022.3 **URP**
+**Current package:** `unity-package/` — local Unity Package Manager package targeting Unity 6000.0.60f1 **URP 17.0.4**
+
+**Unity 6 API note (retarget 6000.0.60f1):** No `FindObjectsOfType` / other known-obsolete call sites in this package today. Editor docks still use IMGUI `OnGUI` (supported in Unity 6; UI Toolkit migration optional later). Prefer `FindObjectsByType` if scene queries are added. Box editor binary present at `/home/box/Unity/Hub/Editor/6000.0.60f1/Editor/Unity` (license not checked — do not launch until licensed).
+
 
 ## Purpose and source of truth
 
@@ -24,8 +27,8 @@ very different systems, and no agreed weighting exists for a meaningful aggregat
 
 | Area | Status at last verification |
 |---|---|
-| Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 2022.3 is the package's declared minimum. |
-| Render pipeline | **URP** chosen for Unity 2022.3. Package does **not** declare `com.unity.render-pipelines.universal`; host must enable URP. Editor uses `Shader.Find("Universal Render Pipeline/Lit")` (fallback Unlit/`Sprites/Default`). |
+| Unity package structure | UPM package and separate Runtime, Editor, and EditMode test assemblies exist. Unity 6000.0.60f1 is the package's declared target (`unity`/`unityRelease`). |
+| Render pipeline | **URP** chosen for Unity 6000.0 (Unity 6). Package declares `com.unity.render-pipelines.universal` **17.0.4**; host still enables URP in the project. Editor uses `Shader.Find("Universal Render Pipeline/Lit")` (fallback Unlit/`Sprites/Default`). |
 | Resource index and browser | Background scan, search/filter, paginated results (`ListPagination` 50/100/250/500), and inspection/import UI exist. The index handles `.bmd`, `.bon`, `.dat`, `.ecbsd`, `.ecm`, `.ecwld`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`, `.t2bk`, `.t2mk`, `.t2lm`, `.wav`, and texture extensions for SKI/terrain/building/water resolve. Browser imports assembled materials+textures, can instantiate assembled models (optional AnimationClip playback), export Mesh+AnimationClip+Prefab (GUID-preserving), import terrain Prefabs from `.trn2`, import building Prefabs from `.bmd`, and import full maps (`.trn2`+`.ecwld`/`.ecbsd`) via `MapAssetImporter`. ECM selection assembles SkinModel+AddiSkins (no CoGfx). No folder tree or persistent index cache yet; Unity UI/pagination unverified. |
 | Text decoding | GFX/ECM text decoding supports UTF-8 and the game's GBK mapping table; the Editor loads the bundled table. |
 | GFX | Text parser and `GfxAsset` exist. **Core runtime [~]** (CPU, not VFX Graph): `GfxHeaderDriver`/`GfxPlayer` (timing/play/seek/loop/alpha/face/shake, `[ExecuteAlways]`), `GfxKeypointEval`+Ctrl 100–111, `GfxCurvePath`, `GfxRuntimePlanner`/`GfxSceneBuilder` → hierarchy with `GfxElementStub` for unported IDs; browser instantiate; map import uses `GfxPlayer` when `.gfx` resolves (placeholder fallback). Sprites/decals **100/101 [~]** (CPU Mesh + `AngelicaGfxSprite`). SpeedTrail **110 [~]** and LtnTrail **180 [~]** (CPU ribbon/strip + `AngelicaGfxTrail`, SegLife mask / lt_rnd zigzag, Bind=0 history, TexFile via `GfxTextureResolver`+DDS). Particles **120–125 [~]** (`GfxParticleSim` CPU + Shuriken `SetParticles`, emitter shapes/affectors/bind/drag; Warp/DummyEle not ported; 122 needs mesh samples). Light **130 [~]** (`GfxLightEval` CPU + Unity `Light` Point/Spot/Directional for URP; Attenuation fit / InnerUse / Phi→spotAngle / keypoints; URP additional-light limit + falloff gaps documented). Ring **140 [~]** / Paraboloid **190 [~]** (`GfxRingMesh` CPU + Mesh / AngelicaGfxTrail|Sprite; Pitch cone, OrgAtCenter, Coeff/height f32 circles; sheet/tile; no UReverse). Lightning **150–152 [~]** (`GfxLightningEval` CPU strip + Mesh; 151 bolt → child 150 strokes; curve 110; Ex append/tail). Model **160 [~]** (`GfxModelEval` + `GfxModelResolver`/`GfxModelSceneFactory` SMD→assembled hierarchy; KP transform/color/alpha; ModelActName Animation seek; FacingDir; DestBlend/AlphaCmp/WriteZ). Sound **170 [~]** (`GfxSoundEval` + `GfxSoundResolver` + `AudioSource`; Path/Vol/Pitch/Force2D/MinMaxDist/IsLoop; AudioClip via AssembledAudioImporter (Imported/Sounds; wav/ogg/mp3)). Container **200 [~]**, grid **210/211 [~]**, phys **220 [~]**, ECModel **230 [~]**. Gap audit: OuterColor/MatchGrnd/LDType caster/child ECM/SPH **absent in Godot too**; ParType 2 = world quad as Godot; Warp [~] (`_CameraOpaqueTexture`); DummyEle [~] (node copies; no MultiMesh); GFX-Player dock + «GFX Ausführen» [~]; CoGfx on ECM hooks [~] (`EcmCoGfxAttacher` / `EcmCoGfxParamDriver`). |
@@ -54,7 +57,7 @@ Runner and validate Editor UI, `AssetDatabase`, and imported assets.
 - `unity-package/README.md` — package installation, current behavior, and limitations.
 - `TODO.md` — detailed migration stages and outstanding work.
 - DDS policy (models): `AssembledTextureImporter` copies the original `.dds` under
-  `Assets/ForsakenWorld/Imported/Textures` so Unity 2022.3 `IHVImageFormatImporter`
+  `Assets/ForsakenWorld/Imported/Textures` so Unity 6000.0 (Unity 6) `IHVImageFormatImporter`
   imports DXT1/DXT3/DXT5 and common uncompressed Texture2D natively (GUID preserved on
   overwrite). Runtime `DdsHeaderParser` / optional `DdsDxtDecoder` validate DX9 headers
   (including `DDSD_LINEARSIZE` vs pitch) and provide decode fallback when native import is
@@ -130,7 +133,7 @@ from names or comments alone.
 
 1. Verify Mesh/Prefab export, ECM assemble import, DDS→Texture2D binding, terrain/building/map
    Prefab import, GFX core tick (`GfxPlayer` edit-mode playback, ID 100/101 sprites + 110/180 trails + 120–125 particles + 130 light + 140/190 ring/paraboloid + 150–152 lightning, other stubs in hierarchy),
-   browser pagination, and scene instantiate in a real Unity 2022.3 URP project (AssetDatabase,
+   browser pagination, and scene instantiate in a real Unity 6000.0 (Unity 6) URP project (AssetDatabase,
    PrefabUtility, Scene View, Test Runner). Provide complete `.trn2`+`.ecwld`/`.ecbsd` map sets,
    `Building/textures`, and sample `.gfx` packs when available.
 2. Godot-parity GFX element families next (CPU Particle System / meshes, not VFX Graph), suggested

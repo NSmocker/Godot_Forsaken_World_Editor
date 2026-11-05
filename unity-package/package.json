@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "displayName": "Forsaken World Editor",
   "description": "Tools for inspecting and importing Forsaken World game data.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": {
     "name": "Silver Echo Games"
+  },
+  "unityRelease": "60f1",
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.0.4"
   }
 }
