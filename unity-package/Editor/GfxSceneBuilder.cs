@@ -184,6 +184,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 driver.SystemId = el.SystemId;
+                // Godot never creates nodes for IDs without an element script (gfx_parser).
+                driver.ElementName = GfxElementRegistry.HasGodotElementScript(el.SystemId)
+                    ? GfxPropertyValues.Get(el.Properties, "Name", string.Empty)
+                    : string.Empty;
                 driver.GlobalLoopTime = el.GlobalLoopTime;
                 driver.LocalStartTime = el.LocalStartTime;
                 driver.LocalTotalTime = el.LocalTotalTime;

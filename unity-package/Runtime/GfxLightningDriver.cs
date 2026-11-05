@@ -256,6 +256,8 @@ namespace SilverEcho.ForsakenWorld
         public float WaveLen = 1f;
         public float Persistence = 0.5f;
         public int OctaveNum = 1;
+        public bool HasStartPos;
+        public bool HasEndPos;
         public float[] StartPos = new float[3];
         public float[] EndPos = new float[3];
         public int Segs;
@@ -313,6 +315,8 @@ namespace SilverEcho.ForsakenWorld
             {
                 SystemId = p.SystemId,
                 Name = p.Name,
+                HasStartPos = p.HasStartPos,
+                HasEndPos = p.HasEndPos,
                 ElementIndex = p.ElementIndex,
                 TexFile = p.TexFile,
                 DestBlend = p.DestBlend,
@@ -381,6 +385,8 @@ namespace SilverEcho.ForsakenWorld
             {
                 SystemId = SystemId,
                 Name = Name,
+                HasStartPos = HasStartPos,
+                HasEndPos = HasEndPos,
                 ElementIndex = ElementIndex,
                 TexFile = TexFile,
                 DestBlend = DestBlend,

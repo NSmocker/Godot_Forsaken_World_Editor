@@ -145,6 +145,42 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void CoGfxScaleKeepsDedaultScaleAndParamMatchesElementName()
+        {
+            // Godot: tran_matrix(info, node.scale.x * GfxScale); _find_element matches
+            // parsed_data["Name"] (first hit), and a non-150 hit is rejected.
+            var doc = new EcmDocument();
+            var ev = new EcmCoGfxEvent { EventType = EcmCoGfxAttacher.EventTypeGfx };
+            ev.Files.Add("ltn.gfx");
+            ev.Properties["GfxScale"] = "2";
+            ev.Parameters.Add(new Dictionary<string, string>
+            {
+                ["ele"] = "Bolt extra",
+                ["ParamId"] = "200",
+                ["ParamDataHook"] = "RightHand"
+            });
+            doc.CoGfxEvents.Add(ev);
+
+            var root = new GameObject("Model");
+            EcmCoGfxAttacher.BuildGfxOverride = (rel, index, w) =>
+            {
+                var go = new GameObject("ltn");
+                go.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+                var el = new GameObject("Element_1_ID_100");
+                el.transform.SetParent(go.transform, false);
+                var stub = el.AddComponent<GfxElementStub>();
+                stub.SystemId = "100";
+                stub.ElementName = "Bolt";
+                return go;
+            };
+            var warnings = new List<string>();
+            Assert.AreEqual(1, EcmCoGfxAttacher.Attach(root, doc, null, warnings));
+            var gfx = root.transform.GetChild(0);
+            Assert.AreEqual(1f, gfx.localScale.x, 1e-5f);
+            Assert.IsTrue(warnings.Exists(m => m.Contains("Bolt (ID 100) is not lightning")));
+        }
+
+        [Test]
         public void AsIntBoolMatchesGodotToInt()
         {
             Assert.IsFalse(EcmCoGfxAttacher.AsIntBool(null));

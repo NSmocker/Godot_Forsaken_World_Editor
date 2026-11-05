@@ -11,6 +11,7 @@ namespace SilverEcho.ForsakenWorld
     public class GfxElementDriver : MonoBehaviour
     {
         [SerializeField] private string systemId = string.Empty;
+        [SerializeField] private string elementName = string.Empty;
         [SerializeField] private bool timeManual;
         [SerializeField] private float timeMs;
         [SerializeField] private float globalLoopTime = 3000f;
@@ -23,6 +24,13 @@ namespace SilverEcho.ForsakenWorld
 
         private List<GfxKeypointSpec> keypoints = new List<GfxKeypointSpec>();
         private GfxKeypointState lastState;
+
+        /// <summary>The element's own "Name:" value (parsed_data["Name"] in Godot).</summary>
+        public string ElementName
+        {
+            get { return elementName; }
+            set { elementName = value ?? string.Empty; }
+        }
 
         public string SystemId
         {

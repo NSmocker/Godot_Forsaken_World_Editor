@@ -48,7 +48,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     continue;
                 }
 
-                var scale = ReadFloat(info, "GfxScale", 1f);
+                // Godot: tran_matrix(info, node.scale.x * GfxScale) keeps DedaultScale.
+                var scale = gfxRoot.transform.localScale.x * ReadFloat(info, "GfxScale", 1f);
                 ApplyTranMatrix(gfxRoot.transform, info, scale);
 
                 var player = gfxRoot.GetComponent<GfxPlayer>();
@@ -274,13 +275,24 @@ namespace SilverEcho.ForsakenWorld.Editor
                 string eleRaw;
                 p.TryGetValue("ele", out eleRaw);
                 var eleName = ScanfS(eleRaw);
-                var lightning = FindLightningElement(gfxRoot.transform, eleName);
-                if (lightning == null)
+                var element = FindElement(gfxRoot.transform, eleName);
+                if (element == null)
                 {
                     Warn(
                         warnings,
                         "CoGfx " + gfxRoot.name + ": element " + eleName +
                         " for lightning endpoint missing in GFX");
+                    continue;
+                }
+
+                // Godot: first element with that Name; if it is not a built 150, skip.
+                var lightning = element as GfxLightningDriver;
+                if (lightning == null || element.SystemId != "150")
+                {
+                    Warn(
+                        warnings,
+                        "CoGfx " + gfxRoot.name + ": element " + eleName + " (ID " +
+                        element.SystemId + ") is not lightning; endpoint not set");
                     continue;
                 }
 
@@ -291,6 +303,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                         warnings,
                         "CoGfx " + gfxRoot.name + ": lightning " + eleName +
                         " without Pos1Enable / Pos2Enable; endpoint not set");
+                    continue;
+                }
+
+                if (!(id == ParamLtnPos1 ? lp.HasStartPos : lp.HasEndPos))
+                {
+                    Warn(
+                        warnings,
+                        "CoGfx " + gfxRoot.name + ": lightning " + eleName + " without " +
+                        (id == ParamLtnPos1 ? "StartPos" : "EndPos") + " in the .gfx; endpoint not set");
                     continue;
                 }
 
@@ -328,7 +349,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             driver.SetLinks(links);
         }
 
-        private static GfxLightningDriver FindLightningElement(Transform gfx, string eleName)
+        /// <summary>ecm_cogfx._find_element: first direct element child whose Name (scanf) matches.</summary>
+        private static GfxElementDriver FindElement(Transform gfx, string eleName)
         {
             if (gfx == null || string.IsNullOrEmpty(eleName))
                 return null;
@@ -338,11 +360,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var child = gfx.GetChild(i);
                 if (child == null || child.gameObject == null)
                     continue;
-                if (ScanfS(child.gameObject.name) != eleName)
+                var driver = child.gameObject.GetComponent<GfxElementDriver>();
+                if (driver == null || string.IsNullOrEmpty(driver.ElementName))
                     continue;
-                var lightning = child.gameObject.GetComponent<GfxLightningDriver>();
-                if (lightning != null)
-                    return lightning;
+                if (ScanfS(driver.ElementName) == eleName)
+                    return driver;
             }
 
             return null;

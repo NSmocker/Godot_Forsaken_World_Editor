@@ -36,6 +36,9 @@ namespace SilverEcho.ForsakenWorld
         public float WaveLen = 1f;
         public float Persistence = 0.5f;
         public int OctaveNum = 1;
+        /// <summary>.gfx declares StartPos / EndPos (create_id_150 declares the uniform).</summary>
+        public bool HasStartPos;
+        public bool HasEndPos;
         public float[] StartPos = GfxMath.Vec3Zero();
         public float[] EndPos = GfxMath.Vec3Zero();
         public int Segs;
@@ -168,6 +171,8 @@ namespace SilverEcho.ForsakenWorld
             p.WaveLen = GfxPropertyValues.Float(properties, "WaveLen", 1f);
             p.Persistence = GfxPropertyValues.Float(properties, "Persistence", 0.5f);
             p.OctaveNum = GfxPropertyValues.Int(properties, "OctaveNum", 1);
+            p.HasStartPos = properties.ContainsKey("StartPos");
+            p.HasEndPos = properties.ContainsKey("EndPos");
             p.StartPos = GfxPropertyValues.Vec3(properties, "StartPos");
             p.EndPos = GfxPropertyValues.Vec3(properties, "EndPos");
             p.Segs = GfxPropertyValues.Int(properties, "Segs", 0);
