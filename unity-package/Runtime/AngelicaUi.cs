@@ -26,6 +26,30 @@ namespace SilverEcho.ForsakenWorld
 
         public const string DefaultFont = "方正细黑一简体";
 
+        public static readonly System.Collections.Generic.Dictionary<string, string> FontFiles =
+            new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["方正细黑一简体"] = "fzxh1jw.ttf",
+                ["方正隶二简体"] = "fzl2jw.ttf",
+                ["方正隶变简体"] = "fzlbjw.ttf",
+                ["方正兰亭黑体"] = "fzlthk.ttf",
+            };
+
+        private static readonly string[] BoolKeys =
+        {
+            "Anomaly", "ReadOnly", "WantReturn", "NumberOnly", "Multiline",
+            "Password", "AutoReturn", "EnableSelection", "RenderTop", "VerticalProgress",
+            "ReverseDirection", "HoverHilight", "AutoWrap", "LongHilightBar", "TextTransparent",
+            "TransScrollWheel", "LeftScrollBar", "ExtendAsCircular", "ForceDynamicRender"
+        };
+
+        private static readonly string[] IntKeys =
+        {
+            "Align", "AlignStyle", "LineSpace", "TextOffsetX", "TextOffsetY", "MaxLen", "ButtonID",
+            "GroupID", "TotalLevels", "Indent", "ExtendLength", "TextAlign", "FrameMode", "Frames",
+            "Interval", "Degree"
+        };
+
         public string DataRoot { get; private set; }
         public string Language { get; private set; } = string.Empty;
 
@@ -110,6 +134,16 @@ namespace SilverEcho.ForsakenWorld
                 return string.Empty;
             var p = ResolveUnderRoot(Path.Combine("resources", fileName));
             return p.Length > 0 ? p : ResolveUnderRoot(fileName);
+        }
+
+        /// <summary>Godot angelica_ui.font: face name → font/&lt;file&gt; under the data root.</summary>
+        public string Font(string face)
+        {
+            string file;
+            if (string.IsNullOrEmpty(face) || !FontFiles.TryGetValue(face, out file))
+                file = FontFiles[DefaultFont];
+            var p = ResolveUnderRoot(Path.Combine("font", file));
+            return p.Length > 0 ? p : ResolveUnderRoot(Path.Combine("resources", "font", file));
         }
 
         public List<AuiLayoutEntry> ReadLayout(string fileName)
@@ -294,6 +328,17 @@ namespace SilverEcho.ForsakenWorld
                 }
             }
 
+            foreach (var key in BoolKeys)
+            {
+                if (AngelicaXml.HasValue(c, key))
+                    ctrl.BoolProps[ToSnake(key)] = AngelicaXml.BoolValue(c, key);
+            }
+            foreach (var key in IntKeys)
+            {
+                if (AngelicaXml.HasValue(c, key))
+                    ctrl.IntProps[ToSnake(key)] = AngelicaXml.IntValue(c, key);
+            }
+
             if (type == "SUBDIALOG")
                 ctrl.DialogFile = AngelicaXml.StringValue(c, "DialogFile");
             return ctrl;
@@ -458,9 +503,15 @@ namespace SilverEcho.ForsakenWorld
             }
 
             if (AngelicaXml.HasValue(k, "FontName"))
-                text["font"] = AngelicaXml.StringValue(k, "FontName");
+            {
+                var face = AngelicaXml.StringValue(k, "FontName");
+                text["font"] = face;
+                text["font_file"] = Font(face);
+            }
             if (AngelicaXml.HasValue(k, "FontSize"))
                 text["size"] = AngelicaXml.IntValue(k, "FontSize");
+            if (AngelicaXml.HasValue(k, "Shadow"))
+                text["shadow"] = new float[] { 0f, 0f, 0f, (AngelicaXml.IntValue(k, "Shadow") & 0xFF) / 255f };
             foreach (var key in new[]
                      {
                          "Color", "ShadowColor", "OutlineColor", "InnerTextColor", "TextUpperColor",
@@ -619,6 +670,10 @@ namespace SilverEcho.ForsakenWorld
         public readonly Dictionary<string, object> Text = new Dictionary<string, object>();
         public readonly Dictionary<string, AuiResource> Resources =
             new Dictionary<string, AuiResource>(StringComparer.Ordinal);
+        public readonly Dictionary<string, bool> BoolProps =
+            new Dictionary<string, bool>(StringComparer.Ordinal);
+        public readonly Dictionary<string, int> IntProps =
+            new Dictionary<string, int>(StringComparer.Ordinal);
         public Dictionary<string, string> Attrs = new Dictionary<string, string>();
         public AngelicaXml.Item Item;
     }
