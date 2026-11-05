@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace SilverEcho.ForsakenWorld
 {
-    /// <summary>Shared URP material for GFX trails 110/180 (AngelicaGfxTrail).</summary>
+    /// <summary>Shared URP material for GFX trails 110/180 / rings (AngelicaGfxTrail; Warp optional).</summary>
     public static class GfxTrailMaterialFactory
     {
         public const string ShaderName = "Forsaken World/Angelica Gfx Trail";
@@ -51,6 +51,7 @@ namespace SilverEcho.ForsakenWorld
                 mat.SetColor("_BaseColor", Color.white);
             if (mat.HasProperty("_GfxAlpha"))
                 mat.SetFloat("_GfxAlpha", 1f);
+            GfxWarpMaterial.Apply(mat, false);
             return mat;
         }
     }

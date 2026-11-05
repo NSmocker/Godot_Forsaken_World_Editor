@@ -56,8 +56,9 @@ namespace SilverEcho.ForsakenWorld
             if (trailParams.Warp && warnings != null && !warpUnsupportedLogged)
             {
                 warpUnsupportedLogged = true;
+                // create_id_110.gd adds screen_texture but fragment ignores Warp ("komplett ignoriert").
                 warnings.Add(
-                    "GFX ID 110 Warp heat-distortion is not ported; blend forced to mix.");
+                    "GFX ID 110 Warp is ignored in Godot fragment too; blend forced to mix.");
             }
 
             if (texture == null && warnings != null &&

@@ -5,7 +5,7 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// URP material for GFX particles 120–125. Reuses AngelicaGfxSprite shader
-    /// (same DestBlend add/mix + TexFile binding as create_id_120 fragment).
+    /// (same DestBlend add/mix + TexFile + optional Warp as create_id_120 fragment).
     /// </summary>
     public static class GfxParticleMaterialFactory
     {
@@ -53,6 +53,7 @@ namespace SilverEcho.ForsakenWorld
                 mat.SetFloat("_GfxAlpha", 1f);
             if (mat.HasProperty("_MixAlphaScale"))
                 mat.SetFloat("_MixAlphaScale", additive ? 1f : 0.70f);
+            GfxWarpMaterial.Apply(mat, false);
             return mat;
         }
     }

@@ -7,7 +7,7 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// CPU sprite/decal element for GFX ID 100/101 (create_id_100/101.gd).
-    /// Mesh quad + URP AngelicaGfxSprite material; keypoints/ctrl via GfxElementDriver.
+    /// Mesh quad + URP AngelicaGfxSprite material (Warp → _CameraOpaqueTexture); keypoints/ctrl via GfxElementDriver.
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxSpriteDriver : GfxElementDriver
@@ -50,12 +50,17 @@ namespace SilverEcho.ForsakenWorld
             meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
 
-            if (spriteParams.Warp && warnings != null && !warpUnsupportedLogged)
+            if (spriteParams.Warp)
             {
-                warpUnsupportedLogged = true;
-                warnings.Add(
-                    "GFX ID " + spriteParams.SystemId +
-                    " Warp heat-distortion is not ported (Godot uses screen_texture); blend forced to mix.");
+                if (!GfxWarpMaterial.Apply(runtimeMaterial, true) &&
+                    warnings != null && !warpUnsupportedLogged)
+                {
+                    warpUnsupportedLogged = true;
+                    warnings.Add(
+                        "GFX ID " + spriteParams.SystemId +
+                        " Warp requested but material has no _Warp (fallback shader); " +
+                        "heat-distortion skipped, blend forced to mix.");
+                }
             }
 
             if (texture == null && warnings != null && !string.IsNullOrEmpty(spriteParams.TexFile))
@@ -386,6 +391,7 @@ namespace SilverEcho.ForsakenWorld
                 mat.SetVector("_UvRect", new Vector4(1f, 1f, 0f, 0f));
             if (mat.HasProperty("_GfxAlpha"))
                 mat.SetFloat("_GfxAlpha", 1f);
+            GfxWarpMaterial.Apply(mat, false);
 
             return mat;
         }

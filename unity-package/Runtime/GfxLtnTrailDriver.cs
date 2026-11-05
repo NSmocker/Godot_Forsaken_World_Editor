@@ -70,7 +70,7 @@ namespace SilverEcho.ForsakenWorld
             {
                 warpUnsupportedLogged = true;
                 warnings.Add(
-                    "GFX ID 180 Warp heat-distortion is not ported; blend forced to mix.");
+                    "GFX ID 180 Warp heat-distortion absent in Godot too; blend forced to mix.");
             }
 
             if (texture == null && warnings != null &&

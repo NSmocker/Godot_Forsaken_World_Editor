@@ -39,7 +39,7 @@ namespace SilverEcho.ForsakenWorld
             if (bolt.Warp && warnings != null)
             {
                 warnings.Add(
-                    "GFX ID 151 Warp heat-distortion is not ported; blend forced to mix.");
+                    "GFX ID 151 Warp heat-distortion absent in Godot create_id_151 too; blend forced to mix.");
             }
 
             if (texture == null && warnings != null && !string.IsNullOrEmpty(bolt.TexFile))

@@ -72,12 +72,17 @@ namespace SilverEcho.ForsakenWorld
             particleRenderer.shadowCastingMode = ShadowCastingMode.Off;
             particleRenderer.receiveShadows = false;
 
-            if (particleParams.Warp && warnings != null && !warpUnsupportedLogged)
+            if (particleParams.Warp)
             {
-                warpUnsupportedLogged = true;
-                warnings.Add(
-                    "GFX ID " + particleParams.SystemId +
-                    " Warp heat-distortion is not ported; blend forced to mix.");
+                if (!GfxWarpMaterial.Apply(runtimeMaterial, true) &&
+                    warnings != null && !warpUnsupportedLogged)
+                {
+                    warpUnsupportedLogged = true;
+                    warnings.Add(
+                        "GFX ID " + particleParams.SystemId +
+                        " Warp requested but material has no _Warp (fallback shader); " +
+                        "heat-distortion skipped, blend forced to mix.");
+                }
             }
 
             if (!string.IsNullOrEmpty(particleParams.DummyEle) &&

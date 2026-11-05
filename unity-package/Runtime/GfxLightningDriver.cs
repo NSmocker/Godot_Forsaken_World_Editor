@@ -59,7 +59,7 @@ namespace SilverEcho.ForsakenWorld
                 warpUnsupportedLogged = true;
                 warnings.Add(
                     "GFX ID " + lightningParams.SystemId +
-                    " Warp heat-distortion is not ported; blend forced to mix.");
+                    " Warp heat-distortion absent in Godot create_id_150/152 too; blend forced to mix.");
             }
 
             if (texture == null && warnings != null &&
