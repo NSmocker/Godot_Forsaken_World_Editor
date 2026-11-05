@@ -8,6 +8,7 @@ namespace SilverEcho.ForsakenWorld
     public static class GfxTrailMaterialFactory
     {
         public const string ShaderName = "Forsaken World/Angelica Gfx Trail";
+        public const string HdrpShaderName = AngelicaRenderPipeline.HdrpGfxTrail;
 
         public static Material Create(
             string name,
@@ -16,11 +17,16 @@ namespace SilverEcho.ForsakenWorld
             bool gfx2dRender,
             Texture texture)
         {
-            var shader = Shader.Find(ShaderName) ??
-                         Shader.Find(GfxSpriteDriver.ShaderName) ??
-                         Shader.Find("Universal Render Pipeline/Unlit") ??
-                         Shader.Find("Sprites/Default") ??
-                         Shader.Find("Universal Render Pipeline/Lit");
+            var shader = AngelicaRenderPipeline.Find(
+                             HdrpShaderName,
+                             ShaderName,
+                             GfxSpriteDriver.HdrpShaderName,
+                             GfxSpriteDriver.ShaderName,
+                             AngelicaRenderPipeline.HdrpUnlit,
+                             "Universal Render Pipeline/Unlit",
+                             "Sprites/Default",
+                             AngelicaRenderPipeline.HdrpLit,
+                             "Universal Render Pipeline/Lit");
             if (shader == null)
                 shader = Shader.Find("Hidden/InternalErrorShader");
 

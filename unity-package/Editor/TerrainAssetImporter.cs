@@ -14,6 +14,7 @@ namespace SilverEcho.ForsakenWorld.Editor
     public static class TerrainAssetImporter
     {
         public const string ShaderName = "Forsaken World/Angelica Terrain";
+        public const string HdrpShaderName = AngelicaRenderPipeline.HdrpTerrain;
         public const int MaxLayers = 16;
         public sealed class Result
         {
@@ -41,7 +42,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             if (file == null || index == null) throw new ArgumentNullException();
             if (!SystemInfo.supports2DArrayTextures) throw new NotSupportedException("Terrain requires Texture2DArray support.");
-            var shader = Shader.Find(ShaderName);
+            var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
             if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader))
                 throw new InvalidOperationException("Angelica Terrain shader is unavailable. Use a URP project and resolve shader compilation errors.");
             var parser = new TerrainParser(decoder);

@@ -18,6 +18,7 @@ namespace SilverEcho.ForsakenWorld.Editor
     public static class BuildingAssetImporter
     {
         public const string ShaderName = "Forsaken World/Angelica LitModel";
+        public const string HdrpShaderName = AngelicaRenderPipeline.HdrpLitModel;
         public const string ImportRoot = "Assets/ForsakenWorld/Imported/Buildings";
         public const float DefaultAlphaRef = 84f / 255f;
 
@@ -57,7 +58,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (file == null || index == null)
                 throw new ArgumentNullException();
 
-            var shader = Shader.Find(ShaderName);
+            var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
             if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader))
                 throw new InvalidOperationException(
                     "Angelica LitModel shader is unavailable. Use a URP project and resolve shader compilation errors.");

@@ -65,18 +65,24 @@ namespace SilverEcho.ForsakenWorld
                 Version = version
             };
 
-            // Parse tree type data (type ID → .spt path) stored at dwTreeOff after all blocks.
+            // CECScene::LoadTreeTypeData: two AStrings per type, no type id.
+            // The instance dwType is the index in this table.
             if (treeOffset > 0 && numTreeType > 0 && treeOffset < (uint)data.Length)
             {
-                var treeTypeReader = new BinaryDataReader(data, sourceName);
-                treeTypeReader.Seek((int)treeOffset);
-                for (var i = 0; i < numTreeType; i++)
+                try
                 {
-                    var typeId = treeTypeReader.ReadUInt32LittleEndian();
-                    var sptPath = ReadATreeString(treeTypeReader);
-                    var compMapPath = ReadATreeString(treeTypeReader);
-                    if (!document.TreeTypes.ContainsKey(typeId))
-                        document.TreeTypes[typeId] = sptPath;
+                    var treeTypeReader = new BinaryDataReader(data, sourceName);
+                    treeTypeReader.Seek((int)treeOffset);
+                    for (var i = 0; i < numTreeType; i++)
+                    {
+                        var sptPath = ReadATreeString(treeTypeReader);
+                        ReadATreeString(treeTypeReader); // composite map, unused for placeholders
+                        document.TreeTypes[(uint)i] = sptPath;
+                    }
+                }
+                catch (InvalidDataException)
+                {
+                    document.TreeTypes.Clear();
                 }
             }
 
@@ -101,10 +107,8 @@ namespace SilverEcho.ForsakenWorld
                         throw new InvalidDataException(sourceName + ": invalid object count in block " + i);
                 }
 
-                // Trees stored inline in each block: ECWDFILETREE5 (type DWORD + XYZ float[3] = 16 bytes)
-                // for PW v12. For FW v13-14 the existing parser skipped 8 bytes per tree; we match that
-                // stride to keep block alignment, reading type + X position only (Y/Z default to 0).
-                var treeStride = version == 12 ? 16 : 8;
+                // ECWDFILETREE5 (version >= 5): type DWORD + XYZ. PW v12 and FW v13/v14.
+                const int treeStride = 16;
                 for (var k = 0; k < counts[0]; k++)
                 {
                     if (reader.Remaining < treeStride)
@@ -112,13 +116,8 @@ namespace SilverEcho.ForsakenWorld
                     var tree = new EcwldTree
                     {
                         Type = reader.ReadUInt32LittleEndian(),
-                        Pos = new[] { reader.ReadSingleLittleEndian(), 0f, 0f }
+                        Pos = ReadVec3(reader)
                     };
-                    if (version == 12)
-                    {
-                        tree.Pos[1] = reader.ReadSingleLittleEndian();
-                        tree.Pos[2] = reader.ReadSingleLittleEndian();
-                    }
                     document.Trees.Add(tree);
                 }
 

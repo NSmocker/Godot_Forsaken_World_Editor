@@ -16,11 +16,16 @@ namespace SilverEcho.ForsakenWorld
             bool gfx2dRender,
             Texture texture)
         {
-            var shader = Shader.Find(GfxSpriteDriver.ShaderName) ??
-                         Shader.Find(GfxTrailMaterialFactory.ShaderName) ??
-                         Shader.Find("Universal Render Pipeline/Unlit") ??
-                         Shader.Find("Sprites/Default") ??
-                         Shader.Find("Universal Render Pipeline/Lit");
+            var shader = AngelicaRenderPipeline.Find(
+                             GfxSpriteDriver.HdrpShaderName,
+                             GfxSpriteDriver.ShaderName,
+                             GfxTrailMaterialFactory.HdrpShaderName,
+                             GfxTrailMaterialFactory.ShaderName,
+                             AngelicaRenderPipeline.HdrpUnlit,
+                             "Universal Render Pipeline/Unlit",
+                             "Sprites/Default",
+                             AngelicaRenderPipeline.HdrpLit,
+                             "Universal Render Pipeline/Lit");
             if (shader == null)
                 shader = Shader.Find("Hidden/InternalErrorShader");
 

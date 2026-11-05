@@ -17,6 +17,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         public const string UrpLitShaderName = "Universal Render Pipeline/Lit";
         public const string UrpUnlitShaderName = "Universal Render Pipeline/Unlit";
         public const string ArmorReflectShaderName = "Forsaken World/Angelica Armor Reflect";
+        public const string HdrpArmorReflectShaderName = AngelicaRenderPipeline.HdrpArmorReflect;
+        public const string HdrpLitShaderName = AngelicaRenderPipeline.HdrpLit;
+        public const string HdrpUnlitShaderName = AngelicaRenderPipeline.HdrpUnlit;
         public const string ReflectMapRelativePath = ModelMaterialAssembler.ReflectMapRelativePath;
         public const string ReflectMapCacheKey = ReflectMapRelativePath;
 
@@ -31,13 +34,21 @@ namespace SilverEcho.ForsakenWorld.Editor
             Shader shader;
             if (source.UsesReflectShader)
             {
-                shader = Shader.Find(ArmorReflectShaderName) ??
-                    Shader.Find(UrpLitShaderName) ??
-                    Shader.Find(UrpUnlitShaderName);
+                shader = AngelicaRenderPipeline.Find(
+                    HdrpArmorReflectShaderName,
+                    ArmorReflectShaderName,
+                    HdrpLitShaderName,
+                    UrpLitShaderName,
+                    HdrpUnlitShaderName,
+                    UrpUnlitShaderName);
             }
             else
             {
-                shader = Shader.Find(UrpLitShaderName) ?? Shader.Find(UrpUnlitShaderName);
+                shader = AngelicaRenderPipeline.Find(
+                    HdrpLitShaderName,
+                    UrpLitShaderName,
+                    HdrpUnlitShaderName,
+                    UrpUnlitShaderName);
             }
 
             if (shader == null)

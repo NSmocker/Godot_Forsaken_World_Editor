@@ -22,6 +22,7 @@ namespace SilverEcho.ForsakenWorld.Editor
     {
         public const string ImportRoot = "Assets/ForsakenWorld/Imported/Maps";
         public const string WaterShaderName = "Forsaken World/Angelica Water";
+        public const string HdrpWaterShaderName = AngelicaRenderPipeline.HdrpWater;
         public const string WaterNormalMap = "textures/water/waternormal/water_normal00.dds";
 
         public sealed class Result
@@ -353,7 +354,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (world.Bsd == null || world.Bsd.WaterAreas.Count == 0)
                 return 0;
 
-            var shader = Shader.Find(WaterShaderName);
+            var shader = AngelicaRenderPipeline.Find(HdrpWaterShaderName, WaterShaderName);
             if (shader == null || !shader.isSupported)
             {
                 result.Warnings.Add("Angelica Water shader unavailable; water meshes still imported unshaded.");
@@ -698,6 +699,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             return count;
         }
 
+        /// <summary>
+        /// Scene hierarchy for a parsed .ecwld: TextMeshPro "дерефа" at each tree.
+        /// </summary>
+        public static GameObject CreateWorldPreview(EcwldDocument document)
+        {
+            if (document == null)
+                throw new ArgumentNullException(nameof(document));
+            var root = new GameObject(Sanitize(Path.GetFileNameWithoutExtension(document.SourcePath)) + "_world");
+            var trees = new GameObject("Trees");
+            trees.transform.SetParent(root.transform, false);
+            PlaceTrees(document.Trees, document.TreeTypes, trees, new Result());
+            return root;
+        }
+
         private static int PlaceTrees(
             IList<EcwldTree> trees,
             Dictionary<uint, string> treeTypes,
@@ -713,8 +728,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // TextMeshPro text showing the tree name.
                 var tmp = go.AddComponent<TextMeshPro>();
                 tmp.text = "дерефа";
-                tmp.fontSize = 2f;
+                tmp.fontSize = 6f;
+                tmp.color = Color.white;
                 tmp.alignment = TextAlignmentOptions.Center;
+                tmp.enableWordWrapping = false;
+                if (TMP_Settings.defaultFontAsset != null)
+                    tmp.font = TMP_Settings.defaultFontAsset;
+                tmp.ForceMeshUpdate();
                 // Billboard: no shadows, text faces upright.
                 var meshRenderer = go.GetComponent<MeshRenderer>();
                 if (meshRenderer != null)

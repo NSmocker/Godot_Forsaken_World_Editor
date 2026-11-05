@@ -243,10 +243,13 @@ namespace SilverEcho.ForsakenWorld
                 for (var i = 0; i < mats.Length; i++)
                 {
                     var src = mats[i];
-                    var lit = Shader.Find("Universal Render Pipeline/Lit")
-                        ?? Shader.Find("Universal Render Pipeline/Unlit")
-                        ?? Shader.Find("Sprites/Default")
-                        ?? Shader.Find("Hidden/InternalErrorShader");
+                    var lit = AngelicaRenderPipeline.Find(
+                            AngelicaRenderPipeline.HdrpLit,
+                            "Universal Render Pipeline/Lit",
+                            AngelicaRenderPipeline.HdrpUnlit,
+                            "Universal Render Pipeline/Unlit",
+                            "Sprites/Default",
+                            "Hidden/InternalErrorShader");
                     if (lit == null)
                         continue;
                     var mat = new Material(lit);

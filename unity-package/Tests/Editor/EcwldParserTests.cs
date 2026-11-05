@@ -68,32 +68,29 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void ParsesTreesFromV13Block()
         {
-            // v13 block: 1 tree record = type DWORD + X float = 8 bytes (Y/Z default to 0)
-            var blocks = new List<byte[]> { BuildBlockWithTree(version: 13, treeType: 7, posX: 5f, posY: 0f, posZ: 0f) };
+            // v13 still stores ECWDFILETREE5: type + XYZ = 16 bytes.
+            var blocks = new List<byte[]> { BuildBlockWithTree(version: 13, treeType: 7, posX: 5f, posY: 6f, posZ: 7f) };
             var document = CreateParser().Parse(BuildEcwldWithCustomBlocks(blocks, version: 13), "trees_v13.ecwld");
 
             Assert.AreEqual(13u, document.Version);
             Assert.AreEqual(1, document.Trees.Count);
             Assert.AreEqual(7u, document.Trees[0].Type);
             Assert.AreEqual(5f, document.Trees[0].Pos[0], 0.0001f);
-            Assert.AreEqual(0f, document.Trees[0].Pos[1], 0.0001f);
-            Assert.AreEqual(0f, document.Trees[0].Pos[2], 0.0001f);
+            Assert.AreEqual(6f, document.Trees[0].Pos[1], 0.0001f);
+            Assert.AreEqual(7f, document.Trees[0].Pos[2], 0.0001f);
         }
 
         [Test]
         public void ParsesTreeTypesFromHeaderOffset()
         {
             // Build a file with tree type data at a custom offset after blocks.
-            // Format per tree type: DWORD typeId + length-prefixed spt path + length-prefixed comp map path.
+            // Format per tree type: length-prefixed spt path + length-prefixed comp map path.
+            // Type id is the table index, matching CECScene::LoadTreeTypeData.
             var blocks = new List<byte[]> { BuildBlock(version: 12, exportId: 7) };
             var treeTypeData = new List<byte>();
             var ttw = new BinaryWriter(new MemoryStream());
-            // Tree type 100 -> "trees/oak.spt"
-            ttw.Write(100u);
             WriteAString(ttw, "trees/oak.spt");
             WriteAString(ttw, "trees/oak_comp.dds");
-            // Tree type 200 -> "trees/pine.spt"
-            ttw.Write(200u);
             WriteAString(ttw, "trees/pine.spt");
             WriteAString(ttw, "trees/pine_comp.dds");
             ttw.Flush();
@@ -124,8 +121,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             var document = CreateParser().Parse(result, "treetypes.ecwld");
 
             Assert.AreEqual(2, document.TreeTypes.Count);
-            Assert.AreEqual("trees/oak.spt", document.TreeTypes[100]);
-            Assert.AreEqual("trees/pine.spt", document.TreeTypes[200]);
+            Assert.AreEqual("trees/oak.spt", document.TreeTypes[0]);
+            Assert.AreEqual("trees/pine.spt", document.TreeTypes[1]);
         }
 
         [Test]
@@ -242,14 +239,11 @@ namespace SilverEcho.ForsakenWorld.Tests
             foreach (var c in n)
                 w.Write(c);
 
-            // Tree record: type DWORD + position (16 bytes for v12, 8 bytes for v13+)
+            // ECWDFILETREE5: type DWORD + XYZ for every supported version.
             w.Write(treeType);
             w.Write(posX);
-            if (version == 12)
-            {
-                w.Write(posY);
-                w.Write(posZ);
-            }
+            w.Write(posY);
+            w.Write(posZ);
 
             w.Flush();
             return ms.ToArray();

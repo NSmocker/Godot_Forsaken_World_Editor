@@ -19,9 +19,9 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static readonly string[] PageSizeLabels = { "50", "100", "250", "500" };
         private static GfxTextDecoder gameDataDecoder;
         private static readonly string[] FileTypes =
-            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps", "Buildings", "Textures", "Audio", "UI XML" };
+            { "All", "ECM", "GFX", "Models", "Skeletons", "Skins", "Tracks", "Maps", "World", "Buildings", "Textures", "Audio", "UI XML" };
         private static readonly string[] Extensions =
-            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2", "bmd", "@textures", "@audio", "xml" };
+            { "", "ecm", "gfx", "smd", "bon", "ski", "stck", "trn2", "ecwld", "bmd", "@textures", "@audio", "xml" };
 
         private static readonly HashSet<string> TextureExtensions = new HashSet<string>
             { "dds", "bmp", "tga", "png", "jpg", "jpeg" };
@@ -377,6 +377,17 @@ namespace SilverEcho.ForsakenWorld.Editor
                     {
                         if (GUILayout.Button("Import map Prefab (terrain + buildings + world)"))
                             ImportSelectedMap();
+                        if (GUILayout.Button("Instantiate map in scene"))
+                            InstantiateSelectedMap();
+                    }
+
+                    using (new EditorGUI.DisabledScope(
+                        selectedFile == null ||
+                        selectedFile.Extension != "ecwld" ||
+                        selectedEcwld == null))
+                    {
+                        if (GUILayout.Button("Load world (.ecwld) into scene"))
+                            InstantiateSelectedWorld();
                     }
 
                     using (new EditorGUI.DisabledScope(
@@ -1693,7 +1704,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             EditorGUILayout.LabelField(
                 "Effects: " + world.Effects.Count +
                 "  ECModels: " + world.Models.Count +
-                "  Sounds: " + world.Sounds.Count);
+                "  Sounds: " + world.Sounds.Count +
+                "  Trees: " + world.Trees.Count +
+                "  Tree types: " + world.TreeTypes.Count);
             EditorGUILayout.LabelField(
                 "Water refs: " + world.WaterRefs.Count +
                 "  Ornaments: " + world.OrnamentRefs.Count +
@@ -1738,6 +1751,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     ", water=" + result.Water +
                     ", effects=" + result.Effects +
                     ", models=" + result.Models +
+                    ", trees=" + result.Trees +
                     ", sounds=" + result.Sounds +
                     (result.HasLight ? ", light" : "") +
                     (result.Warnings.Count > 0
@@ -1762,6 +1776,54 @@ namespace SilverEcho.ForsakenWorld.Editor
                 status = "Map import failed: " + exception.Message;
                 Debug.LogError(status);
             }
+        }
+
+        private void InstantiateSelectedMap()
+        {
+            if (selectedFile == null || selectedFile.Extension != "trn2" || index == null)
+                return;
+            try
+            {
+                var result = MapAssetImporter.Import(
+                    selectedFile, index, GetGameDataDecoder(), showProgress: true);
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
+                if (prefab == null)
+                    throw new IOException("Map prefab was not created: " + result.PrefabPath);
+                var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                if (instance == null)
+                    instance = UnityEngine.Object.Instantiate(prefab);
+                Undo.RegisterCreatedObjectUndo(instance, "Instantiate Forsaken Map");
+                Selection.activeObject = instance;
+                status = "Instantiated map with " + result.Trees + " tree labels. " + result.PrefabPath;
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning(warning);
+            }
+            catch (Exception exception) when (
+                exception is IOException || exception is UnauthorizedAccessException ||
+                exception is ArgumentException || exception is InvalidOperationException ||
+                exception is InvalidDataException || exception is NotSupportedException ||
+                exception is OperationCanceledException || exception is UnityException)
+            {
+                status = "Map instantiate failed: " + exception.Message;
+                Debug.LogError(status);
+            }
+        }
+
+        private void InstantiateSelectedWorld()
+        {
+            if (selectedFile == null || selectedFile.Extension != "ecwld")
+                return;
+            if (selectedEcwld == null)
+            {
+                status = "World file is not parsed.";
+                return;
+            }
+
+            var root = MapAssetImporter.CreateWorldPreview(selectedEcwld);
+            Undo.RegisterCreatedObjectUndo(root, "Load Forsaken World");
+            Selection.activeObject = root;
+            status = "Loaded " + selectedFile.DisplayName + " into the scene (" +
+                selectedEcwld.Trees.Count + " trees).";
         }
 
         private void ImportSelectedTerrain()

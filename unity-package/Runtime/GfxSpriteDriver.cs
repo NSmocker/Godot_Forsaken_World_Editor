@@ -13,6 +13,7 @@ namespace SilverEcho.ForsakenWorld
     public sealed class GfxSpriteDriver : GfxElementDriver
     {
         public const string ShaderName = "Forsaken World/Angelica Gfx Sprite";
+        public const string HdrpShaderName = AngelicaRenderPipeline.HdrpGfxSprite;
 
         [SerializeField] private GfxSpriteParamsSerial paramsSerial = new GfxSpriteParamsSerial();
         [SerializeField] private bool visualActive = true;
@@ -351,10 +352,14 @@ namespace SilverEcho.ForsakenWorld
             if (spriteParams == null)
                 throw new ArgumentNullException(nameof(spriteParams));
 
-            var shader = Shader.Find(GfxSpriteDriver.ShaderName) ??
-                         Shader.Find("Universal Render Pipeline/Unlit") ??
-                         Shader.Find("Sprites/Default") ??
-                         Shader.Find("Universal Render Pipeline/Lit");
+            var shader = AngelicaRenderPipeline.Find(
+                             GfxSpriteDriver.HdrpShaderName,
+                             GfxSpriteDriver.ShaderName,
+                             AngelicaRenderPipeline.HdrpUnlit,
+                             "Universal Render Pipeline/Unlit",
+                             "Sprites/Default",
+                             AngelicaRenderPipeline.HdrpLit,
+                             "Universal Render Pipeline/Lit");
             if (shader == null)
                 shader = Shader.Find("Hidden/InternalErrorShader");
 
