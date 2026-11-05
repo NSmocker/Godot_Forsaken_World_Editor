@@ -150,6 +150,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachModel(el, elementGo, index, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "170")
+                {
+                    driver = AttachSound(el, elementGo, index, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -423,6 +427,55 @@ namespace SilverEcho.ForsakenWorld.Editor
             return bolt;
         }
 
+
+
+        private static GfxElementDriver AttachSound(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GameDataIndex index,
+            List<string> warnings)
+        {
+            var sound = elementGo.AddComponent<GfxSoundDriver>();
+            var soundParams = GfxSoundParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            var clips = new AudioClip[
+                soundParams.SoundPaths != null ? soundParams.SoundPaths.Length : 0];
+            if (index != null && soundParams.SoundPaths != null)
+            {
+                var resolver = new GfxSoundResolver(index);
+                for (var i = 0; i < soundParams.SoundPaths.Length; i++)
+                {
+                    var resolved = resolver.Resolve(soundParams.SoundPaths[i]);
+                    if (!resolved.IsResolved)
+                    {
+                        if (warnings != null)
+                            warnings.Add(
+                                "GFX ID 170 Path not in game data: " +
+                                soundParams.SoundPaths[i] +
+                                (string.IsNullOrEmpty(resolved.Error)
+                                    ? string.Empty
+                                    : " (" + resolved.Error + ")"));
+                        continue;
+                    }
+
+                    // AudioClip import requires Assets copy (MapAssetImporter parity).
+                    // Path is recorded; clip stays null until host imports the file.
+                    var ext = Path.GetExtension(resolved.File.FullPath);
+                    if (warnings != null &&
+                        !string.Equals(ext, ".wav", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase))
+                    {
+                        warnings.Add(
+                            "GFX ID 170 unsupported extension: " +
+                            resolved.File.RelativePath);
+                    }
+                }
+            }
+
+            sound.Configure(soundParams, clips, warnings);
+            return sound;
+        }
 
         private static GfxElementDriver AttachModel(
             GfxElementPlan el,
