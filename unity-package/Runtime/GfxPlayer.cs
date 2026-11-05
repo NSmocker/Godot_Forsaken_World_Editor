@@ -11,6 +11,10 @@ namespace SilverEcho.ForsakenWorld
     [ExecuteAlways]
     public sealed class GfxPlayer : MonoBehaviour
     {
+        private static readonly List<GfxPlayer> registered = new List<GfxPlayer>();
+
+        /// <summary>Live GfxPlayer instances (edit + play). Used by GFX-Player dock.</summary>
+        public static IReadOnlyList<GfxPlayer> RegisteredPlayers => registered;
         [SerializeField] private bool headerControl = true;
         [SerializeField] private bool playing = true;
         [SerializeField] private bool timeManual;
@@ -192,12 +196,15 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnEnable()
         {
+            if (!registered.Contains(this))
+                registered.Add(this);
             EnsureDriver();
             hierarchyDirty = true;
         }
 
         public override void OnDisable()
         {
+            registered.Remove(this);
             ClearShake();
         }
 
