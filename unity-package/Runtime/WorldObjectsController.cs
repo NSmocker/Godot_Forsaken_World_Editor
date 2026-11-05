@@ -6,6 +6,7 @@ namespace SilverEcho.ForsakenWorld
     /// Day/night + load-radius visibility for map objects, matching
     /// gfx_importer/angelica_world_objects.gd. Also swaps Sun / ambient colors.
     /// </summary>
+    [ExecuteAlways]
     public sealed class WorldObjectsController : MonoBehaviour
     {
         public const float DefaultUpdateInterval = 0.25f;
@@ -52,9 +53,10 @@ namespace SilverEcho.ForsakenWorld
 
         public void ApplyTime()
         {
+            // Godot compares global positions (cam.global_position vs child.global_position).
             Vector3? camPos = null;
             if (Camera.main != null && Camera.main.transform != null)
-                camPos = Camera.main.transform.localPosition;
+                camPos = Camera.main.transform.position;
 
             ApplyNode(transform, camPos);
             if (lightNight == null || lightNight.Value != night)
@@ -111,36 +113,33 @@ namespace SilverEcho.ForsakenWorld
                 var on = vt == WorldObjectMeta.ValidTimeAlways ||
                     vt == (night ? WorldObjectMeta.ValidTimeNight : WorldObjectMeta.ValidTimeDay);
 
-                var radius = loadRadius;
+                // Godot: AudioStreamPlayer3D uses its max_distance (0 = no distance test).
                 var audio = child.gameObject != null ? child.gameObject.GetComponent<AudioSource>() : null;
-                if (audio != null && audio.maxDistance > 0f)
-                    radius = audio.maxDistance;
+                var radius = audio != null ? audio.maxDistance : loadRadius;
 
                 if (on && camPos != null && radius > 0f)
                 {
-                    var dx = child.localPosition.x - camPos.Value.x;
-                    var dy = child.localPosition.y - camPos.Value.y;
-                    var dz = child.localPosition.z - camPos.Value.z;
-                    var distSq = dx * dx + dy * dy + dz * dz;
-                    on = distSq <= radius * radius;
+                    var d = child.position - camPos.Value;
+                    on = d.x * d.x + d.y * d.y + d.z * d.z <= radius * radius;
                 }
 
-                // Stubs have no SetActive; toggle behaviours/renderers.
-                SetActiveApprox(child.gameObject, on);
+                // visible = on; process only when on and (Animate_In_Editor or playing).
+                var run = on && (animateInEditor || Application.isPlaying);
+                ApplyState(child.gameObject, on, run);
                 if (audio != null)
                     audio.mute = !on;
             }
         }
 
-        private static void SetActiveApprox(GameObject go, bool on)
+        public static void ApplyState(GameObject go, bool visible, bool run)
         {
             if (go == null)
                 return;
             var renderers = go.GetComponentsInChildren<Renderer>(true);
             foreach (var renderer in renderers)
             {
-                if (renderer != null)
-                    renderer.gameObject.name = renderer.gameObject.name; // keep stub happy
+                if (renderer != null && renderer.enabled != visible)
+                    renderer.enabled = visible;
             }
 
             var behaviours = go.GetComponentsInChildren<Behaviour>(true);
@@ -148,7 +147,8 @@ namespace SilverEcho.ForsakenWorld
             {
                 if (behaviour == null || behaviour is WorldObjectMeta || behaviour is WorldObjectsController)
                     continue;
-                behaviour.enabled = on;
+                if (behaviour.enabled != run)
+                    behaviour.enabled = run;
             }
         }
 
