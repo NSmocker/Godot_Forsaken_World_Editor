@@ -238,5 +238,23 @@ namespace SilverEcho.ForsakenWorld
             if (r < 0f) r += m;
             return r;
         }
+
+        /// <summary>Godot Quaternion.from_euler: YXZ intrinsic order, radians.</summary>
+        public static float[] QuatFromEuler(float[] eulerRad)
+        {
+            if (eulerRad == null || eulerRad.Length < 3)
+                return QuatIdentity();
+            var qx = QuatFromAxisAngle(Vec3(1f, 0f, 0f), eulerRad[0]);
+            var qy = QuatFromAxisAngle(Vec3(0f, 1f, 0f), eulerRad[1]);
+            var qz = QuatFromAxisAngle(Vec3(0f, 0f, 1f), eulerRad[2]);
+            // Y * X * Z (Godot YXZ)
+            return MulQuat(qy, MulQuat(qx, qz));
+        }
+
+        /// <summary>float32 truncate like Angelica / Godot PackedFloat32Array.</summary>
+        public static float F32(float value)
+        {
+            return BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(value));
+        }
     }
 }

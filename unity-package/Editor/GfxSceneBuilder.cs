@@ -124,6 +124,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachLtnTrail(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "120" || el.SystemId == "121" ||
+                         el.SystemId == "122" || el.SystemId == "123" ||
+                         el.SystemId == "124" || el.SystemId == "125")
+                {
+                    driver = AttachParticle(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -216,6 +222,93 @@ namespace SilverEcho.ForsakenWorld.Editor
                 trailParams.TexFile, el.SystemId, texResolver, warnings);
             trail.Configure(trailParams, texture, gfx2d, warnings);
             return trail;
+        }
+
+
+        private static GfxElementDriver AttachParticle(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var particle = elementGo.AddComponent<GfxParticleDriver>();
+            var particleParams = GfxParticleParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            particleParams.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+
+            // Emitter-owned CtrlMethods (125 curve) that were not consumed into keypoints.
+            var emitterExtra = new List<GfxCtrlSpec>();
+            var usedInKp = 0;
+            foreach (var kp in el.Keypoints)
+                usedInKp += kp.Ctrls != null ? kp.Ctrls.Count : 0;
+            // Prefer scanning element ControlMethods for type 110 / extras.
+            if (el.ControlMethods != null)
+            {
+                foreach (var raw in el.ControlMethods)
+                {
+                    var spec = GfxKeypointBuilder.FromDictionary(raw);
+                    if (spec == null)
+                        continue;
+                    if (spec.Type == 110)
+                        emitterExtra.Add(spec);
+                }
+            }
+
+            if (particleParams.SystemId == "125")
+            {
+                GfxCtrlSpec curve = null;
+                foreach (var c in emitterExtra)
+                {
+                    if (c.Type == 110) { curve = c; break; }
+                }
+                if (curve == null)
+                {
+                    foreach (var kp in el.Keypoints)
+                    {
+                        foreach (var c in kp.Ctrls)
+                        {
+                            if (c != null && c.Type == 110) { curve = c; break; }
+                        }
+                        if (curve != null) break;
+                    }
+                }
+                if (curve != null && curve.CurvePath != null &&
+                    curve.CurvePath.Points != null && curve.CurvePath.Points.Length >= 2)
+                {
+                    particleParams.CurvePoints = curve.CurvePath.Points;
+                    particleParams.CurveRatios = curve.CurvePath.Ratios;
+                    particleParams.CurveDirs = curve.CurvePath.Dirs;
+                    particleParams.AvgStepCount =
+                        GfxParticleParams.AvgStepCountForSeg(particleParams.AvgGenSeg);
+                    particleParams.EmitterEnabled = true;
+                }
+                else
+                {
+                    particleParams.EmitterEnabled = false;
+                }
+            }
+
+            var affectors = new List<GfxCtrlSpec>();
+            if (el.Affectors != null)
+            {
+                foreach (var raw in el.Affectors)
+                {
+                    var spec = GfxKeypointBuilder.FromDictionary(raw);
+                    if (spec != null)
+                        affectors.Add(spec);
+                }
+            }
+
+            var texture = ResolveElementTexture(
+                particleParams.TexFile, el.SystemId, texResolver, warnings);
+            particle.SystemId = el.SystemId;
+            particle.LocalStartTime = el.LocalStartTime;
+            particle.LocalTotalTime = el.LocalTotalTime;
+            particle.SetKeypoints(el.Keypoints);
+            particle.Configure(
+                particleParams, texture, gfx2d, affectors, emitterExtra, warnings);
+            return particle;
         }
 
         private static Texture ResolveElementTexture(
