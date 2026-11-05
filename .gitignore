@@ -1,0 +1,8 @@
+
+# Accidental Unity project files if Editor is pointed at repo root (host lives outside repo)
+/Library/
+/Logs/
+/Packages/
+/ProjectSettings/
+/UserSettings/
+/Assets/
