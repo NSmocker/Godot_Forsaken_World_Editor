@@ -6,6 +6,17 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxHeaderDriverTests
     {
         [Test]
+        public void ParseBoolMatchesGodotTypeBoolRead()
+        {
+            // gfx_data_node: val == "1" or val.to_lower() == "true"; absent → default.
+            Assert.IsTrue(GfxPropertyValues.ParseBool(" TRUE "));
+            Assert.IsTrue(GfxPropertyValues.ParseBool("1", false));
+            Assert.IsFalse(GfxPropertyValues.ParseBool("2", true));
+            Assert.IsFalse(GfxPropertyValues.ParseBool("", true));
+            Assert.IsTrue(GfxPropertyValues.ParseBool(null, true));
+        }
+
+        [Test]
         public void HeaderConfigUsesGodotAsBoolAndFloatTruncatedInts()
         {
             // gfx_data_node._read_cfg: _as_bool → only "1"/"true"; int(f.call(...)) parses float.

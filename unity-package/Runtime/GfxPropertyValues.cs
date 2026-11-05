@@ -81,14 +81,16 @@ namespace SilverEcho.ForsakenWorld
             return fallback;
         }
 
+        /// <summary>
+        /// Godot gfx_data_node param read (TYPE_BOOL): <c>val == "1" or val.to_lower() == "true"</c>.
+        /// Absent key (null) → fallback; any present value other than 1/true → false.
+        /// </summary>
         public static bool ParseBool(string raw, bool fallback = false)
         {
-            if (string.IsNullOrWhiteSpace(raw))
+            if (raw == null)
                 return fallback;
             var s = raw.Trim().ToLowerInvariant();
-            if (s == "1" || s == "true") return true;
-            if (s == "0" || s == "false") return false;
-            return fallback;
+            return s == "1" || s == "true";
         }
 
         public static float[] ParseVec3(string raw, float[] fallback)
