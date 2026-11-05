@@ -130,6 +130,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachParticle(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "130")
+                {
+                    driver = AttachLight(el, elementGo, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -309,6 +313,19 @@ namespace SilverEcho.ForsakenWorld.Editor
             particle.Configure(
                 particleParams, texture, gfx2d, affectors, emitterExtra, warnings);
             return particle;
+        }
+
+
+        private static GfxElementDriver AttachLight(
+            GfxElementPlan el,
+            GameObject elementGo,
+            List<string> warnings)
+        {
+            var light = elementGo.AddComponent<GfxLightDriver>();
+            var lightParams = GfxLightParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            light.Configure(lightParams, warnings);
+            return light;
         }
 
         private static Texture ResolveElementTexture(
