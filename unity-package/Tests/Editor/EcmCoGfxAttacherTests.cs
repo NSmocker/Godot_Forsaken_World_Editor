@@ -143,5 +143,18 @@ namespace SilverEcho.ForsakenWorld.Tests
             EcmCoGfxAttacher.Attach(root, doc, null, warnings);
             Assert.IsTrue(warnings.Exists(m => m.Contains("GfxParam 7")));
         }
+
+        [Test]
+        public void AsIntBoolMatchesGodotToInt()
+        {
+            Assert.IsFalse(EcmCoGfxAttacher.AsIntBool(null));
+            Assert.IsFalse(EcmCoGfxAttacher.AsIntBool(""));
+            Assert.IsFalse(EcmCoGfxAttacher.AsIntBool("0"));
+            Assert.IsFalse(EcmCoGfxAttacher.AsIntBool("true")); // Godot to_int("true")==0
+            Assert.IsTrue(EcmCoGfxAttacher.AsIntBool("1"));
+            Assert.IsTrue(EcmCoGfxAttacher.AsIntBool("2"));
+            Assert.IsTrue(EcmCoGfxAttacher.AsIntBool(" -3 "));
+        }
+
     }
 }

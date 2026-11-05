@@ -128,6 +128,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             return FindHookRecursive(root, hookName.Trim());
         }
 
+        /// <summary>Godot ecm_cogfx._as_bool: strip_edges().to_int() != 0.</summary>
+        public static bool AsIntBool(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+            int n;
+            return int.TryParse(
+                       value.Trim(),
+                       NumberStyles.Integer,
+                       CultureInfo.InvariantCulture,
+                       out n) &&
+                   n != 0;
+        }
+
         public static string ScanfS(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -282,7 +296,8 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                 string isCmd;
                 p.TryGetValue("ParamDataIsCmd", out isCmd);
-                var cmd = isCmd != null && isCmd.Trim() != "0" && isCmd.Trim() != "";
+                // Godot ecm_cogfx._as_bool: strip_edges().to_int() != 0
+                var cmd = AsIntBool(isCmd);
                 string hookRaw;
                 p.TryGetValue(cmd ? "ParamDataCmd" : "ParamDataHook", out hookRaw);
                 var hookName = ScanfS(hookRaw);
