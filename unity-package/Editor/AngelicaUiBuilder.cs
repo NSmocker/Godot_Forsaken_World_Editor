@@ -15,6 +15,10 @@ namespace SilverEcho.ForsakenWorld.Editor
     public static class AngelicaUiBuilder
     {
         public const int MaxSubDepth = 4;
+        /// <summary>Godot PREVIEW_PROGRESS: progress bars preview full (100 of 100).</summary>
+        public const float PreviewProgress = 100f;
+        /// <summary>Godot DISABLED_TEXT = Color8(128, 128, 128) for disabled buttons/checks.</summary>
+        public static readonly Color DisabledText = new Color(128f / 255f, 128f / 255f, 128f / 255f, 1f);
 
         public static GameObject BuildDialog(
             AuiDialog dialog,
@@ -136,6 +140,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 info.Multiline = bv;
             if (c.BoolProps.TryGetValue("password", out bv))
                 info.Password = bv;
+            if (c.BoolProps.TryGetValue("vertical_progress", out bv))
+                info.ProgressVertical = bv;
+            if (c.BoolProps.TryGetValue("reverse_direction", out bv))
+                info.ProgressReverse = bv;
 
             ApplyText(info, c.Text, defaults, ui);
             ApplyResources(info, c);
@@ -161,6 +169,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (info == null)
                     continue;
                 BindSurface(info, loader);
+                BindProgressFill(info, loader);
                 BindText(info);
             }
         }
@@ -188,6 +197,61 @@ namespace SilverEcho.ForsakenWorld.Editor
             image.color = new Color(1f, 1f, 1f, info.Alpha);
         }
 
+        /// <summary>
+        /// Godot <c>_progress</c>: TextureProgressBar with FrameImage under, FillImage on top,
+        /// fill_mode from VerticalProgress / ReverseDirection, value = PREVIEW_PROGRESS of 100.
+        /// uGUI: child Image (Type.Filled) stretched over the control.
+        /// </summary>
+        private static void BindProgressFill(AuiElementInfo info, AuiSurfaceLoader loader)
+        {
+            if (!string.Equals(info.AuiType, "PROGRESS", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(info.ProgressFillPath))
+                return;
+            var tex = loader.Load(info.ProgressFillPath);
+            if (tex == null)
+                return;
+            // Same layout policy as the rest of the AUI preview: rect lives in AuiElementInfo
+            // X/Y/Width/Height meta (no RectTransform layout pass yet).
+            var child = new GameObject("Fill");
+            child.transform.SetParent(info.transform, false);
+            var image = child.AddComponent<Image>();
+            image.sprite = loader.CreateSprite(tex, AuiFrameMode.Unknown);
+            ApplyProgressFill(image, info.ProgressVertical, info.ProgressReverse);
+            image.color = new Color(1f, 1f, 1f, info.Alpha);
+        }
+
+        /// <summary>Godot fill_mode mapping onto uGUI Image.Type.Filled.</summary>
+        public static void ApplyProgressFill(Image image, bool vertical, bool reverse)
+        {
+            image.type = Image.Type.Filled;
+            if (vertical)
+            {
+                image.fillMethod = Image.FillMethod.Vertical;
+                // FILL_BOTTOM_TO_TOP default; reverse → FILL_TOP_TO_BOTTOM
+                image.fillOrigin = reverse
+                    ? (int)Image.OriginVertical.Top
+                    : (int)Image.OriginVertical.Bottom;
+            }
+            else
+            {
+                image.fillMethod = Image.FillMethod.Horizontal;
+                // FILL_LEFT_TO_RIGHT default; reverse → FILL_RIGHT_TO_LEFT
+                image.fillOrigin = reverse
+                    ? (int)Image.OriginHorizontal.Right
+                    : (int)Image.OriginHorizontal.Left;
+            }
+            image.fillAmount = PreviewProgress / 100f;
+        }
+
+        /// <summary>Godot font_disabled_color = DISABLED_TEXT on _button / _check only.</summary>
+        public static bool UsesDisabledTextColor(AuiElementInfo info)
+        {
+            if (info == null || info.Enabled)
+                return false;
+            var t = info.AuiType ?? string.Empty;
+            return t == "STILLIMAGEBUTTON" || t == "RADIO" || t == "CHECK";
+        }
+
         private static void BindText(AuiElementInfo info)
         {
             if (string.IsNullOrEmpty(info.Text) && string.IsNullOrEmpty(info.RichText))
@@ -207,7 +271,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 ? info.RichText
                 : (info.Text ?? string.Empty);
             text.fontSize = info.FontSizePixels > 0 ? info.FontSizePixels : 13;
-            text.color = info.FontColor;
+            text.color = UsesDisabledTextColor(info) ? DisabledText : info.FontColor;
             text.alignment = AlignToAnchor(info.Align);
         }
 
@@ -331,6 +395,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             AuiResource disabled;
             if (c.Resources.TryGetValue("FrameDisabledImage", out disabled))
                 info.ResourceDisabledFile = disabled.File;
+
+            AuiResource fill;
+            if (string.Equals(c.Type, "PROGRESS", StringComparison.OrdinalIgnoreCase) &&
+                c.Resources.TryGetValue("FillImage", out fill) && !fill.IsGfx)
+            {
+                info.ProgressFillFile = fill.File;
+                info.ProgressFillPath = fill.Path;
+            }
 
             // Godot: Gfx* resources → meta only (no texture / no 3D SubViewport yet).
             ApplyGfxMeta(info, c);

@@ -8,6 +8,41 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class AuiVisualTests
     {
         [Test]
+        public void ProgressFillAndDisabledTextMatchGodotBuilder()
+        {
+            // Godot _progress: fill_mode LEFT_TO_RIGHT / RIGHT_TO_LEFT / BOTTOM_TO_TOP /
+            // TOP_TO_BOTTOM from VerticalProgress + ReverseDirection, value PREVIEW_PROGRESS=100.
+            var go = new GameObject("p");
+            var image = go.AddComponent<UnityEngine.UI.Image>();
+            AngelicaUiBuilder.ApplyProgressFill(image, vertical: false, reverse: false);
+            Assert.AreEqual(UnityEngine.UI.Image.Type.Filled, image.type);
+            Assert.AreEqual(UnityEngine.UI.Image.FillMethod.Horizontal, image.fillMethod);
+            Assert.AreEqual((int)UnityEngine.UI.Image.OriginHorizontal.Left, image.fillOrigin);
+            Assert.AreEqual(1f, image.fillAmount, 1e-6f);
+            AngelicaUiBuilder.ApplyProgressFill(image, vertical: false, reverse: true);
+            Assert.AreEqual((int)UnityEngine.UI.Image.OriginHorizontal.Right, image.fillOrigin);
+            AngelicaUiBuilder.ApplyProgressFill(image, vertical: true, reverse: false);
+            Assert.AreEqual(UnityEngine.UI.Image.FillMethod.Vertical, image.fillMethod);
+            Assert.AreEqual((int)UnityEngine.UI.Image.OriginVertical.Bottom, image.fillOrigin);
+            AngelicaUiBuilder.ApplyProgressFill(image, vertical: true, reverse: true);
+            Assert.AreEqual((int)UnityEngine.UI.Image.OriginVertical.Top, image.fillOrigin);
+
+            // Godot DISABLED_TEXT Color8(128,128,128) only on _button / _check controls.
+            var info = new GameObject("b").AddComponent<AuiElementInfo>();
+            info.AuiType = "STILLIMAGEBUTTON";
+            info.Enabled = false;
+            Assert.IsTrue(AngelicaUiBuilder.UsesDisabledTextColor(info));
+            info.AuiType = "CHECK";
+            Assert.IsTrue(AngelicaUiBuilder.UsesDisabledTextColor(info));
+            info.AuiType = "LABEL";
+            Assert.IsFalse(AngelicaUiBuilder.UsesDisabledTextColor(info));
+            info.AuiType = "RADIO";
+            info.Enabled = true;
+            Assert.IsFalse(AngelicaUiBuilder.UsesDisabledTextColor(info));
+            Assert.AreEqual(128f / 255f, AngelicaUiBuilder.DisabledText.r, 1e-3f);
+        }
+
+        [Test]
         public void NineSliceResolves3x3And4x4()
         {
             var m = AuiNineSlice.ComputeMargins(96, 96, AuiFrameMode.Unknown);

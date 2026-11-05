@@ -30,6 +30,13 @@ namespace SilverEcho.ForsakenWorld
         public string ResourceHoverFile = string.Empty;
         public string ResourceDisabledFile = string.Empty;
 
+        /// <summary>PROGRESS FillImage (Godot texture_progress); path for BindVisuals.</summary>
+        public string ProgressFillFile = string.Empty;
+        public string ProgressFillPath = string.Empty;
+        /// <summary>PROGRESS VerticalProgress / ReverseDirection (Godot fill_mode).</summary>
+        public bool ProgressVertical;
+        public bool ProgressReverse;
+
         /// <summary>Godot meta "gfx" (Gfx resource path).</summary>
         public string GfxPath = string.Empty;
         /// <summary>Godot meta "gfx_down".</summary>
