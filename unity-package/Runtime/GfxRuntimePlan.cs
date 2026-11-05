@@ -70,6 +70,15 @@ namespace SilverEcho.ForsakenWorld
         public static bool IsPorted(string systemId) =>
             !string.IsNullOrEmpty(systemId) && PortedIds.Contains(systemId);
 
+        /// <summary>
+        /// IDs with a gfx_element_&lt;id&gt;.gd script: gfx_parser.build_file_node creates (and numbers)
+        /// only these; any other ID is skipped without consuming an Element_N index. 102 has an
+        /// element script but no visual builder in Godot.
+        /// </summary>
+        public static bool HasGodotElementScript(string systemId) =>
+            !string.IsNullOrEmpty(systemId) &&
+            (GodotSupportedIds.Contains(systemId) || systemId == "102");
+
         public static bool IsKnownInGodot(string systemId) =>
             !string.IsNullOrEmpty(systemId) && GodotSupportedIds.Contains(systemId);
 
@@ -123,12 +132,17 @@ namespace SilverEcho.ForsakenWorld
                 if (!isPorted && !plan.StubbedElementIds.Contains(id))
                     plan.StubbedElementIds.Add(id);
 
+                // gfx_parser: element_count only advances for IDs with an element script;
+                // skipped IDs never become Element_ nodes (names seed Random_Seed via hash()).
+                var godotNode = GfxElementRegistry.HasGodotElementScript(id);
                 var el = new GfxElementPlan
                 {
                     Index = index,
                     SystemId = id,
                     IsStub = !isPorted,
-                    Name = "Element_" + index + "_ID_" + (string.IsNullOrEmpty(id) ? "Unknown" : id),
+                    Name = godotNode
+                        ? "Element_" + index + "_ID_" + id
+                        : "Skipped_ID_" + (string.IsNullOrEmpty(id) ? "Unknown" : id),
                     Keypoints = GfxKeypointBuilder.Build(element)
                 };
                 foreach (var pair in element.Properties)
@@ -145,10 +159,11 @@ namespace SilverEcho.ForsakenWorld
 
                 float headerContribution;
                 FillTiming(el, element, out headerContribution);
-                if (headerContribution > fileLoop)
+                if (godotNode && headerContribution > fileLoop)
                     fileLoop = headerContribution;
                 plan.Elements.Add(el);
-                index++;
+                if (godotNode)
+                    index++;
             }
 
             // Godot create_id_*._get_max_time_for_header: shared GlobalLoopTime for every

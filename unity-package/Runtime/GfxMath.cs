@@ -8,6 +8,31 @@ namespace SilverEcho.ForsakenWorld
     /// </summary>
     public static class GfxMath
     {
+        /// <summary>
+        /// Godot 4 <c>hash(String)</c> = String::hash(): djb2 over UTF-32 code points
+        /// (hash * 33 + c). Used for Random_Seed = hash(str(node.name)) &amp; 0xFFFF.
+        /// </summary>
+        public static uint GodotStringHash(string s)
+        {
+            uint h = 5381;
+            if (string.IsNullOrEmpty(s))
+                return h;
+            for (var i = 0; i < s.Length; i++)
+            {
+                uint c = char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])
+                    ? (uint)char.ConvertToUtf32(s[i], s[++i])
+                    : s[i];
+                if (c == 0)
+                    break;
+                h = unchecked((h << 5) + h + c);
+            }
+
+            return h;
+        }
+
+        /// <summary>Godot create_id_120/150/180: hash(str(parent_node.name)) &amp; 0xFFFF.</summary>
+        public static int GodotNodeSeed(string nodeName) => (int)(GodotStringHash(nodeName) & 0xFFFF);
+
         public const float Epsilon = 1e-6f;
 
         public static float[] Vec3(float x, float y, float z) => new[] { x, y, z };

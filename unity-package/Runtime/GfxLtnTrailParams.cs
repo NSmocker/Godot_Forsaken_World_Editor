@@ -106,17 +106,8 @@ namespace SilverEcho.ForsakenWorld
             return p;
         }
 
-        public static int HashName(string name)
-        {
-            if (string.IsNullOrEmpty(name))
-                return 0;
-            unchecked
-            {
-                var h = 0;
-                foreach (var ch in name)
-                    h = h * 31 + ch;
-                return h;
-            }
-        }
+        /// <summary>Godot hash(str(parent_node.name)) (create_id_180 Random_Seed source).</summary>
+        public static int HashName(string name) =>
+            unchecked((int)GfxMath.GodotStringHash(name ?? string.Empty));
     }
 }

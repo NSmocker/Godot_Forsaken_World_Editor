@@ -278,7 +278,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var particle = elementGo.AddComponent<GfxParticleDriver>();
             var particleParams = GfxParticleParams.FromProperties(
                 el.Properties, el.SystemId, el.Index);
-            particleParams.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+            particleParams.RandomSeed = GfxMath.GodotNodeSeed(el.Name);
 
             // Emitter-owned CtrlMethods (125 curve) that were not consumed into keypoints.
             var emitterExtra = new List<GfxCtrlSpec>();
@@ -378,7 +378,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             var ltn = elementGo.AddComponent<GfxLightningDriver>();
             var lp = GfxLightningParams.FromProperties(el.Properties, el.SystemId, el.Index);
-            lp.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+            lp.RandomSeed = GfxMath.GodotNodeSeed(el.Name);
             // Align ElementStartTime with plan LocalStartTime (StartTime_2 already applied).
             lp.ElementStartTime = el.LocalStartTime;
 
@@ -431,7 +431,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             var bolt = elementGo.AddComponent<GfxLtnBoltDriver>();
             var bp = GfxLtnBoltParams.FromProperties(el.Properties, el.SystemId, el.Index);
-            bp.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+            // create_id_151.build_strokes(parsed_data, hash(str(parent_node.name))): full 32-bit hash.
+            bp.RandomSeed = unchecked((int)GfxMath.GodotStringHash(el.Name));
             var texture = ResolveElementTexture(
                 bp.TexFile, el.SystemId, texResolver, warnings);
             bolt.SystemId = el.SystemId;

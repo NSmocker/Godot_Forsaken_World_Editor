@@ -35,6 +35,38 @@ namespace SilverEcho.ForsakenWorld.Tests
             "KEYPOINTCOUNT: 0\n";
 
         [Test]
+        public void ElementNumberingSkipsIdsWithoutGodotScriptAndSeedsUseGodotHash()
+        {
+            // gfx_parser.build_file_node: element_count advances only for gfx_element_<id>.gd.
+            var gfx =
+                "MOXTVersion: 92\n" +
+                "GFXELEMENTID: 150 A\nStartTime: 0\nKEYPOINTCOUNT: 0\n" +
+                "GFXELEMENTID: 999 B\nStartTime: 0\nKEYPOINTCOUNT: 0\n" +
+                "GFXELEMENTID: 102 C\nStartTime: 0\nKEYPOINTCOUNT: 0\n" +
+                "GFXELEMENTID: 120 D\nStartTime: 0\nKEYPOINTCOUNT: 0\n";
+            var plan = GfxRuntimePlanner.Build(new GfxParser().Parse(gfx));
+            Assert.AreEqual(4, plan.Elements.Count);
+            Assert.AreEqual("Element_1_ID_150", plan.Elements[0].Name);
+            Assert.AreEqual("Skipped_ID_999", plan.Elements[1].Name);
+            Assert.AreEqual("Element_2_ID_102", plan.Elements[2].Name);
+            Assert.AreEqual("Element_3_ID_120", plan.Elements[3].Name);
+            // Godot hash(String) djb2 (x*33 + c) and Random_Seed = hash & 0xFFFF.
+            Assert.AreEqual(1000507488u, GfxMath.GodotStringHash("Element_1_ID_150"));
+            Assert.AreEqual(34912, GfxMath.GodotNodeSeed("Element_1_ID_150"));
+            Assert.AreEqual(62637, GfxMath.GodotNodeSeed("Stroke_1"));
+        }
+
+        [Test]
+        public void BoltPcgMatchesGodotRandomNumberGenerator()
+        {
+            // RandomNumberGenerator.seed = hash(name); DEFAULT_INC kept; randf CLZ path.
+            var rng = new GfxLtnBoltBuilder.GodotPcg(unchecked((int)GfxMath.GodotStringHash("Element_1_ID_151")));
+            Assert.AreEqual(0.1740250140428543f, rng.Randf(), 1e-7f);
+            Assert.AreEqual(0.22649848461151123f, rng.Randf(), 1e-7f);
+            Assert.AreEqual(0.4207172095775604f, rng.Randf(), 1e-7f);
+        }
+
+        [Test]
         public void PlannerMarksPortedSpritesAndStubsOthers()
         {
             var doc = new GfxParser().Parse(SampleGfx);

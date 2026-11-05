@@ -77,7 +77,8 @@ namespace SilverEcho.ForsakenWorld
                 var ltn = go.AddComponent<GfxLightningDriver>();
                 var lp = GfxLtnBoltBuilder.ToLightningParams(
                     boltParams, list[n], parentProps);
-                lp.RandomSeed = boltParams.RandomSeed ^ (n * 397);
+                // Each stroke is a 150 element named Stroke_<n+1>: Random_Seed = hash(name) & 0xFFFF.
+                lp.RandomSeed = GfxMath.GodotNodeSeed("Stroke_" + (n + 1));
                 ltn.SystemId = "150";
                 ltn.GlobalLoopTime = GlobalLoopTime;
                 ltn.LocalStartTime = LocalStartTime;

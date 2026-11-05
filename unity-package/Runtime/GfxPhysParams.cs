@@ -93,7 +93,7 @@ namespace SilverEcho.ForsakenWorld
             p.ParType = GfxPropertyValues.Int(properties, "IsFaceToView", 1);
             if (p.ParType < 0) p.ParType = 0;
             if (p.ParType > 2) p.ParType = 2;
-            p.RandomSeed = (elementName ?? string.Empty).GetHashCode() & 0xFFFF;
+            p.RandomSeed = GfxMath.GodotNodeSeed(elementName ?? string.Empty); // create_id_220
             p.PhysDesc = GfxPropertyValues.Get(properties, "PhysDesc", string.Empty).Trim();
             p.TexFile = GfxPropertyValues.Get(properties, "TexFile", string.Empty);
 

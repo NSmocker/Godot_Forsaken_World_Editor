@@ -272,10 +272,14 @@ namespace SilverEcho.ForsakenWorld
                 SetSeed((ulong)(uint)seed);
             }
 
+            /// <summary>Godot RandomPCG::DEFAULT_INC (PCG_DEFAULT_INC_64); seed() keeps it.</summary>
+            public const ulong DefaultInc = 1442695040888963407UL;
+
             public void SetSeed(ulong seed)
             {
+                // pcg32_srandom_r(&pcg, seed, current_inc)
                 state = 0;
-                inc = (seed << 1) | 1UL;
+                inc = (DefaultInc << 1) | 1UL;
                 Next();
                 state += seed;
                 Next();
@@ -290,10 +294,27 @@ namespace SilverEcho.ForsakenWorld
                 return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
             }
 
+            public uint Rand() => Next();
+
+            /// <summary>
+            /// Godot 4 RandomPCG::randf (CLZ32 path): exponent offset from one draw, significand
+            /// from a second draw with MSB/LSB set.
+            /// </summary>
             public float Randf()
             {
-                // Godot: (rand() >> 8) * (1.0 / 16777216.0)
-                return (Next() >> 8) * (1f / 16777216f);
+                var protoExpOffset = Next();
+                if (protoExpOffset == 0)
+                    return 0f;
+                var significand = Next() | 0x80000001u;
+                return (float)Math.Pow(2.0, -32 - LeadingZeros(protoExpOffset)) * (float)significand;
+            }
+
+            private static int LeadingZeros(uint x)
+            {
+                var n = 0;
+                if (x == 0) return 32;
+                while ((x & 0x80000000u) == 0) { n++; x <<= 1; }
+                return n;
             }
         }
     }
