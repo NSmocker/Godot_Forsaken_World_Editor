@@ -11,6 +11,9 @@ namespace SilverEcho.ForsakenWorld.Editor
     /// </summary>
     public static class GfxSceneBuilder
     {
+        private const int MaxContainerNesting = 4;
+        private static readonly List<string> BuildingStack = new List<string>();
+
         public sealed class BuildResult
         {
             public GameObject Root;
@@ -153,6 +156,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 else if (el.SystemId == "170")
                 {
                     driver = AttachSound(el, elementGo, index, result.Warnings);
+                }
+                else if (el.SystemId == "200")
+                {
+                    driver = AttachContainer(el, elementGo, index, result.Warnings);
                 }
                 else
                 {
@@ -560,6 +567,103 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             return texture;
+        }
+
+
+        private static GfxElementDriver AttachContainer(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GameDataIndex index,
+            List<string> warnings)
+        {
+            var container = elementGo.AddComponent<GfxContainerDriver>();
+            var containerParams = GfxContainerParams.FromProperties(
+                el.Properties, el.SystemId, el.Index, el.Name);
+            containerParams.DummyUsers = GfxPropertyValues.Get(
+                el.Properties, "DummyUsers", string.Empty);
+
+            GameObject subRoot = null;
+            var subSpeed = 1f;
+            var subScale = 1f;
+            if (!string.IsNullOrWhiteSpace(containerParams.GfxPath) && index != null)
+            {
+                var built = TryBuildNestedSubGfx(
+                    containerParams.GfxPath, index, warnings);
+                if (built != null && built.Root != null)
+                {
+                    subRoot = built.Root;
+                    subScale = subRoot.transform.localScale.x;
+                    if (Math.Abs(subScale) < 0.000001f)
+                        subScale = 1f;
+                    subRoot.transform.localScale = Vector3.one;
+                    if (built.Player != null)
+                    {
+                        subSpeed = built.Player.PlaySpeed > 0f ? built.Player.PlaySpeed : 1f;
+                        built.Player.enabled = false;
+                        built.Player.Playing = false;
+                        built.Player.HeaderControl = false;
+                    }
+                }
+            }
+
+            container.Configure(containerParams, subRoot, subSpeed, subScale, warnings);
+            return container;
+        }
+
+        private static BuildResult TryBuildNestedSubGfx(
+            string gfxPath,
+            GameDataIndex index,
+            List<string> warnings)
+        {
+            if (index == null || string.IsNullOrWhiteSpace(gfxPath))
+                return null;
+
+            GameDataFile file;
+            string err;
+            if (!TryResolveGfx(index, gfxPath, out file, out err))
+            {
+                if (warnings != null)
+                    warnings.Add(
+                        "GFX Container: " + gfxPath.Replace('\\', '/') +
+                        " not found (" + (err ?? "missing") + ")");
+                return null;
+            }
+
+            var key = (file.FullPath ?? file.RelativePath ?? gfxPath).ToLowerInvariant();
+            if (BuildingStack.Contains(key) || BuildingStack.Count >= MaxContainerNesting)
+            {
+                if (warnings != null)
+                    warnings.Add(
+                        "GFX Container: " + file.RelativePath +
+                        " self-contains or exceeds nesting " + MaxContainerNesting +
+                        " — skipped");
+                return null;
+            }
+
+            BuildingStack.Add(key);
+            try
+            {
+                return BuildFromFile(
+                    file.FullPath,
+                    null,
+                    index,
+                    GfxContainerDriver.SubGfxNodeName);
+            }
+            catch (Exception e) when (
+                e is IOException || e is InvalidDataException || e is InvalidOperationException ||
+                e is NotSupportedException || e is ArgumentException)
+            {
+                if (warnings != null)
+                    warnings.Add(
+                        "GFX Container build failed: " + file.RelativePath +
+                        " (" + e.Message + ")");
+                return null;
+            }
+            finally
+            {
+                if (BuildingStack.Count > 0)
+                    BuildingStack.RemoveAt(BuildingStack.Count - 1);
+            }
         }
 
         /// <summary>

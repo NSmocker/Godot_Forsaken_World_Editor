@@ -370,8 +370,9 @@ namespace SilverEcho.ForsakenWorld
                         elements.Add(driverComp);
                         if (driverComp.GlobalLoopTime > loop)
                             loop = driverComp.GlobalLoopTime;
-                        // Container (ID 200) would stop descent when prepare_sub_gfx exists;
-                        // not ported yet — continue collecting.
+                        // Container drives Sub_GFX itself (gfx_container_200._prepare).
+                        if (driverComp is GfxContainerDriver)
+                            continue;
                     }
 
                     Collect(child);
