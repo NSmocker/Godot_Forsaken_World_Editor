@@ -89,12 +89,12 @@ The repository does not currently contain a Unity host project. A host project i
 to develop the parser or index, but one is required to run Unity EditMode tests or validate
 Editor UI, AssetDatabase imports, and rendering.
 
-**Migration verification status (2026-11-05):** the Runtime and Editor source compiled in a
-standalone harness with temporary Unity API stubs, and **213**
-parser/asset/index/geometry/assembly/animation/materials/DDS/texture-path/submesh/ECM-resolve/Prefab-path/terrain/BMD/ecwld/ecbsd/water/pagination/GFX-core
-test cases passed. Standalone-harness real-asset scan (PW-Workshop all branches, not committed):
-previous model/ECM/DDS/BMD numbers unchanged; **no** `.ecwld`/`.ecbsd`/`BSData.dat` or complete
-`.trn2`+`.t2bk`+`.t2mk` map sets; **0** `.gfx` files (element-ID histogram unavailable);
-`Building/textures` mostly absent. Prefab/AssetDatabase/terrain/building/map/GFX scene tick and
-browser pagination remain unverified in a real Unity Editor. This does not validate Unity
-compilation, the Test Runner, Editor UI, or live AssetDatabase behavior.
+**Migration verification status (2026-11-05):** **Unity-verified** on Unity **6000.0.60f1**
+Personal (licensed) against a throwaway URP 17 host at `/workspace/unity-host` (file: package
+reference; host and game assets never committed): package Core+Editor compile green; EditMode
+Test Runner **271/271** passed (same count as the standalone Unity/NUnit stub harness). Sample
+PW-Workshop parse probe in that host: DDS/ECM/BMD OK; SMD v8 OK; SMD v5/v6 unsupported as
+designed. Standalone-harness real-asset histogram (prior): model/ECM/DDS/BMD numbers unchanged;
+**no** `.ecwld`/`.ecbsd`/`BSData.dat` or complete `.trn2` map sets; **0** `.gfx` files.
+Still **not** Unity-verified: full workshop Prefab/AssetDatabase sweep, GameData browser UI,
+map import, interactive Play Mode, real `.gfx` scene tick.
