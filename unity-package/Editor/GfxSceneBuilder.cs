@@ -35,29 +35,56 @@ namespace SilverEcho.ForsakenWorld.Editor
             var name = string.IsNullOrEmpty(nodeName)
                 ? Path.GetFileNameWithoutExtension(fullPath)
                 : nodeName;
-            return Build(document, name, fullPath);
+            return Build(document, name, fullPath, null);
+        }
+
+        public static BuildResult BuildFromFile(
+            string fullPath,
+            GfxTextDecoder decoder,
+            GameDataIndex index,
+            string nodeName = null)
+        {
+            if (string.IsNullOrEmpty(fullPath))
+                throw new ArgumentException("path required", nameof(fullPath));
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("GFX file not found", fullPath);
+
+            var bytes = File.ReadAllBytes(fullPath);
+            var document = new GfxParser(decoder ?? new GfxTextDecoder()).Parse(bytes);
+            var name = string.IsNullOrEmpty(nodeName)
+                ? Path.GetFileNameWithoutExtension(fullPath)
+                : nodeName;
+            return Build(document, name, fullPath, index);
         }
 
         public static BuildResult Build(
             GfxDocument document,
             string nodeName = "GFX",
-            string sourcePath = "")
+            string sourcePath = "",
+            GameDataIndex index = null)
         {
             if (document == null)
                 throw new ArgumentNullException(nameof(document));
 
             var plan = GfxRuntimePlanner.Build(document, nodeName, sourcePath);
-            return Build(plan);
+            return Build(plan, index);
         }
 
-        public static BuildResult Build(GfxRuntimePlan plan)
+        public static BuildResult Build(GfxRuntimePlan plan, GameDataIndex index = null)
         {
             if (plan == null)
                 throw new ArgumentNullException(nameof(plan));
 
             var result = new BuildResult { Plan = plan };
             result.Warnings.AddRange(plan.Warnings);
-            result.StubbedIds.AddRange(plan.StubbedElementIds);
+            // Recompute stub list after ported IDs may have changed since plan build.
+            result.StubbedIds.Clear();
+            foreach (var el in plan.Elements)
+            {
+                if (!GfxElementRegistry.IsPorted(el.SystemId) &&
+                    !result.StubbedIds.Contains(el.SystemId))
+                    result.StubbedIds.Add(el.SystemId);
+            }
 
             var root = new GameObject(Sanitize(plan.Name));
             var player = root.AddComponent<GfxPlayer>();
@@ -67,25 +94,36 @@ namespace SilverEcho.ForsakenWorld.Editor
                 root.transform.localScale = new Vector3(
                     plan.DefaultScale, plan.DefaultScale, plan.DefaultScale);
 
+            var gfx2d = GfxPropertyValues.Bool(plan.Header, "2DRender", false);
+            GfxTextureResolver texResolver = index != null
+                ? new GfxTextureResolver(index)
+                : null;
+
             foreach (var el in plan.Elements)
             {
                 var elementGo = new GameObject(Sanitize(el.Name));
                 elementGo.transform.SetParent(root.transform, false);
 
                 GfxElementDriver driver;
-                if (el.IsStub || !GfxElementRegistry.IsPorted(el.SystemId))
+                if (!GfxElementRegistry.IsPorted(el.SystemId))
+                {
+                    driver = elementGo.AddComponent<GfxElementStub>();
+                    result.Warnings.Add(
+                        "GFX element ID " + el.SystemId +
+                        " stubbed (visual builder not ported yet).");
+                }
+                else if (el.SystemId == "100" || el.SystemId == "101")
+                {
+                    driver = AttachSprite(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
+                else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
                     if (!result.StubbedIds.Contains(el.SystemId))
                         result.StubbedIds.Add(el.SystemId);
                     result.Warnings.Add(
                         "GFX element ID " + el.SystemId +
-                        " stubbed (visual builder not ported yet).");
-                }
-                else
-                {
-                    // Future: dispatch to create_id_* builders.
-                    driver = elementGo.AddComponent<GfxElementStub>();
+                        " registered as ported but has no builder yet; stubbed.");
                 }
 
                 driver.SystemId = el.SystemId;
@@ -119,6 +157,56 @@ namespace SilverEcho.ForsakenWorld.Editor
             return result;
         }
 
+        private static GfxElementDriver AttachSprite(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var sprite = elementGo.AddComponent<GfxSpriteDriver>();
+            var spriteParams = GfxSpriteParams.FromProperties(
+                el.Properties, el.SystemId, el.Index);
+            Texture texture = null;
+            if (texResolver != null && !string.IsNullOrEmpty(spriteParams.TexFile))
+            {
+                var resolved = texResolver.Resolve(spriteParams.TexFile);
+                if (resolved != null && resolved.IsResolved)
+                {
+                    try
+                    {
+                        var imported = AssembledTextureImporter.ImportOrUpdate(
+                            resolved.Resource.File.FullPath,
+                            resolved.RequestedRelativePath,
+                            resolved.DdsHeader);
+                        if (imported != null && imported.Texture != null)
+                            texture = imported.Texture;
+                        else if (warnings != null && imported != null &&
+                                 !string.IsNullOrEmpty(imported.Error))
+                            warnings.Add(
+                                "GFX ID " + el.SystemId + " TexFile import: " +
+                                imported.Error);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (warnings != null)
+                            warnings.Add(
+                                "GFX ID " + el.SystemId + " TexFile import failed: " +
+                                ex.Message);
+                    }
+                }
+                else if (warnings != null && resolved != null && resolved.Resource != null &&
+                         !string.IsNullOrEmpty(resolved.Resource.Error))
+                {
+                    warnings.Add(
+                        "GFX ID " + el.SystemId + " TexFile: " + resolved.Resource.Error);
+                }
+            }
+
+            sprite.Configure(spriteParams, texture, gfx2d, warnings);
+            return sprite;
+        }
+
         /// <summary>
         /// Tries to resolve a gfx\ relative path via GameDataIndex and build a runtime root.
         /// Returns null when the file cannot be resolved (caller keeps placeholder).
@@ -146,6 +234,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return BuildFromFile(
                     file.FullPath,
                     decoder,
+                    index,
                     Path.GetFileNameWithoutExtension(file.Name));
             }
             catch (Exception e) when (

@@ -1981,7 +1981,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var built = GfxSceneBuilder.Build(
                     document,
                     Path.GetFileNameWithoutExtension(selectedFile.Name),
-                    selectedFile.RelativePath);
+                    selectedFile.RelativePath,
+                    index);
                 if (built.Root == null)
                 {
                     EditorUtility.DisplayDialog(
@@ -1997,7 +1998,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     : "";
                 EditorUtility.DisplayDialog(
                     "Forsaken World",
-                    "Instantiated GFX runtime root with GfxPlayer. Element visuals are stubs until their family slice is ported." +
+                    "Instantiated GFX runtime root with GfxPlayer. ID 100/101 are sprites; other element IDs may still be stubs." +
                     stubNote,
                     "OK");
             }

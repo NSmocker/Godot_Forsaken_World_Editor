@@ -61,8 +61,10 @@ namespace SilverEcho.ForsakenWorld
             };
 
         // IDs with a real Unity visual builder in this package.
+        private static readonly string[] DefaultPortedIds = { "100", "101" };
+
         private static readonly HashSet<string> PortedIds =
-            new HashSet<string>(StringComparer.Ordinal);
+            new HashSet<string>(DefaultPortedIds, StringComparer.Ordinal);
 
         public static bool IsPorted(string systemId) =>
             !string.IsNullOrEmpty(systemId) && PortedIds.Contains(systemId);
@@ -77,7 +79,13 @@ namespace SilverEcho.ForsakenWorld
                 PortedIds.Add(systemId);
         }
 
-        internal static void ClearPortedForTests() => PortedIds.Clear();
+        /// <summary>Resets to the default ported set (currently 100/101).</summary>
+        internal static void ClearPortedForTests()
+        {
+            PortedIds.Clear();
+            foreach (var id in DefaultPortedIds)
+                PortedIds.Add(id);
+        }
     }
 
     public static class GfxRuntimePlanner
