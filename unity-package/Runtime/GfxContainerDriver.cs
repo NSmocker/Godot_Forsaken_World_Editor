@@ -7,8 +7,8 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// GFX ID 200 container (create_id_200.gd / gfx_container_200.gd).
     /// Hosts a nested Sub_GFX hierarchy and drives its clock/transform/alpha.
-    /// Dummy containers stay invisible (particle DummyEle copies not ported).
-    /// OuterColor tint not applied (same gap as Godot).
+    /// Dummy containers stay invisible (DummyEle copies: Godot gfx_dummy_particles; Unity pending).
+    /// OuterColor tint not applied (absent in Godot too: gfx_container_200.gd).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxContainerDriver : GfxElementDriver

@@ -12,7 +12,7 @@ namespace SilverEcho.ForsakenWorld
     /// as camera-facing basis when Camera.main exists.
     /// 211: screen-parallel local XY placement (full clip-space Fill_Verts_2D needs a
     /// custom shader — not ported; points stay in local XY with Rad_2D).
-    /// MatchGrnd / AlwaysOnGround not ported (needs terrain).
+    /// MatchGrnd / AlwaysOnGround absent in Godot too (create_id_210.gd).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxGridDriver : GfxElementDriver
