@@ -60,6 +60,12 @@ namespace SilverEcho.ForsakenWorld
             return cfg;
         }
 
+        /// <summary>gfx_parser.gfx_2d_render: <c>str(data.get("2DRender", "0")).strip_edges() == "1"</c>.</summary>
+        public static bool Is2DRender(IDictionary<string, string> header)
+        {
+            return (GfxPropertyValues.Get(header, "2DRender", "0") ?? "0").Trim() == "1";
+        }
+
         /// <summary>
         /// Godot gfx_data_node._as_bool(d.get(key, def)): lower-cased "1"/"true" → true,
         /// anything else present (e.g. "2", "yes") → false; absent → default string.

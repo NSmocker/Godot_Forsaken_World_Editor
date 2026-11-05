@@ -6,6 +6,16 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxHeaderDriverTests
     {
         [Test]
+        public void TwoDRenderIsStrictOneLikeGodot()
+        {
+            var h = new Dictionary<string, string> { { "2DRender", " 1 " } };
+            Assert.IsTrue(GfxHeaderConfig.Is2DRender(h));
+            h["2DRender"] = "true";
+            Assert.IsFalse(GfxHeaderConfig.Is2DRender(h));
+            Assert.IsFalse(GfxHeaderConfig.Is2DRender(new Dictionary<string, string>()));
+        }
+
+        [Test]
         public void ParseBoolMatchesGodotTypeBoolRead()
         {
             // gfx_data_node: val == "1" or val.to_lower() == "true"; absent → default.

@@ -97,7 +97,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 root.transform.localScale = new Vector3(
                     plan.DefaultScale, plan.DefaultScale, plan.DefaultScale);
 
-            var gfx2d = GfxPropertyValues.Bool(plan.Header, "2DRender", false);
+            var gfx2d = GfxHeaderConfig.Is2DRender(plan.Header);
             GfxTextureResolver texResolver = index != null
                 ? new GfxTextureResolver(index)
                 : null;
