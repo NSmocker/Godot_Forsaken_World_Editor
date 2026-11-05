@@ -44,6 +44,9 @@ namespace SilverEcho.ForsakenWorld
         {
             if (Mesh == null || Material == null || Matrices == null || Matrices.Length == 0)
                 return;
+            // Real Unity requires enableInstancing for RenderMeshInstanced (harness stub did not).
+            if (!Material.enableInstancing)
+                Material.enableInstancing = true;
             Block.Clear();
             Block.SetVectorArray(CustomDataProperty, Custom);
             var rp = new RenderParams

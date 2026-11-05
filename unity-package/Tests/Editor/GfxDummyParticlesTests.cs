@@ -128,7 +128,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             var mf = sub.AddComponent<MeshFilter>();
             mf.sharedMesh = new Mesh();
             var mr = sub.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = new Material(new Shader());
+            mr.sharedMaterial = new Material(Shader.Find("Sprites/Default") ?? Shader.Find("Hidden/InternalErrorShader"));
             container.Configure(
                 new GfxContainerParams
                 {
@@ -149,7 +149,6 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(0, driver.SlotCount);
             Assert.AreEqual(1, driver.BatchCount);
 
-            Graphics.LastRenderMeshInstancedCount = -1;
             var slots = new[]
             {
                 new GfxParticleSlot
@@ -161,9 +160,23 @@ namespace SilverEcho.ForsakenWorld.Tests
                 new GfxParticleSlot { Alive = false },
                 new GfxParticleSlot { Alive = false }
             };
+            // Harness Graphics stub exposes LastRenderMeshInstanced*; real Unity does not.
+            var countProp = typeof(Graphics).GetProperty("LastRenderMeshInstancedCount");
+            if (countProp != null && countProp.CanWrite)
+                countProp.SetValue(null, -1);
             driver.Tick(slots, 1f, false);
-            Assert.AreEqual(3, Graphics.LastRenderMeshInstancedCount);
-            Assert.IsNotNull(Graphics.LastRenderMeshInstancedMesh);
+            if (countProp != null)
+            {
+                Assert.AreEqual(3, (int)countProp.GetValue(null));
+                var meshProp = typeof(Graphics).GetProperty("LastRenderMeshInstancedMesh");
+                Assert.IsNotNull(meshProp);
+                Assert.IsNotNull(meshProp.GetValue(null));
+            }
+            else
+            {
+                Assert.IsTrue(driver.UsesInstancing);
+                Assert.AreEqual(1, driver.BatchCount);
+            }
 
             driver.ForceNodes = true;
             driver.EnsureBuilt();
