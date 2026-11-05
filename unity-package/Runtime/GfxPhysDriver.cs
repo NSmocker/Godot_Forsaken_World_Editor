@@ -148,6 +148,13 @@ namespace SilverEcho.ForsakenWorld
                 outCount++;
             }
 
+            // Edit Mode: SetParticles alone may leave particleCount at 0 until the system
+            // has been played/simulated at least once (real Unity; harness always counted).
+            if (!particleSystem.isPlaying && !particleSystem.isPaused)
+            {
+                particleSystem.Play(true);
+                particleSystem.Pause(true);
+            }
             particleSystem.SetParticles(particleBuffer, outCount);
             SetVisualActive(outCount > 0);
 
