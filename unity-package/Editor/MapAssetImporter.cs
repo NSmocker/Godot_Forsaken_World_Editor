@@ -720,6 +720,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 var pathForCheck = file != null ? file.FullPath : Path.Combine(index.Root, rel);
+                // Godot angelica_world._sound: map ambience is wav-only.
                 if (!string.Equals(Path.GetExtension(pathForCheck), ".wav", StringComparison.OrdinalIgnoreCase))
                 {
                     result.Warnings.Add("Sound " + sound.Path + ": nur .wav wird unterstützt");
@@ -741,8 +742,23 @@ namespace SilverEcho.ForsakenWorld.Editor
                 audio.rolloffMode = AudioRolloffMode.Logarithmic;
                 audio.minDistance = Math.Max(sound.MinDistance, 0.1f);
                 audio.maxDistance = Math.Max(sound.MaxDistance, 0f);
-                // AudioClip import requires real Unity; keep params + path for now.
-                // TODO: copy cleaned WAV into Assets and assign AudioClip like Godot _sound.
+                // Godot angelica_world._sound: wav-only map ambience → Assets Import + AudioClip.
+                if (file != null)
+                {
+                    var imported = AssembledAudioImporter.ImportGameDataFile(file);
+                    if (imported.Clip != null)
+                        audio.clip = imported.Clip;
+                    else if (!string.IsNullOrEmpty(imported.Error))
+                        result.Warnings.Add("Sound " + sound.Path + ": " + imported.Error);
+                }
+                else
+                {
+                    var imported = AssembledAudioImporter.ImportOrUpdate(pathForCheck, rel);
+                    if (imported.Clip != null)
+                        audio.clip = imported.Clip;
+                    else if (!string.IsNullOrEmpty(imported.Error))
+                        result.Warnings.Add("Sound " + sound.Path + ": " + imported.Error);
+                }
                 count++;
             }
 

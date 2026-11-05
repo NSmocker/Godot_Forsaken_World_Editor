@@ -458,17 +458,19 @@ namespace SilverEcho.ForsakenWorld.Editor
                         continue;
                     }
 
-                    // AudioClip import requires Assets copy (MapAssetImporter parity).
-                    // Path is recorded; clip stays null until host imports the file.
-                    var ext = Path.GetExtension(resolved.File.FullPath);
-                    if (warnings != null &&
-                        !string.Equals(ext, ".wav", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase))
+                    var imported = AssembledAudioImporter.ImportGameDataFile(resolved.File);
+                    if (imported.Clip != null)
+                    {
+                        clips[i] = imported.Clip;
+                    }
+                    else if (warnings != null)
                     {
                         warnings.Add(
-                            "GFX ID 170 unsupported extension: " +
-                            resolved.File.RelativePath);
+                            "GFX ID 170 AudioClip import failed: " +
+                            resolved.File.RelativePath +
+                            (string.IsNullOrEmpty(imported.Error)
+                                ? string.Empty
+                                : " (" + imported.Error + ")"));
                     }
                 }
             }

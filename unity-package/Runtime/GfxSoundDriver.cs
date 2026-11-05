@@ -7,7 +7,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// GFX ID 170 sound (create_id_170.gd / gfx_sound_170.gd).
     /// AudioSource placement + vol/pitch/range/loop; clip assignment when provided
-    /// (imported AudioClip — same gap as MapAssetImporter PlaceSounds).
+    /// (AudioClip via AssembledAudioImporter under Assets/ForsakenWorld/Imported/Sounds).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxSoundDriver : GfxElementDriver
