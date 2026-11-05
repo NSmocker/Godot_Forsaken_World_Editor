@@ -61,7 +61,7 @@ namespace SilverEcho.ForsakenWorld
             };
 
         // IDs with a real Unity visual builder in this package.
-        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "120", "121", "122", "123", "124", "125", "130", "140", "180", "190" };
+        private static readonly string[] DefaultPortedIds = { "100", "101", "110", "120", "121", "122", "123", "124", "125", "130", "140", "150", "151", "152", "180", "190" };
 
         private static readonly HashSet<string> PortedIds =
             new HashSet<string>(DefaultPortedIds, StringComparer.Ordinal);
@@ -79,7 +79,7 @@ namespace SilverEcho.ForsakenWorld
                 PortedIds.Add(systemId);
         }
 
-        /// <summary>Resets to the default ported set (currently 100/101/110/120–125/130/140/180/190).</summary>
+        /// <summary>Resets to the default ported set (currently 100/101/110/120–125/130/140/150–152/180/190).</summary>
         internal static void ClearPortedForTests()
         {
             PortedIds.Clear();
@@ -147,6 +147,15 @@ namespace SilverEcho.ForsakenWorld
         private static void FillTiming(GfxElementPlan el, GfxElement element)
         {
             var start = GfxPropertyValues.Float(element.Properties, "StartTime", 0f);
+            // Lightning 150/152 v102+: DestNum amplitude StartTime, real start in StartTime_2
+            // (create_id_150._element_start_time).
+            if ((el.SystemId == "150" || el.SystemId == "152") &&
+                element.Properties != null &&
+                element.Properties.ContainsKey("DestNum") &&
+                element.Properties.ContainsKey("StartTime_2"))
+            {
+                start = GfxPropertyValues.Float(element.Properties, "StartTime_2", start);
+            }
             var localTotal = start;
             var endless = false;
             foreach (var kp in element.Keypoints)

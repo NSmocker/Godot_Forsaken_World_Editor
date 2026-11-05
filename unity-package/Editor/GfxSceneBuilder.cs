@@ -138,6 +138,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     driver = AttachRing(el, elementGo, texResolver, gfx2d, result.Warnings);
                 }
+                else if (el.SystemId == "150" || el.SystemId == "152")
+                {
+                    driver = AttachLightning(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
+                else if (el.SystemId == "151")
+                {
+                    driver = AttachLtnBolt(el, elementGo, texResolver, gfx2d, result.Warnings);
+                }
                 else
                 {
                     driver = elementGo.AddComponent<GfxElementStub>();
@@ -332,6 +340,84 @@ namespace SilverEcho.ForsakenWorld.Editor
             return light;
         }
 
+
+
+        private static GfxElementDriver AttachLightning(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var ltn = elementGo.AddComponent<GfxLightningDriver>();
+            var lp = GfxLightningParams.FromProperties(el.Properties, el.SystemId, el.Index);
+            lp.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+            // Align ElementStartTime with plan LocalStartTime (StartTime_2 already applied).
+            lp.ElementStartTime = el.LocalStartTime;
+
+            // Curve mode: first CtrlType 110 under KP0 (create_id_150 InitBuf).
+            GfxCtrlSpec curve = null;
+            if (el.Keypoints != null && el.Keypoints.Count > 0 && el.Keypoints[0].Ctrls != null)
+            {
+                foreach (var c in el.Keypoints[0].Ctrls)
+                {
+                    if (c != null && c.Type == 110) { curve = c; break; }
+                }
+            }
+            if (curve == null && el.ControlMethods != null)
+            {
+                foreach (var raw in el.ControlMethods)
+                {
+                    var spec = GfxKeypointBuilder.FromDictionary(raw);
+                    if (spec != null && spec.Type == 110) { curve = spec; break; }
+                }
+            }
+            if (curve != null && curve.CurvePath != null)
+            {
+                lp.Curved = true;
+                lp.LightNum = 1;
+                float[][] intPos, intDir, intUp;
+                float curveLen;
+                GfxLightningEval.BuildCurveSamples(
+                    curve.CurvePath, lp.Segs,
+                    out intPos, out intDir, out intUp, out curveLen);
+                lp.CurveIntPos = intPos;
+                lp.CurveIntDir = intDir;
+                lp.CurveIntUp = intUp;
+                lp.CurveLen = curveLen;
+            }
+            if (el.Keypoints != null && el.Keypoints.Count > 0)
+                lp.Kp0TimeSpan = el.Keypoints[0].TimeSpan;
+
+            var texture = ResolveElementTexture(
+                lp.TexFile, el.SystemId, texResolver, warnings);
+            ltn.Configure(lp, texture, gfx2d, warnings);
+            return ltn;
+        }
+
+        private static GfxElementDriver AttachLtnBolt(
+            GfxElementPlan el,
+            GameObject elementGo,
+            GfxTextureResolver texResolver,
+            bool gfx2d,
+            List<string> warnings)
+        {
+            var bolt = elementGo.AddComponent<GfxLtnBoltDriver>();
+            var bp = GfxLtnBoltParams.FromProperties(el.Properties, el.SystemId, el.Index);
+            bp.RandomSeed = (el.Name != null ? el.Name.GetHashCode() : el.Index) & 0xFFFF;
+            var texture = ResolveElementTexture(
+                bp.TexFile, el.SystemId, texResolver, warnings);
+            bolt.SystemId = el.SystemId;
+            bolt.LocalStartTime = el.LocalStartTime;
+            bolt.LocalTotalTime = el.LocalTotalTime;
+            bolt.GlobalLoopTime = el.GlobalLoopTime;
+            bolt.RepeatCount = el.RepeatCount;
+            bolt.RepeatDelay = el.RepeatDelay;
+            bolt.IsEndless = el.IsEndless;
+            bolt.SetKeypoints(el.Keypoints);
+            bolt.Configure(bp, texture, gfx2d, el.Properties, warnings);
+            return bolt;
+        }
 
         private static GfxElementDriver AttachRing(
             GfxElementPlan el,
