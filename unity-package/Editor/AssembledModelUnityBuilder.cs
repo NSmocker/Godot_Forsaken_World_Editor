@@ -214,9 +214,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Material material;
                 if (!slotMaterials.TryGetValue(key, out material))
                 {
-                    var shader = Shader.Find(AssembledUrpMaterialBuilder.UrpLitShaderName) ??
-                        Shader.Find(AssembledUrpMaterialBuilder.UrpUnlitShaderName) ??
-                        Shader.Find("Sprites/Default") ??
+                    // Pipeline-aware fallback, same policy as AssembledUrpMaterialBuilder:
+                    // HDRP host -> HDRP pair first, URP host (or missing HDRP) -> URP pair.
+                    var shader = AngelicaRenderPipeline.Find(
+                        AssembledUrpMaterialBuilder.HdrpLitShaderName,
+                        AssembledUrpMaterialBuilder.UrpLitShaderName,
+                        AssembledUrpMaterialBuilder.HdrpUnlitShaderName,
+                        AssembledUrpMaterialBuilder.UrpUnlitShaderName)
+                        ?? Shader.Find("Sprites/Default") ??
                         Shader.Find("Hidden/InternalErrorShader");
                     if (shader == null)
                         throw new InvalidOperationException("No shader for fallback material.");
