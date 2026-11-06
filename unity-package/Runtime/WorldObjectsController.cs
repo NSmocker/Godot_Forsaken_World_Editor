@@ -164,15 +164,4 @@ namespace SilverEcho.ForsakenWorld
             return null;
         }
     }
-
-    /// <summary>Day/night color pairs for Sun and Environment, stored on the map root or child.</summary>
-    public sealed class WorldLightColors : MonoBehaviour
-    {
-        public Color DayColor = Color.white;
-        public Color NightColor = Color.white;
-        public Color DayAmbient = new Color(0.2f, 0.2f, 0.2f, 1f);
-        public Color NightAmbient = new Color(0.05f, 0.05f, 0.1f, 1f);
-        public Color DayBackground = new Color(0.5f, 0.7f, 1f, 1f);
-        public Color NightBackground = new Color(0.02f, 0.02f, 0.05f, 1f);
-    }
 }

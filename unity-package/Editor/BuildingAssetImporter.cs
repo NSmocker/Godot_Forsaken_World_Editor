@@ -21,6 +21,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         public const string HdrpShaderName = AngelicaRenderPipeline.HdrpLitModel;
         public const string ImportRoot = "Assets/ForsakenWorld/Imported/Buildings";
         public const float DefaultAlphaRef = 84f / 255f;
+        public const float DefaultBrightness = 2f;
 
         public sealed class Result
         {
@@ -229,7 +230,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 name = string.IsNullOrEmpty(surface.Name) ? "LitModel" : surface.Name
             };
             material.SetFloat("_AlphaRef", DefaultAlphaRef);
-            material.SetFloat("_Brightness", 1f);
+            material.SetFloat("_Brightness", DefaultBrightness);
             material.SetFloat("_Cull", surface.TwoSided ? (float)CullMode.Off : (float)CullMode.Back);
 
             if (string.IsNullOrEmpty(surface.TextureName))

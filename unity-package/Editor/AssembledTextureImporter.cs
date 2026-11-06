@@ -57,6 +57,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             string sourceRelativePath,
             DdsDocument header = null)
         {
+            return GameDataImportSession.Once("texture:" + sourceFullPath + ":" + sourceRelativePath,
+                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header));
+        }
+
+        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath, DdsDocument header)
+        {
             var result = new ImportResult();
             if (string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
             {

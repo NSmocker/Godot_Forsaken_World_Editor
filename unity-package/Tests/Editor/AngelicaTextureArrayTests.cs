@@ -33,7 +33,7 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
-        public void BuildRejectsEmptyAndOversize()
+        public void BuildRejectsEmptyAndImpossibleBudget()
         {
             Assert.Throws<System.ArgumentException>(() =>
                 AngelicaTextureArrayBuilder.Build(new Texture2D[0]));
@@ -43,12 +43,20 @@ namespace SilverEcho.ForsakenWorld.Tests
             {
                 Assert.Throws<System.NotSupportedException>(() =>
                     AngelicaTextureArrayBuilder.Build(
-                        new[] { big, big }, maxEdge: 1024, maxUncompressedBytes: 16));
+                        new[] { big, big }, maxEdge: 1024, maxUncompressedBytes: 1));
             }
             finally
             {
                 Object.DestroyImmediate(big);
             }
+        }
+
+        [Test]
+        public void FitEdgeShrinksUntilTheImportBudgetFits()
+        {
+            // 2 RGBA32 layers fit a 128-byte budget only at 4×4 (4*4*2*4 = 128).
+            Assert.AreEqual(4, AngelicaTextureArrayBuilder.FitEdge(1024, 2, 4, 1, 128));
+            Assert.AreEqual(1024, AngelicaTextureArrayBuilder.FitEdge(1024, 40, 1, 2, 134217728));
         }
 
         private static Color[] Fill(int edge, Color c)

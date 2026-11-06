@@ -5,6 +5,7 @@
 // The shader tags are HDRenderPipeline / ForwardOnly, so HDRP draws these passes.
 // Visual math matches the URP twins.
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 float3 AngelicaCameraPositionWS()
 {

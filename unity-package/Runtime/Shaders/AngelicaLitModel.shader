@@ -4,7 +4,7 @@ Shader "Forsaken World/Angelica LitModel"
     {
         _Albedo ("Albedo", 2D) = "white" {}
         _AlphaRef ("Alpha reference", Range(0, 1)) = 0.3294
-        _Brightness ("Brightness", Range(0, 4)) = 1
+        _Brightness ("Brightness", Range(0, 4)) = 2
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader

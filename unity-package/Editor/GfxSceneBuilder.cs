@@ -843,6 +843,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (index.TryResolve(candidate, out file, out error) ||
                     index.TryResolve(candidate, out file, out error, true))
                     return true;
+                if (error != null && error.IndexOf("ambiguous", StringComparison.OrdinalIgnoreCase) >= 0) return false;
             }
 
             error = error ?? "not found";

@@ -24,7 +24,7 @@ uniform vec4 layer_uv[MAX_LAYERS];
 // Mindesthöhe der Teilkarte (TRN2FILESUBTRN::fMinHei)
 uniform float min_height = 0.0;
 uniform bool use_lightmap = true;
-uniform float brightness = 1.0;
+uniform float brightness = 2.0;
 
 varying vec3 v_pos;
 

@@ -59,6 +59,12 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         public static ImportResult ImportOrUpdate(string sourceFullPath, string sourceRelativePath)
         {
+            return GameDataImportSession.Once("audio:" + sourceFullPath + ":" + sourceRelativePath,
+                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath));
+        }
+
+        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath)
+        {
             var result = new ImportResult();
             if (string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
             {

@@ -104,7 +104,7 @@ namespace SilverEcho.ForsakenWorld
             if (string.IsNullOrWhiteSpace(fileName))
                 return string.Empty;
             if (Path.IsPathRooted(fileName) && File.Exists(fileName))
-                return fileName;
+                return SafeExistingPath(fileName);
             if (string.IsNullOrEmpty(interfacesDir))
                 return string.Empty;
             return ResolveIn(interfacesDir, fileName);
@@ -589,28 +589,38 @@ namespace SilverEcho.ForsakenWorld
                 return string.Empty;
             var full = Path.Combine(DataRoot, relative.Replace('\\', Path.DirectorySeparatorChar));
             if (File.Exists(full) || Directory.Exists(full))
-                return full;
+                return SafeExistingPath(full);
             // case-insensitive walk for one segment at a time is heavy; try as-is only
             return string.Empty;
         }
 
-        private static string ResolveIn(string dir, string fileName)
+        private string ResolveIn(string dir, string fileName)
         {
             if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName))
                 return string.Empty;
             var direct = Path.Combine(dir, fileName.Replace('\\', Path.DirectorySeparatorChar));
             if (File.Exists(direct))
-                return direct;
+                return SafeExistingPath(direct);
             if (!Directory.Exists(dir))
                 return string.Empty;
             var target = Path.GetFileName(fileName);
             foreach (var f in Directory.GetFiles(dir))
             {
                 if (string.Equals(Path.GetFileName(f), target, StringComparison.OrdinalIgnoreCase))
-                    return f;
+                    return SafeExistingPath(f);
             }
 
             return string.Empty;
+        }
+
+        private string SafeExistingPath(string path)
+        {
+            var root = Path.GetFullPath(DataRoot).TrimEnd('/', '\\') + Path.DirectorySeparatorChar;
+            var full = Path.GetFullPath(path);
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            for (var current = full; current.Length >= root.Length; current = Path.GetDirectoryName(current))
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return string.Empty;
+            return full;
         }
 
         private static string ToSnake(string key)

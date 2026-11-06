@@ -223,7 +223,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 mat.SetTexture("_Masks", Save(array, prefix + "_Masks.asset")); array = null;
                 mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
                 mat.SetFloat("_LayerCount", entries.Length); mat.SetFloat("_MinHeight", t.Subs[sub].MinHeight);
-                mat.SetFloat("_UseLightmap", 0); mat.SetFloat("_Brightness", 1);
+                mat.SetFloat("_UseLightmap", 0); mat.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
                 return mat;
             }
             finally { if (array != null) Object.DestroyImmediate(array); if (parameters != null) Object.DestroyImmediate(parameters); }
@@ -271,14 +271,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                     images.Add(image); size = Math.Max(size, Math.Max(image.width, image.height));
                 }
                 array = AngelicaTextureArrayBuilder.Build(
-                    images, name: "Terrain Layers", maxEdge: 1024, linear: true);
+                    images, name: "Terrain Layers", maxEdge: 1024, linear: true, warnings: warnings);
                 return array;
             }
             catch { if (array != null) Object.DestroyImmediate(array); throw; }
             finally { foreach (var image in images) Object.DestroyImmediate(image); }
         }
 
-        private static GameDataFile ResolveTexture(GameDataIndex index, string map, string texture)
+        internal static GameDataFile ResolveTexture(GameDataIndex index, string map, string texture)
         {
             // Keep an enclosing client's textures ahead of similarly named assets in another client.
             string normalized = map.Replace('\\', '/'); int maps = normalized.IndexOf("/maps/", StringComparison.OrdinalIgnoreCase);

@@ -38,6 +38,53 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void ReadsGrassBitsFromBsDataChunk()
+        {
+            var bits = new byte[8];
+            bits[0] = 0x80;
+            var payload = new byte[16 + 8 + bits.Length];
+            BitConverter.GetBytes(bits.Length).CopyTo(payload, 16);
+            BitConverter.GetBytes(bits.Length).CopyTo(payload, 20);
+            Buffer.BlockCopy(bits, 0, payload, 24, bits.Length);
+            var bs = new byte[payload.Length + 8];
+            Buffer.BlockCopy(payload, 0, bs, 0, payload.Length);
+            BitConverter.GetBytes(16).CopyTo(bs, payload.Length);
+            BitConverter.GetBytes(1).CopyTo(bs, payload.Length + 4);
+
+            var ms = new MemoryStream();
+            var w = new BinaryWriter(ms);
+            w.Write(Encoding.ASCII.GetBytes("MOXB"));
+            w.Write(EcbsdParser.BsdfMagic);
+            w.Write(7); // BSD version >= 7: bits live in BSData
+            w.Write(1);
+            while (ms.Length < EcbsdParser.BsdHeaderEnd)
+                w.Write((byte)0);
+            WriteAString(w, "BSData\\0.dat");
+            var grassOff = (int)ms.Length;
+            w.Write(0u);
+            WriteVec3(w, 10f, 4f, -6f);
+            w.Write(2f);
+            w.Write(8);
+            w.Write(8);
+            w.Write(0);
+            w.Write(0);
+            w.Flush();
+
+            var document = new EcbsdParser().Parse(
+                ms.ToArray(), "map.ecbsd",
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                name => bs,
+                new Dictionary<uint, uint> { { 9u, (uint)grassOff } });
+
+            Assert.AreEqual(1, document.GrassAreas.Count);
+            Assert.AreEqual(8, document.GrassAreas[0].Columns);
+            Assert.AreEqual(0x80, document.GrassAreas[0].Bits[0]);
+            Assert.AreEqual(10f, document.GrassAreas[0].Center[0], 0.0001f);
+        }
+
+        [Test]
         public void WarnsOnBadMagicInsteadOfThrowing()
         {
             var bad = Encoding.ASCII.GetBytes("XXXX") ;

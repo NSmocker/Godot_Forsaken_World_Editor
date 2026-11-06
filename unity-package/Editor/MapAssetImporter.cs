@@ -36,12 +36,68 @@ namespace SilverEcho.ForsakenWorld.Editor
             public int Models;
             public int Trees;
             public int Sounds;
+            public int GrassBlades;
             public int Water;
             public bool HasLight;
             public bool MissingWorldFile;
             public bool MissingBsdFile;
             public readonly List<string> BuildingPaths = new List<string>();
             public readonly List<string> Warnings = new List<string>();
+        }
+
+        /// <summary>
+        /// Replaces the Grass child of an already imported map prefab. Used when only
+        /// grass materials need to be rebuilt, without reimporting buildings.
+        /// </summary>
+        public static int RebuildGrass(
+            GameDataFile trn2File,
+            GameDataIndex index,
+            GfxTextDecoder decoder,
+            string prefabPath,
+            string folder)
+        {
+            if (trn2File == null || index == null)
+                throw new ArgumentNullException();
+            if (string.IsNullOrEmpty(prefabPath) ||
+                AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath) == null)
+                throw new FileNotFoundException("Map prefab is missing: " + prefabPath);
+
+            var result = new Result();
+            var world = LoadWorld(trn2File, index, decoder, result);
+            var root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                var stripped = StripMissingScripts(root);
+                if (stripped > 0)
+                    Debug.Log("A37_GRASS_STRIPPED_MISSING_SCRIPTS " + stripped);
+                RestoreLightColors(world, root);
+
+                var existing = root.transform.Find("Grass");
+                if (existing != null)
+                    Object.DestroyImmediate(existing.gameObject);
+                var blades = PlaceGrass(
+                    world, index, decoder, trn2File, root, folder, result, false);
+                foreach (var warning in result.Warnings)
+                    Debug.LogWarning("A37_GRASS_WARN " + warning);
+
+                var grass = root.transform.Find("Grass");
+                var sample = grass != null ? grass.GetComponentInChildren<MeshRenderer>() : null;
+                var sampleMat = sample != null ? sample.sharedMaterial : null;
+                var sampleTex = sampleMat != null ? sampleMat.GetTexture("_Albedo") : null;
+                Debug.Log("A37_GRASS_MAT " + (sampleMat != null ? sampleMat.name : "none") +
+                    " albedo=" + (sampleTex != null ? sampleTex.name : "missing"));
+
+                bool saved;
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath, out saved);
+                if (!saved)
+                    throw new IOException("Could not save map prefab: " + prefabPath);
+                AssetDatabase.SaveAssets();
+                return blades;
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
         }
 
         public static string GetOutputFolder(string relativePath)
@@ -62,7 +118,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataFile trn2File,
             GameDataIndex index,
             GfxTextDecoder decoder,
-            bool showProgress = true)
+            bool showProgress = true,
+            bool includeTerrain = true)
         {
             if (trn2File == null || index == null)
                 throw new ArgumentNullException();
@@ -77,10 +134,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Progress(showProgress, "Terrain", 0.05f);
                 try
                 {
-                    var terrain = TerrainAssetImporter.Import(trn2File, index, decoder, showProgress: false);
-                    result.TerrainPrefabPath = terrain.PrefabPath;
-                    result.TerrainAreas = terrain.Areas;
-                    result.Warnings.AddRange(terrain.Warnings);
+                    if (includeTerrain)
+                    {
+                        var terrain = TerrainAssetImporter.Import(trn2File, index, decoder, showProgress: false);
+                        result.TerrainPrefabPath = terrain.PrefabPath;
+                        result.TerrainAreas = terrain.Areas;
+                        result.Warnings.AddRange(terrain.Warnings);
+                    }
                 }
                 catch (Exception e) when (
                     e is IOException || e is InvalidDataException || e is InvalidOperationException ||
@@ -91,7 +151,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 root = new GameObject(Sanitize(mapName));
-                var terrainPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.TerrainPrefabPath);
+                var terrainPrefab = string.IsNullOrEmpty(result.TerrainPrefabPath) ? null :
+                    AssetDatabase.LoadAssetAtPath<GameObject>(result.TerrainPrefabPath);
                 if (terrainPrefab != null)
                 {
                     var terrainInstance = PrefabUtility.InstantiatePrefab(terrainPrefab) as GameObject;
@@ -105,7 +166,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var world = LoadWorld(trn2File, index, decoder, result);
 
                 Progress(showProgress, "Buildings", 0.5f);
-                PlaceBuildings(trn2File, index, decoder, root, world, result, showProgress);
+                if (includeTerrain)
+                    PlaceBuildings(trn2File, index, decoder, root, world, result, showProgress);
 
                 if (world.Document != null)
                 {
@@ -123,11 +185,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                     result.Models = PlaceModels(world.Document.Models, models, index, decoder, result, showProgress);
                     result.Trees = PlaceTrees(world.Document.Trees, world.Document.TreeTypes, trees, result);
                     result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result);
+                    Progress(showProgress, "Grass", 0.9f);
+                    result.GrassBlades = PlaceGrass(
+                        world, index, decoder, trn2File, root, folder, result, showProgress);
                 }
 
                 Progress(showProgress, "Saving map Prefab", 0.95f);
                 result.PrefabPath = folder + "/" + Sanitize(mapName) + ".prefab";
-                PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool saved);
+                bool saved;
+                using (new GameDataPrefabAssets(root, folder + "/Effects"))
+                    PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out saved);
                 if (!saved)
                     throw new IOException("Could not save map prefab: " + result.PrefabPath);
                 AssetDatabase.SaveAssets();
@@ -226,12 +293,28 @@ namespace SilverEcho.ForsakenWorld.Editor
                 bundle.Document.OrnamentRefs,
                 bundle.Document.BoxRefs,
                 bundle.Document.WaterRefs,
-                loadBs);
+                loadBs,
+                bundle.Document.GrassRefs);
             result.Warnings.AddRange(bundle.Bsd.Warnings);
             if (bundle.Bsd.Ornaments.Count == 0 && bundle.Document.OrnamentRefs.Count > 0 &&
                 (bsdBytes.Length < EcbsdParser.BsdHeaderEnd))
                 result.MissingBsdFile = true;
             return bundle;
+        }
+
+        internal static List<GameDataFile> FindBuildingFiles(string mapName, GameDataIndex index, List<string> only)
+        {
+            var prefix = "litmodels/" + mapName + "/";
+            var files = index.Files.Where(f => f.Extension == "bmd" &&
+                f.RelativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (files.Count == 0)
+                files = index.Files.Where(f => f.Extension == "bmd" &&
+                    f.RelativePath.IndexOf("/" + prefix, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            if (only == null) return files;
+            var filter = new HashSet<string>(only.Select(p => p.Replace('\\', '/').TrimStart('/')), StringComparer.OrdinalIgnoreCase);
+            return files.Where(f => filter.Contains(f.RelativePath.Substring(
+                f.RelativePath.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) + prefix.Length)) ||
+                filter.Contains(f.Name + ".bmd")).ToList();
         }
 
         private static void PlaceBuildings(
@@ -250,20 +333,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             // Collect .bmd under litmodels/<map>/ (case-insensitive path match).
             var prefix = "litmodels/" + mapName + "/";
-            var all = index.Files
-                .Where(f => f.Extension == "bmd" &&
-                    f.RelativePath.Replace('\\', '/').StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            // Fallback: any litmodels/<map> suffix match if game root nesting differs.
-            if (all.Count == 0)
-            {
-                var needle = "/litmodels/" + mapName + "/";
-                all = index.Files
-                    .Where(f => f.Extension == "bmd" &&
-                        f.RelativePath.Replace('\\', '/').IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
-                    .ToList();
-            }
+            var all = FindBuildingFiles(mapName, index, null);
 
             HashSet<string> filter = null;
             if (only != null)
@@ -367,6 +437,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (shader != null)
             {
                 sharedMat = new Material(shader) { name = "Water" };
+                sharedMat.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
                 // Normal map optional.
                 if (index.TryResolve(WaterNormalMap, out var nm, out _, true))
                 {
@@ -448,20 +519,62 @@ namespace SilverEcho.ForsakenWorld.Editor
             var light = sun.AddComponent<Light>();
             light.type = LightType.Directional;
             light.color = Rgb(lightData.DayDirectionalRgb);
-            var sunColors = sun.AddComponent<WorldLightColors>();
-            sunColors.DayColor = Rgb(lightData.DayDirectionalRgb);
-            sunColors.NightColor = Rgb(lightData.NightDirectionalRgb);
 
             var env = new GameObject("Environment");
             env.transform.SetParent(root.transform, false);
-            var envColors = env.AddComponent<WorldLightColors>();
-            envColors.DayAmbient = Rgb(lightData.DayAmbientRgb);
-            envColors.NightAmbient = Rgb(lightData.NightAmbientRgb);
-            envColors.DayBackground = Rgb(lightData.DayBackgroundRgb);
-            envColors.NightBackground = Rgb(lightData.NightBackgroundRgb);
+            ApplyLightColors(lightData, sun, env);
+            var envColors = env.GetComponent<WorldLightColors>();
             RenderSettings.ambientLight = envColors.DayAmbient;
             RenderSettings.ambientSkyColor = envColors.DayBackground;
             return true;
+        }
+
+        private static void RestoreLightColors(WorldBundle world, GameObject root)
+        {
+            if (world == null || world.Bsd == null || world.Bsd.DefaultLight == null || root == null)
+                return;
+            var sun = root.transform.Find("Sun");
+            var env = root.transform.Find("Environment");
+            ApplyLightColors(
+                world.Bsd.DefaultLight,
+                sun != null ? sun.gameObject : null,
+                env != null ? env.gameObject : null);
+        }
+
+        private static void ApplyLightColors(EcbsdBoxLight lightData, GameObject sun, GameObject env)
+        {
+            if (lightData == null)
+                return;
+            if (sun != null)
+            {
+                var sunColors = sun.GetComponent<WorldLightColors>() ?? sun.AddComponent<WorldLightColors>();
+                sunColors.DayColor = Rgb(lightData.DayDirectionalRgb);
+                sunColors.NightColor = Rgb(lightData.NightDirectionalRgb);
+            }
+
+            if (env != null)
+            {
+                var envColors = env.GetComponent<WorldLightColors>() ?? env.AddComponent<WorldLightColors>();
+                envColors.DayAmbient = Rgb(lightData.DayAmbientRgb);
+                envColors.NightAmbient = Rgb(lightData.NightAmbientRgb);
+                envColors.DayBackground = Rgb(lightData.DayBackgroundRgb);
+                envColors.NightBackground = Rgb(lightData.NightBackgroundRgb);
+            }
+        }
+
+        private static int StripMissingScripts(GameObject root)
+        {
+            if (root == null)
+                return 0;
+            var removed = 0;
+            foreach (var transform in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (transform == null)
+                    continue;
+                removed += GameObjectUtility.RemoveMonoBehavioursWithMissingScript(transform.gameObject);
+            }
+
+            return removed;
         }
 
         private static int PlaceEffects(
@@ -700,9 +813,20 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         /// <summary>
-        /// Scene hierarchy for a parsed .ecwld: TextMeshPro "дерефа" at each tree.
+        /// Scene hierarchy for a parsed .ecwld: tree labels, and grass when the BSD payload is known.
         /// </summary>
         public static GameObject CreateWorldPreview(EcwldDocument document)
+        {
+            return CreateWorldPreview(document, null, null, null, null, null);
+        }
+
+        public static GameObject CreateWorldPreview(
+            EcwldDocument document,
+            EcbsdDocument bsd,
+            GameDataIndex index,
+            GameDataFile terrainFile,
+            GfxTextDecoder decoder,
+            List<string> warnings)
         {
             if (document == null)
                 throw new ArgumentNullException(nameof(document));
@@ -710,6 +834,19 @@ namespace SilverEcho.ForsakenWorld.Editor
             var trees = new GameObject("Trees");
             trees.transform.SetParent(root.transform, false);
             PlaceTrees(document.Trees, document.TreeTypes, trees, new Result());
+            if (bsd != null && index != null)
+            {
+                var result = new Result();
+                var folder = string.IsNullOrEmpty(document.SourcePath)
+                    ? null
+                    : GetOutputFolder(document.SourcePath);
+                PlaceGrass(
+                    new WorldBundle { Document = document, Bsd = bsd },
+                    index, decoder, terrainFile, root, folder, result, false);
+                if (warnings != null)
+                    warnings.AddRange(result.Warnings);
+            }
+
             return root;
         }
 
@@ -836,6 +973,186 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             return count;
+        }
+
+        private static int PlaceGrass(
+            WorldBundle world,
+            GameDataIndex index,
+            GfxTextDecoder decoder,
+            GameDataFile terrainFile,
+            GameObject root,
+            string folder,
+            Result result,
+            bool showProgress)
+        {
+            if (world == null || world.Document == null || world.Bsd == null ||
+                world.Bsd.GrassAreas.Count == 0 || index == null)
+                return 0;
+
+            var shader = AngelicaRenderPipeline.Find(
+                BuildingAssetImporter.HdrpShaderName, BuildingAssetImporter.ShaderName);
+            if (shader == null)
+                result.Warnings.Add("Angelica LitModel shader unavailable; grass is imported unshaded.");
+            if (!string.IsNullOrEmpty(folder))
+                EnsureFolder(folder + "/grass");
+
+            TerrainHeightField heights = null;
+            var heightSource = terrainFile != null &&
+                terrainFile.Extension.Equals("trn2", StringComparison.OrdinalIgnoreCase)
+                ? terrainFile
+                : null;
+            if (heightSource == null)
+            {
+                var dir = (Path.GetDirectoryName(world.Document.SourcePath) ?? "").Replace('\\', '/');
+                var name = Path.GetFileNameWithoutExtension(world.Document.SourcePath);
+                var rel = string.IsNullOrEmpty(dir) ? name + ".trn2" : dir + "/" + name + ".trn2";
+                GameDataFile sibling;
+                if (index.TryResolve(rel, out sibling, out _))
+                    heightSource = sibling;
+            }
+
+            if (heightSource != null)
+                heights = TerrainHeightField.Load(heightSource, index, decoder, result.Warnings);
+            else
+                result.Warnings.Add("Gras: kein .trn2, Höhe aus dem Gras-Zentrum.");
+
+            var grassRoot = new GameObject("Grass");
+            grassRoot.transform.SetParent(root.transform, false);
+            var materials = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
+            var blades = 0;
+            var chunkIndex = 0;
+            foreach (var area in world.Bsd.GrassAreas)
+            {
+                Progress(showProgress, "Grass " + area.ExportId, 0.9f);
+                if (area.TypeId >= (uint)world.Document.GrassTypes.Count)
+                {
+                    result.Warnings.Add("Gras " + area.ExportId + ": Typ " + area.TypeId + " fehlt.");
+                    continue;
+                }
+
+                var type = world.Document.GrassTypes[(int)area.TypeId];
+                GrassTemplate template = null;
+                string moxRelative = type.ModelPath ?? string.Empty;
+                GameDataFile mox;
+                string error;
+                if (GrassFileResolver.TryResolveModel(index, type.ModelPath, out mox, out error))
+                {
+                    moxRelative = mox.RelativePath;
+                    try { template = new MoxGrassParser(decoder).ParseFile(mox.FullPath); }
+                    catch (Exception e) when (
+                        e is IOException || e is InvalidDataException || e is UnauthorizedAccessException)
+                    {
+                        result.Warnings.Add(mox.RelativePath + ": " + e.Message);
+                    }
+                }
+                else
+                    result.Warnings.Add(error);
+
+                if (template == null)
+                {
+                    template = GrassMeshBuilder.FallbackCard();
+                    result.Warnings.Add("Gras " + area.ExportId + ": Ersatzkarte statt .mox.");
+                }
+
+                float fallbackY = area.Center != null && area.Center.Length > 1 ? area.Center[1] : 0f;
+                var chunks = GrassMeshBuilder.Build(
+                    area, type, template,
+                    (x, z) =>
+                    {
+                        float h;
+                        return heights != null && heights.TrySample(x, z, out h) ? h : fallbackY;
+                    },
+                    result.Warnings);
+                foreach (var chunk in chunks)
+                {
+                    var mesh = BuildGrassMesh(chunk, chunkIndex);
+                    Material material = null;
+                    if (shader != null)
+                    {
+                        var key = (moxRelative + "|" + chunk.TextureName).ToLowerInvariant();
+                        if (!materials.TryGetValue(key, out material))
+                        {
+                            material = new Material(shader)
+                            {
+                                name = "Grass_" + Sanitize(Path.GetFileNameWithoutExtension(
+                                    string.IsNullOrEmpty(chunk.TextureName) ? moxRelative : chunk.TextureName))
+                            };
+                            material.SetFloat("_AlphaRef", BuildingAssetImporter.DefaultAlphaRef);
+                            material.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
+                            if (material.HasProperty("_Cull"))
+                                material.SetFloat("_Cull", (float)CullMode.Off);
+                            GameDataFile textureFile;
+                            string textureError;
+                            if (GrassFileResolver.TryResolveTexture(
+                                    index, moxRelative, chunk.TextureName, out textureFile, out textureError))
+                            {
+                                var imported = AssembledTextureImporter.ImportOrUpdate(
+                                    textureFile.FullPath, textureFile.RelativePath);
+                                if (imported.Texture != null)
+                                    material.SetTexture("_Albedo", imported.Texture);
+                                else if (!string.IsNullOrEmpty(imported.Error))
+                                    result.Warnings.Add(imported.Error);
+                            }
+                            else if (!string.IsNullOrEmpty(chunk.TextureName))
+                                result.Warnings.Add(textureError);
+
+                            if (!string.IsNullOrEmpty(folder))
+                                material = Save(material, folder + "/grass/" + material.name + "_" + materials.Count + ".mat");
+                            materials[key] = material;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(folder))
+                        mesh = Save(mesh, folder + "/grass/" + mesh.name + ".asset");
+                    var go = new GameObject(mesh.name);
+                    go.transform.SetParent(grassRoot.transform, false);
+                    go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    var renderer = go.AddComponent<MeshRenderer>();
+                    if (material != null)
+                        renderer.sharedMaterial = material;
+                    renderer.shadowCastingMode = ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
+                    blades += chunk.Blades;
+                    chunkIndex++;
+                }
+            }
+
+            if (grassRoot.transform.childCount == 0)
+                Object.DestroyImmediate(grassRoot);
+            return blades;
+        }
+
+        private static Mesh BuildGrassMesh(GrassMeshChunk chunk, int index)
+        {
+            var count = chunk.Positions.Length / 3;
+            var vertices = new Vector3[count];
+            var uvs = new Vector2[count];
+            var colors = new Color[count];
+            for (var i = 0; i < count; i++)
+            {
+                vertices[i] = new Vector3(
+                    chunk.Positions[i * 3], chunk.Positions[i * 3 + 1], chunk.Positions[i * 3 + 2]);
+                // .mox stores DirectX V (0 at the top). Flip once here, same as SKI/BMD.
+                // The parser keeps the raw value, so this must not be applied again.
+                uvs[i] = new Vector2(
+                    chunk.Uvs[i * 2],
+                    AngelicaGeometry.UnityTextureV(chunk.Uvs[i * 2 + 1]));
+                // LitModel multiplies texture by vertex color * 2. 0.5 keeps the texture as stored.
+                colors[i] = new Color(0.5f, 0.5f, 0.5f, 1f);
+            }
+
+            var mesh = new Mesh
+            {
+                name = "grass_" + index,
+                indexFormat = count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16
+            };
+            mesh.vertices = vertices;
+            mesh.uv = uvs;
+            mesh.colors = colors;
+            mesh.triangles = chunk.Indices;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private static GameObject Group(GameObject parent, string name)

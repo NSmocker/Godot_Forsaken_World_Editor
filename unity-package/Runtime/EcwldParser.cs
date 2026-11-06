@@ -51,8 +51,9 @@ namespace SilverEcho.ForsakenWorld
 
             reader.Seek(36);
             var treeOffset = reader.ReadUInt32LittleEndian();
-            reader.Seek(44);
+            var grassOffset = reader.ReadUInt32LittleEndian();
             var numTreeType = reader.ReadInt32LittleEndian();
+            var numGrassType = reader.ReadInt32LittleEndian();
 
             var blockOffsets = new uint[numBlock];
             reader.Seek(HeaderSize);
@@ -85,6 +86,9 @@ namespace SilverEcho.ForsakenWorld
                     document.TreeTypes.Clear();
                 }
             }
+
+            if (numGrassType > 0)
+                ReadGrassTypes(reader, document, grassOffset, numGrassType, sourceName);
 
             var seenEffects = new HashSet<uint>();
             var seenModels = new HashSet<uint>();
@@ -129,7 +133,7 @@ namespace SilverEcho.ForsakenWorld
                     document.WaterRefs[id] = offset;
                 }
 
-                // Buildings, then boxes, then grass (Godot combined loop order).
+                // File order is buildings, boxes, then grass (Godot combined those three refs).
                 for (var k = 0; k < counts[3]; k++)
                 {
                     var id = reader.ReadUInt32LittleEndian();
@@ -144,7 +148,14 @@ namespace SilverEcho.ForsakenWorld
                     document.BoxRefs[id] = offset;
                 }
 
-                SkipRefs(reader, counts[2]); // grass
+                for (var k = 0; k < counts[2]; k++)
+                {
+                    if (reader.Remaining < 8)
+                        throw new InvalidDataException(sourceName + ": Block " + i + " grass ref truncated");
+                    var id = reader.ReadUInt32LittleEndian();
+                    var offset = reader.ReadUInt32LittleEndian();
+                    document.GrassRefs[id] = offset;
+                }
 
                 for (var k = 0; k < counts[5]; k++)
                 {
@@ -212,6 +223,36 @@ namespace SilverEcho.ForsakenWorld
             }
 
             return document;
+        }
+
+        private void ReadGrassTypes(
+            BinaryDataReader reader,
+            EcwldDocument document,
+            uint offset,
+            int count,
+            string sourceName)
+        {
+            if (count > 4096)
+                throw new InvalidDataException(sourceName + ": grass type count " + count + " is unreasonable.");
+            if (offset == 0 || offset >= (uint)reader.Length)
+                throw new InvalidDataException(sourceName + ": grass type table is outside the file.");
+            reader.Seek((int)offset);
+            for (var i = 0; i < count; i++)
+            {
+                // ECWDFILEGRASSTYPE, MSVC layout: bool + 3 pad + int + 4 floats = 24.
+                if (reader.Remaining < 24 + 4)
+                    throw new InvalidDataException(sourceName + ": grass type " + i + " truncated");
+                var type = new EcwldGrassType();
+                reader.Skip(1); // bAlphaBlend is forced off by CELGrassType::Init
+                reader.Skip(3);
+                type.AlphaRef = reader.ReadInt32LittleEndian();
+                type.Size = reader.ReadSingleLittleEndian();
+                type.SizeVar = reader.ReadSingleLittleEndian();
+                type.Softness = reader.ReadSingleLittleEndian();
+                type.SightRange = reader.ReadSingleLittleEndian();
+                type.ModelPath = ReadAString(reader);
+                document.GrassTypes.Add(type);
+            }
         }
 
         private static void SkipRefs(BinaryDataReader reader, int count)

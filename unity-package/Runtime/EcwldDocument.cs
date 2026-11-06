@@ -20,6 +20,21 @@ namespace SilverEcho.ForsakenWorld
         public readonly Dictionary<uint, uint> WaterRefs = new Dictionary<uint, uint>();
         public readonly Dictionary<uint, uint> OrnamentRefs = new Dictionary<uint, uint>();
         public readonly Dictionary<uint, uint> BoxRefs = new Dictionary<uint, uint>();
+        /// <summary>Export-ID → byte offset of ECBSDFILEGRASS in the sibling .ecbsd.</summary>
+        public readonly Dictionary<uint, uint> GrassRefs = new Dictionary<uint, uint>();
+        /// <summary>Grass type table from the world header. Index is the type id used by grass areas.</summary>
+        public readonly List<EcwldGrassType> GrassTypes = new List<EcwldGrassType>();
+    }
+
+    public sealed class EcwldGrassType
+    {
+        public int AlphaRef = 84;
+        public float Size = 1f;
+        public float SizeVar = 0.2f;
+        public float Softness = 1f;
+        public float SightRange = 50f;
+        /// <summary>Path of the grass .mox, relative to the game root.</summary>
+        public string ModelPath = string.Empty;
     }
 
     public sealed class EcwldTree

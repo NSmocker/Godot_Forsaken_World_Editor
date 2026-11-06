@@ -64,6 +64,8 @@ namespace SilverEcho.ForsakenWorld
                     AttachDds(result);
                     return result;
                 }
+                if (resolved.Error != null && resolved.Error.IndexOf("ambiguous", StringComparison.OrdinalIgnoreCase) >= 0)
+                    break;
             }
 
             return new ResolvedSkiTexture

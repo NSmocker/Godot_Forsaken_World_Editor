@@ -10,7 +10,7 @@ Shader "Forsaken World/HDRP/Angelica Terrain"
         _LayerCount ("Layer count", Int) = 1
         _MinHeight ("Subterrain minimum height", Float) = 0
         [Toggle] _UseLightmap ("Use daytime lightmap", Float) = 0
-        _Brightness ("Brightness", Range(0, 4)) = 1
+        _Brightness ("Brightness", Range(0, 4)) = 2
     }
     SubShader
     {

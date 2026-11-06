@@ -51,6 +51,39 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void ParsesGrassTypesAndRefsWithoutShiftingEffects()
+        {
+            var withGrass = BuildBlockWithGrass();
+            var bytes = BuildEcwldWithCustomBlocks(new List<byte[]> { withGrass }, 13);
+            var grassTable = new MemoryStream();
+            var w = new BinaryWriter(grassTable);
+            w.Write((byte)1); // alpha blend, ignored at scatter time
+            w.Write(new byte[3]);
+            w.Write(84);
+            w.Write(1.5f);
+            w.Write(0.25f);
+            w.Write(0.8f);
+            w.Write(40f);
+            WriteAString(w, "Grasses\\blade.mox");
+            w.Flush();
+            var table = grassTable.ToArray();
+            var merged = new byte[bytes.Length + table.Length];
+            Buffer.BlockCopy(bytes, 0, merged, 0, bytes.Length);
+            Buffer.BlockCopy(table, 0, merged, bytes.Length, table.Length);
+            WriteU32(merged, 40, (uint)bytes.Length);
+            WriteI32(merged, 48, 1);
+
+            var document = CreateParser().Parse(merged, "grass.ecwld");
+            Assert.AreEqual(1, document.GrassTypes.Count);
+            Assert.AreEqual("Grasses\\blade.mox", document.GrassTypes[0].ModelPath);
+            Assert.AreEqual(1.5f, document.GrassTypes[0].Size, 0.0001f);
+            Assert.AreEqual(84, document.GrassTypes[0].AlphaRef);
+            Assert.AreEqual(1, document.GrassRefs.Count);
+            Assert.AreEqual(640u, document.GrassRefs[9]);
+            Assert.AreEqual("fx/test.gfx", document.Effects[0].Path);
+        }
+
+        [Test]
         public void ParsesTreesFromV12Block()
         {
             // v12 block: 1 tree record = type DWORD + XYZ float[3] = 16 bytes
@@ -224,6 +257,31 @@ namespace SilverEcho.ForsakenWorld.Tests
                 w.Write(new byte[20]);
             WriteAString(w, "ambience/wind.wav");
 
+            w.Flush();
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildBlockWithGrass()
+        {
+            var ms = new MemoryStream();
+            var w = new BinaryWriter(ms);
+            w.Write((ushort)0);
+            w.Write((ushort)0);
+            int[] n = { 0, 0, 1, 0, 0, 1, 0, 0, 0, 0 };
+            foreach (var c in n)
+                w.Write(c);
+            w.Write(9u);
+            w.Write(640u);
+            w.Write(9u);
+            w.Write(1.5f);
+            WriteVec3(w, 1, 2, 3);
+            WriteVec3(w, 0, 0, 1);
+            WriteVec3(w, 0, 1, 0);
+            w.Write(1.0f);
+            w.Write(0);
+            w.Write(0.9f);
+            w.Write(0);
+            WriteAString(w, "fx/test.gfx");
             w.Flush();
             return ms.ToArray();
         }

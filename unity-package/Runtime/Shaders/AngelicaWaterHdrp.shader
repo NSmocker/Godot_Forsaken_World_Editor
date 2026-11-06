@@ -16,7 +16,7 @@ Shader "Forsaken World/HDRP/Angelica Water"
         _SpecularColor ("Specular color", Color) = (1, 0.95, 0.85, 1)
         _SpecularPower ("Specular power", Float) = 96
         _SpecularStrength ("Specular strength", Range(0,2)) = 0.8
-        _Brightness ("Brightness", Range(0,4)) = 1
+        _Brightness ("Brightness", Range(0,4)) = 2
     }
     SubShader
     {

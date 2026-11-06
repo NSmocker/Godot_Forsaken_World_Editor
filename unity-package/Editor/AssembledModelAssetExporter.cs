@@ -240,7 +240,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // Use the success flag (like Building/Terrain/Map importers): inside
                 // AssetDatabase.StartAssetEditing the prefab file is written but the
                 // returned object is null until import resumes.
-                PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool prefabSaved);
+                bool prefabSaved;
+                using (new GameDataPrefabAssets(root, Path.ChangeExtension(result.PrefabPath, null) + "_effects"))
+                    PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out prefabSaved);
                 if (!prefabSaved)
                     throw new InvalidOperationException(
                         "PrefabUtility.SaveAsPrefabAsset failed for " + result.PrefabPath);

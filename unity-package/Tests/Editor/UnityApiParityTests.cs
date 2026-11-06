@@ -79,6 +79,11 @@ namespace SilverEcho.ForsakenWorld.Tests
 
         private static string FindPackageRoot()
         {
+#if UNITY_EDITOR
+            var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(GameDataIndex).Assembly);
+            if (package != null && Directory.Exists(Path.Combine(package.resolvedPath, "Runtime")))
+                return package.resolvedPath;
+#endif
             var candidates = new[]
             {
                 "/workspace/Godot_Forsaken_World_Editor/unity-package",

@@ -25,7 +25,7 @@ uniform vec3 sun_direction = vec3(-0.4, -0.8, -0.45);
 uniform vec3 specular_color = vec3(1.0, 0.95, 0.85);
 uniform float specular_power = 96.0;
 uniform float specular_strength = 0.8;
-uniform float brightness = 1.0;
+uniform float brightness = 2.0;
 
 varying vec3 v_world;
 

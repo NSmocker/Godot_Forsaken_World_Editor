@@ -8,7 +8,7 @@
 
 uniform sampler2D texture_albedo : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 uniform float alpha_ref = 0.3294;
-uniform float brightness = 1.0;
+uniform float brightness = 2.0;
 
 // Forward+ / Mobile erwarten linear, Compatibility rechnet in sRGB
 vec3 to_output(vec3 c) {

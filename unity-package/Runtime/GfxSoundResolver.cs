@@ -89,6 +89,7 @@ namespace SilverEcho.ForsakenWorld
                     RequestedPath = candidate,
                     Error = error ?? "not found"
                 };
+                if (error != null && error.IndexOf("ambiguous", StringComparison.OrdinalIgnoreCase) >= 0) break;
             }
 
             result.Error = last != null

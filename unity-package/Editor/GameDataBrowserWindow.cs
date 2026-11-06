@@ -97,6 +97,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 MessageType.Info);
 
             DrawRootPicker();
+            GameDataDragAndDrop.DrawDropArea(index);
             DrawSearchControls();
             DrawStatus();
 
@@ -192,6 +193,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                             if (selectedFile != file)
                                 SelectFile(file);
                         }
+                        GameDataDragAndDrop.HandleRowDrag(file, GUILayoutUtility.GetLastRect());
                     }
 
                     EditorGUILayout.EndScrollView();
@@ -268,6 +270,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     if (file != null && selectedFile != file)
                         SelectFile(file);
                 }
+                GameDataDragAndDrop.HandleRowDrag(file, GUILayoutUtility.GetLastRect());
             }
             if (node.Files.Count > limit && GUILayout.Button("Show more (" + (node.Files.Count - limit) + " remaining)"))
                 folderFileLimits[rel] = limit + pageSize;
@@ -733,6 +736,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return;
                 index = new GameDataIndex(rootPath, GetGameDataDecoder());
                 index.ReplaceFromRelativePaths(snapshot.RelativePaths);
+                GameDataDragAndDrop.SetIndex(index);
                 scanTime = snapshot.ScanTime ?? string.Empty;
                 index.ScanTime = scanTime;
                 if (index.RepairedPathCount > 0)
@@ -794,6 +798,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var requestedRoot = rootPath.Trim();
             status = "Scanning game data...";
             index = null;
+            GameDataDragAndDrop.SetIndex(null, isScanning: true);
             selectedFile = null;
             selectedGfx = null;
             selectedEcm = null;
@@ -851,6 +856,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             try
             {
                 index = scanTask.GetAwaiter().GetResult();
+                GameDataDragAndDrop.SetIndex(index);
                 scanTime = GameDataScanCache.FormatScanTime(DateTime.Now);
                 index.ScanTime = scanTime;
                 SaveScanCache();
@@ -885,6 +891,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             finally
             {
                 scanTask = null;
+                GameDataDragAndDrop.SetIndex(index);
                 Repaint();
             }
         }
@@ -1196,7 +1203,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                                 if (!File.Exists(full))
                                     throw new FileNotFoundException(name);
                                 return File.ReadAllBytes(full);
-                            });
+                            },
+                            selectedEcwld.GrassRefs);
                     }
                     else
                         selectedWorldStatus = file.Name + ".ecbsd missing beside .ecwld.";
@@ -1247,7 +1255,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             Repaint();
         }
 
-        private static GfxTextDecoder GetGameDataDecoder()
+        internal static GfxTextDecoder GetGameDataDecoder()
         {
             if (gameDataDecoder != null)
                 return gameDataDecoder;
@@ -1677,7 +1685,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                             if (!File.Exists(full))
                                 throw new FileNotFoundException(name);
                             return File.ReadAllBytes(full);
-                        });
+                        },
+                        selectedEcwld.GrassRefs);
                 }
                 else
                     selectedWorldStatus = mapName + ".ecbsd missing; water/light unavailable, buildings unfiltered.";
@@ -1706,7 +1715,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 "  ECModels: " + world.Models.Count +
                 "  Sounds: " + world.Sounds.Count +
                 "  Trees: " + world.Trees.Count +
-                "  Tree types: " + world.TreeTypes.Count);
+                "  Tree types: " + world.TreeTypes.Count +
+                "  Grass types: " + world.GrassTypes.Count +
+                "  Grass refs: " + world.GrassRefs.Count);
             EditorGUILayout.LabelField(
                 "Water refs: " + world.WaterRefs.Count +
                 "  Ornaments: " + world.OrnamentRefs.Count +
@@ -1716,14 +1727,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EditorGUILayout.LabelField(
                     "BSD ornaments: " + bsd.Ornaments.Count +
                     "  water areas: " + bsd.WaterAreas.Count +
+                    "  grass areas: " + bsd.GrassAreas.Count +
                     (bsd.DefaultLight != null ? "  light: yes" : "  light: no"));
                 foreach (var warning in bsd.Warnings)
                     EditorGUILayout.HelpBox(warning, MessageType.Warning);
             }
 
             EditorGUILayout.HelpBox(
-                "Import map Prefab builds terrain + filtered buildings + water/light/ECModels/sounds " +
-                "and GFX placeholders (GFX runtime TODO) under Assets/ForsakenWorld/Imported/Maps.",
+                "Import map Prefab builds terrain + filtered buildings + water/light/ECModels/sounds, " +
+                "grass from .ecwld/.ecbsd/.mox, and GFX under Assets/ForsakenWorld/Imported/Maps.",
                 MessageType.Info);
         }
 
@@ -1752,6 +1764,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     ", effects=" + result.Effects +
                     ", models=" + result.Models +
                     ", trees=" + result.Trees +
+                    ", grass=" + result.GrassBlades +
                     ", sounds=" + result.Sounds +
                     (result.HasLight ? ", light" : "") +
                     (result.Warnings.Count > 0
@@ -1794,7 +1807,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                     instance = UnityEngine.Object.Instantiate(prefab);
                 Undo.RegisterCreatedObjectUndo(instance, "Instantiate Forsaken Map");
                 Selection.activeObject = instance;
-                status = "Instantiated map with " + result.Trees + " tree labels. " + result.PrefabPath;
+                status = "Instantiated map with " + result.Trees + " tree labels and " +
+                    result.GrassBlades + " grass blades. " + result.PrefabPath;
                 foreach (var warning in result.Warnings)
                     Debug.LogWarning(warning);
             }
@@ -1819,11 +1833,26 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return;
             }
 
-            var root = MapAssetImporter.CreateWorldPreview(selectedEcwld);
+            GameDataFile terrain = null;
+            if (index != null)
+            {
+                var dir = (Path.GetDirectoryName(selectedFile.RelativePath) ?? "").Replace('\\', '/');
+                var rel = string.IsNullOrEmpty(dir)
+                    ? selectedFile.Name + ".trn2"
+                    : dir + "/" + selectedFile.Name + ".trn2";
+                index.TryResolve(rel, out terrain, out _);
+            }
+
+            var grassWarnings = new List<string>();
+            var root = MapAssetImporter.CreateWorldPreview(
+                selectedEcwld, selectedEcbsd, index, terrain, GetGameDataDecoder(), grassWarnings);
             Undo.RegisterCreatedObjectUndo(root, "Load Forsaken World");
             Selection.activeObject = root;
+            foreach (var warning in grassWarnings)
+                Debug.LogWarning(warning);
             status = "Loaded " + selectedFile.DisplayName + " into the scene (" +
-                selectedEcwld.Trees.Count + " trees).";
+                selectedEcwld.Trees.Count + " trees, " +
+                (selectedEcbsd != null ? selectedEcbsd.GrassAreas.Count : 0) + " grass areas).";
         }
 
         private void ImportSelectedTerrain()

@@ -1,5 +1,34 @@
 # Forsaken World Editor Unity package
 
+How each supported format pulls other files (versions, search order, drag-and-drop
+closure) is specified in [DEPENDENCIES.md](DEPENDENCIES.md).
+
+## Drag and drop
+
+1. Open **Tools > Forsaken World > Game Data Browser**, choose the extracted game data
+   root and **Scan** once. The saved index is reused after restarting Unity.
+2. Drag files from Explorer, or drag a file row from the browser, into **Project**,
+   **Scene**, **Hierarchy**, or the browser's drop area. Multiple Explorer files can be
+   dropped together. Files must belong to the scanned root; rescan after adding source files.
+3. Imports are saved under **Assets/ForsakenWorld/Imported** and selected when complete.
+   Scene/Hierarchy drops additionally instantiate generated prefabs, with Undo support.
+   Project drops use this shared output location regardless of the folder under the cursor.
+
+The outgoing dependency graph is imported once per batch, with shared textures/audio
+reused by nested builders. SMD/ECM, GFX, BMD, terrain/maps and AUI XML/DCF produce prefabs;
+BON/SKI/STCK remain data assets when dropped alone. Terrain automatically includes its
+paired world; ECWLD without terrain can import its world objects. Auxiliary terrain,
+BSData, GPHY, STF and XML source payloads are preserved under `Imported/Sources` as
+TextAssets (`.bytes`); fonts use Unity's native importer. Sources are never moved.
+
+Missing optional dependencies are warnings in Console; a missing or corrupt required
+skeleton/model blocks that root while other dropped files continue. Cycles are deduplicated,
+ambiguous suffixes are not silently chosen, and dependencies outside the game data root
+are rejected. Repeat the drop to update imported assets while preserving their main GUIDs.
+The progress bar supports cancellation between files. Unsupported features listed in
+DEPENDENCIES.md (including PHY/SPT, binary ECM, morph/supple/muscle SKI and AUI GFX visuals)
+remain unsupported; standalone tracks never guess a skeleton.
+
 This folder is a local Unity package. Add its absolute path through **Window > Package
 Manager > + > Add package from disk...** and select `package.json`, or copy the folder into
 the host project's `Packages/` directory.
@@ -16,7 +45,7 @@ provide an encoding factory. The parser tests use Unity Test Framework and can b
 **Window > General > Test Runner** after importing the package into a Unity project with Test
 Framework enabled.
 
-`GameDataIndex` recursively indexes `.bmd`, `.bon`, `.ecm`, `.gfx`, `.ski`, `.smd`, `.stck`, `.trn2`,
+`GameDataIndex` recursively indexes `.bmd`, `.bon`, `.ecm`, `.gfx`, `.mox`, `.ski`, `.smd`, `.stck`, `.trn2`,
 `.t2bk`, `.t2mk`, `.t2lm`, and common texture extensions (`.dds`, `.bmp`, `.tga`, `.png`,
 `.jpg`, `.jpeg`) for SKI/terrain/building resolve, supports path/extension search and case-insensitive
 resource resolution, and can resolve a unique path suffix for Angelica references that omit

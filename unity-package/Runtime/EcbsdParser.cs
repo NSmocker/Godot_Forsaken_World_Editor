@@ -29,7 +29,8 @@ namespace SilverEcho.ForsakenWorld
             IReadOnlyDictionary<uint, uint> ornamentRefs,
             IReadOnlyDictionary<uint, uint> boxRefs,
             IReadOnlyDictionary<uint, uint> waterRefs,
-            Func<string, byte[]> loadBsData = null)
+            Func<string, byte[]> loadBsData = null,
+            IReadOnlyDictionary<uint, uint> grassRefs = null)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
@@ -55,6 +56,8 @@ namespace SilverEcho.ForsakenWorld
                 return document;
             }
 
+            reader.Seek(8);
+            document.Version = reader.ReadUInt32LittleEndian();
             reader.Seek(12);
             var nameCount = reader.ReadInt32LittleEndian();
             if (nameCount < 0 || nameCount > 4096)
@@ -175,7 +178,174 @@ namespace SilverEcho.ForsakenWorld
                 }
             }
 
+            if (grassRefs != null && grassRefs.Count > 0)
+                ReadGrass(reader, data, document, grassRefs, loadBsData);
+
             return document;
+        }
+
+        private void ReadGrass(
+            BinaryDataReader reader,
+            byte[] data,
+            EcbsdDocument document,
+            IReadOnlyDictionary<uint, uint> grassRefs,
+            Func<string, byte[]> loadBsData)
+        {
+            var dats = new Dictionary<int, BsDataFile>();
+            foreach (var pair in grassRefs)
+            {
+                var off = (int)pair.Value;
+                var record = document.Version >= 7 ? 36 : 24;
+                if (off < 0 || off + record > data.Length)
+                {
+                    document.Warnings.Add("Gras " + pair.Key + ": Datensatz abgeschnitten");
+                    continue;
+                }
+
+                reader.Seek(off);
+                var area = new EcbsdGrassArea
+                {
+                    ExportId = pair.Key,
+                    TypeId = reader.ReadUInt32LittleEndian(),
+                    Center = ReadVec3(reader),
+                    GridSize = reader.ReadSingleLittleEndian(),
+                    Columns = reader.ReadInt32LittleEndian(),
+                    Rows = reader.ReadInt32LittleEndian()
+                };
+                if (document.Version >= 7)
+                {
+                    area.SubTerrain = reader.ReadInt32LittleEndian();
+                    area.DataIndex = reader.ReadInt32LittleEndian();
+                }
+
+                var expected = GrassBitLength(area.Columns, area.Rows);
+                if (area.GridSize <= 0f || expected < 0)
+                {
+                    document.Warnings.Add("Gras " + pair.Key + ": ungültiges Raster");
+                    continue;
+                }
+
+                if (document.Version < 7)
+                {
+                    if (reader.Remaining < expected)
+                    {
+                        document.Warnings.Add("Gras " + pair.Key + ": Bits abgeschnitten");
+                        continue;
+                    }
+
+                    area.Bits = reader.ReadBytes(expected);
+                }
+                else
+                {
+                    area.Bits = LoadGrassBits(document, area, expected, dats, loadBsData);
+                    if (area.Bits == null)
+                        continue;
+                }
+
+                document.GrassAreas.Add(area);
+            }
+        }
+
+        private static byte[] LoadGrassBits(
+            EcbsdDocument document,
+            EcbsdGrassArea area,
+            int expected,
+            Dictionary<int, BsDataFile> dats,
+            Func<string, byte[]> loadBsData)
+        {
+            if (loadBsData == null || area.SubTerrain < 0 || area.SubTerrain >= document.BsDataNames.Count)
+            {
+                document.Warnings.Add("Gras " + area.ExportId + ": BSData fehlt");
+                return null;
+            }
+
+            BsDataFile dat;
+            if (!dats.TryGetValue(area.SubTerrain, out dat))
+            {
+                var name = document.BsDataNames[area.SubTerrain];
+                byte[] bytes;
+                try { bytes = loadBsData(name); }
+                catch (Exception e) when (
+                    e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+                {
+                    document.Warnings.Add(name + " nicht gefunden, Gras fehlt (" + e.Message + ")");
+                    dats[area.SubTerrain] = null;
+                    return null;
+                }
+
+                dat = bytes == null ? null : ReadBsData(bytes, name);
+                dats[area.SubTerrain] = dat;
+                if (dat == null)
+                {
+                    document.Warnings.Add(name + " nicht gefunden, Gras fehlt");
+                    return null;
+                }
+            }
+
+            if (dat == null || area.DataIndex < 0 || area.DataIndex >= dat.Offsets.Count)
+            {
+                document.Warnings.Add("Gras " + area.ExportId + ": Datenindex fehlt");
+                return null;
+            }
+
+            var offset = dat.Offsets[area.DataIndex];
+            return ReadGrassPayload(dat.Bytes, offset, expected, dat.Name, area.ExportId, document.Warnings);
+        }
+
+        internal static int GrassBitLength(int columns, int rows)
+        {
+            if (columns <= 0 || rows <= 0 || columns > 8192 || rows > 8192)
+                return -1;
+            if ((columns & 7) != 0)
+                return -1;
+            var bits = (long)columns * rows;
+            if ((bits & 7) != 0 || bits / 8 > 8 * 1024 * 1024)
+                return -1;
+            return (int)(bits / 8);
+        }
+
+        internal static byte[] ReadGrassPayload(
+            byte[] bytes,
+            int offset,
+            int expected,
+            string name,
+            uint exportId,
+            List<string> warnings)
+        {
+            if (bytes == null || offset < 0 || offset + 8 > bytes.Length)
+            {
+                warnings.Add("Gras " + exportId + ": Bits abgeschnitten");
+                return null;
+            }
+
+            var comp = BitConverter.ToInt32(bytes, offset);
+            var origin = BitConverter.ToInt32(bytes, offset + 4);
+            if (origin == expected && comp > 0 && offset + 8L + comp <= bytes.Length)
+            {
+                var payload = new byte[comp];
+                Buffer.BlockCopy(bytes, offset + 8, payload, 0, comp);
+                if (comp == expected)
+                    return payload;
+                try
+                {
+                    return TerrainParser.Inflate(payload, expected, name + " grass");
+                }
+                catch (InvalidDataException e)
+                {
+                    warnings.Add("Gras " + exportId + ": " + e.Message);
+                    return null;
+                }
+            }
+
+            if (offset + expected <= bytes.Length)
+            {
+                var raw = new byte[expected];
+                Buffer.BlockCopy(bytes, offset, raw, 0, expected);
+                return raw;
+            }
+
+            warnings.Add("Gras " + exportId + ": Bits abgeschnitten");
+            return null;
         }
 
         /// <summary>

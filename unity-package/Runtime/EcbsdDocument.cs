@@ -14,7 +14,24 @@ namespace SilverEcho.ForsakenWorld
         public readonly List<EcbsdOrnament> Ornaments = new List<EcbsdOrnament>();
         public EcbsdBoxLight DefaultLight;
         public readonly List<WorldWaterArea> WaterAreas = new List<WorldWaterArea>();
+        public readonly List<EcbsdGrassArea> GrassAreas = new List<EcbsdGrassArea>();
+        public uint Version;
         public readonly List<string> Warnings = new List<string>();
+    }
+
+    public sealed class EcbsdGrassArea
+    {
+        public uint ExportId;
+        /// <summary>Index into the .ecwld grass type table.</summary>
+        public uint TypeId;
+        public float[] Center = new float[3];
+        public float GridSize = 1f;
+        public int Columns;
+        public int Rows;
+        public int SubTerrain = -1;
+        public int DataIndex = -1;
+        /// <summary>One bit per cell, MSB first in each byte. Null when the bits map could not be read.</summary>
+        public byte[] Bits;
     }
 
     public sealed class EcbsdOrnament
