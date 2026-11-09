@@ -140,9 +140,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     result.Warnings.AddRange(map.Warnings);
                     return AssetDatabase.LoadAssetAtPath<GameObject>(map.PrefabPath);
                 case "gfx":
-                    var gfx = GfxSceneBuilder.BuildFromFile(file.FullPath, decoder, graph.Index);
-                    result.Warnings.AddRange(gfx.Warnings);
-                    return SaveHierarchy(gfx.Root, file);
+                    var gfxBuild = GfxSceneBuilder.BuildFromFile(file.FullPath, decoder, graph.Index);
+                    result.Warnings.AddRange(gfxBuild.Warnings);
+                    return SaveGfxPrefab(gfxBuild.Root, file);
                 case "xml": case "dcf":
                     return BuildUi(node, graph, result);
                 default: return null;
@@ -234,6 +234,44 @@ namespace SilverEcho.ForsakenWorld.Editor
             finally
             {
                 Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>
+        /// Saves a GFX hierarchy as a reusable Prefab under Imported/GFX with GUID-preserving reimport.
+        /// This is the main entry point for drag-and-drop of .gfx files.
+        /// </summary>
+        private static Object SaveGfxPrefab(GameObject root, GameDataFile source)
+        {
+            if (root == null) throw new InvalidDataException("Could not build GFX " + source.RelativePath);
+
+            var rel = Path.ChangeExtension(source.RelativePath, null).Replace('\\', '/').TrimEnd('/');
+            var name = Path.GetFileNameWithoutExtension(source.RelativePath);
+            var folder = ImportRoot + "/GFX/" + Path.GetDirectoryName(rel).TrimEnd('/');
+
+            AngelicaAssetFolders.Ensure(folder);
+
+            var prefabPath = folder + "/" + name + "_gfx.prefab";
+
+            using (new GameDataPrefabAssets(root, folder))
+            {
+                var existing = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+
+                if (existing != null)
+                {
+                    // Reimport in place — preserves GUID and references
+                    PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                    Object.DestroyImmediate(root);
+                    return existing;
+                }
+                else
+                {
+                    var prefab = PrefabUtility.SaveAsPrefabAsset(root, prefabPath, out var success);
+                    Object.DestroyImmediate(root);
+                    if (!success)
+                        throw new IOException("Failed to save GFX prefab: " + prefabPath);
+                    return prefab;
+                }
             }
         }
 
