@@ -38,6 +38,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     catch (Exception e) when (IsImportError(e)) { result.Errors.Add(path + ": " + e.Message); }
                 }
                 var graph = result.Graph;
+                PrefetchNativeNodes(graph);
                 for (var i = 0; i < graph.ImportOrder.Count; i++)
                 {
                     var node = graph.ImportOrder[i];
@@ -88,6 +89,31 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
             }
             return result;
+        }
+
+        private static void PrefetchNativeNodes(GameDataDependencyGraph graph)
+        {
+            if (graph == null)
+                return;
+            var textures = new List<GameDataFile>();
+            var sounds = new List<GameDataFile>();
+            foreach (var node in graph.ImportOrder)
+            {
+                if (node == null || !node.CanImport || node.File == null)
+                    continue;
+                switch (node.File.Extension)
+                {
+                    case "dds": case "bmp": case "tga": case "png": case "jpg": case "jpeg":
+                        textures.Add(node.File);
+                        break;
+                    case "wav": case "ogg": case "mp3":
+                        sounds.Add(node.File);
+                        break;
+                }
+            }
+
+            AssembledTextureImporter.ImportFiles(textures);
+            AssembledAudioImporter.ImportFiles(sounds);
         }
 
         private static Object ImportData(GameDataDependencyGraph.Node node)

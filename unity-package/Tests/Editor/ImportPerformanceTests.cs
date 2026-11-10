@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using NUnit.Framework;
+using SilverEcho.ForsakenWorld;
 using SilverEcho.ForsakenWorld.Editor;
 using UnityEditor;
 using UnityEngine;
@@ -104,6 +105,43 @@ namespace SilverEcho.ForsakenWorld.Tests
             {
                 Assert.IsTrue(AssembledTextureImporter.ImportOrUpdate(source, relative).Updated);
                 Assert.AreEqual(1, next.Statistics.NativeImports);
+            }
+        }
+
+        [Test]
+        public void NativeBatchImportsUniqueTexturesInOneChunkAndLaterLoadsDoNotReimport()
+        {
+            string secondRelative = relative.Replace("texture.tga", "other.tga");
+            string secondSource = Path.Combine(directory, "other.tga");
+            File.WriteAllBytes(secondSource, Tga(16));
+            string secondOutput = AssembledTextureImporter.GetTextureAssetPath(secondRelative);
+            try
+            {
+                using (var session = new GameDataImportSession())
+                {
+                    var imported = AssembledTextureImporter.ImportFiles(new[]
+                    {
+                        new GameDataFile(source, relative),
+                        new GameDataFile(secondSource, secondRelative),
+                        new GameDataFile(source, relative)
+                    });
+                    Assert.AreEqual(2, imported);
+                    Assert.AreEqual(1, session.Statistics.NativeImportBatches);
+                    Assert.AreEqual(2, session.Statistics.NativeImports);
+
+                    var again = AssembledTextureImporter.ImportOrUpdate(source, relative);
+                    Assert.IsNotNull(again.Texture, again.Error);
+                    Assert.IsTrue(again.Unchanged);
+                    Assert.AreEqual(2, session.Statistics.NativeImports);
+                    Assert.AreEqual(0, AssembledTextureImporter.ImportFiles(new[]
+                    {
+                        new GameDataFile(source, relative)
+                    }));
+                }
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(Path.GetDirectoryName(secondOutput).Replace('\\', '/'));
             }
         }
 

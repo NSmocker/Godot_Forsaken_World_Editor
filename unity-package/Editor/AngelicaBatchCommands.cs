@@ -69,6 +69,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 "A37_IMPORT_OK prefab=" + result.PrefabPath +
                 " terrainAreas=" + result.TerrainAreas +
                 " buildings=" + result.Buildings +
+                " skippedOutside=" + result.SkippedOutsideSectors +
                 " water=" + result.Water +
                 " effects=" + result.Effects +
                 " models=" + result.Models +

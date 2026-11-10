@@ -127,6 +127,39 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void SectorImportSkipsBuildingsOutsideTheSelectionAndKeepsBorderOverlap()
+        {
+            string mapName = mapFile.Name;
+            string insideRel = "litmodels/" + mapName + "/inside.bmd";
+            string outsideRel = "litmodels/" + mapName + "/outside.bmd";
+            Directory.CreateDirectory(Path.Combine(sourceRoot, "litmodels", mapName));
+            File.WriteAllBytes(Path.Combine(sourceRoot, insideRel.Replace('/', Path.DirectorySeparatorChar)),
+                BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04,
+                    posX: -1.5f, posY: 0f, posZ: 1f, scaleX: 0.1f, scaleY: 1f, scaleZ: 1f));
+            File.WriteAllBytes(Path.Combine(sourceRoot, outsideRel.Replace('/', Path.DirectorySeparatorChar)),
+                BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04,
+                    posX: 8f, posY: 0f, posZ: 8f, scaleX: 1f, scaleY: 1f, scaleZ: 1f));
+            index.Scan();
+            mapFile = index.Files.Single(f => f.Extension == "trn2");
+            string insideFolder = BuildingAssetImporter.GetOutputFolder(insideRel);
+            string outsideFolder = BuildingAssetImporter.GetOutputFolder(outsideRel);
+            try
+            {
+                var result = ImportMap(0);
+                Assert.AreEqual(1, result.Buildings, string.Join("\n", result.Warnings));
+                Assert.AreEqual(1, result.SkippedOutsideSectors);
+                Assert.IsTrue(result.Warnings.Any(w => w.Contains("outside the selected sectors")));
+                Assert.IsFalse(AssetDatabase.IsValidFolder(outsideFolder));
+                Assert.IsTrue(AssetDatabase.IsValidFolder(insideFolder));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(insideFolder);
+                AssetDatabase.DeleteAsset(outsideFolder);
+            }
+        }
+
+        [Test]
         public void UnreadableSelectionDoesNotImportOtherSectors()
         {
             File.WriteAllBytes(Path.Combine(sourceRoot, "sub3.t2bk"), new byte[] { 0 });

@@ -25,6 +25,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             previous = current;
             owner = previous?.owner ?? this;
+            if (previous == null)
+                GameDataNativeImportBatch.Reset();
             results = previous?.results ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             Statistics = previous?.Statistics ?? new ImportStatistics();
             this.forceReimport = forceReimport || (previous?.forceReimport ?? false);
@@ -92,10 +94,11 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         public sealed class ImportStatistics
         {
-            public int Requests, CacheHits, NativeImports, UnchangedFiles, WriteBatches, SaveCalls;
+            public int Requests, CacheHits, NativeImports, NativeImportBatches, UnchangedFiles, WriteBatches, SaveCalls;
             public readonly Dictionary<string, double> StageSeconds = new Dictionary<string, double>();
             public override string ToString() => "requests=" + Requests + ", cache hits=" + CacheHits +
-                ", native imports=" + NativeImports + ", unchanged=" + UnchangedFiles +
+                ", native imports=" + NativeImports + ", native batches=" + NativeImportBatches +
+                ", unchanged=" + UnchangedFiles +
                 ", write batches=" + WriteBatches + ", saves=" + SaveCalls;
         }
 

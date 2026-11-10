@@ -1811,6 +1811,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     " (terrain areas=" + result.TerrainAreas +
                     ", buildings=" + result.Buildings +
                     ", unused_bmd=" + result.UnusedBuildings +
+                    (result.SkippedOutsideSectors > 0
+                        ? ", skipped_outside=" + result.SkippedOutsideSectors
+                        : "") +
                     ", water=" + result.Water +
                     ", effects=" + result.Effects +
                     ", models=" + result.Models +

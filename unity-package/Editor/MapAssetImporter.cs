@@ -39,6 +39,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             public int Sounds;
             public int GrassBlades;
             public int Water;
+            public int SkippedOutsideSectors;
             public bool HasLight;
             public bool MissingWorldFile;
             public bool MissingBsdFile;
@@ -134,6 +135,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 throw new ArgumentNullException();
 
             var result = new Result();
+            // Reject an empty or invalid selection before any folder or asset is created.
+            MapSectorFilter sectors = null;
+            if (options != null && !options.ImportFullMap)
+            {
+                var terrainDocument = new TerrainParser(decoder).Parse(
+                    File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
+                sectors = MapSectorFilter.Create(terrainDocument, options.SelectedSectorIndices);
+            }
+
             var mapName = trn2File.Name;
             var folder = GetOutputFolder(trn2File.RelativePath);
             EnsureFolder(folder);
@@ -184,12 +194,12 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                 Progress(showProgress, "Buildings", 0.5f);
                 if (includeTerrain)
-                    PlaceBuildings(trn2File, index, decoder, root, world, result, showProgress);
+                    PlaceBuildings(trn2File, index, decoder, root, world, result, showProgress, sectors);
 
                 if (world.Document != null)
                 {
                     Progress(showProgress, "Water / light / objects", 0.7f);
-                    result.Water = PlaceWater(world, index, root, folder, result);
+                    result.Water = PlaceWater(world, index, root, folder, result, sectors);
                     result.HasLight = PlaceLight(world, root);
                     var objects = new GameObject("Objects");
                     objects.transform.SetParent(root.transform, false);
@@ -198,14 +208,18 @@ namespace SilverEcho.ForsakenWorld.Editor
                     var models = Group(objects, "Models");
                     var trees = Group(objects, "Trees");
                     var sounds = Group(objects, "Sounds");
-                    result.Effects = PlaceEffects(world.Document.Effects, effects, index, decoder, result);
-                    result.Models = PlaceModels(world.Document.Models, models, index, decoder, result, showProgress);
-                    result.Trees = PlaceTrees(world.Document.Trees, world.Document.TreeTypes, trees, result);
-                    result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result);
+                    result.Effects = PlaceEffects(world.Document.Effects, effects, index, decoder, result, sectors);
+                    result.Models = PlaceModels(world.Document.Models, models, index, decoder, result, showProgress, sectors);
+                    result.Trees = PlaceTrees(world.Document.Trees, world.Document.TreeTypes, trees, result, sectors);
+                    result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result, sectors);
                     Progress(showProgress, "Grass", 0.9f);
                     result.GrassBlades = PlaceGrass(
-                        world, index, decoder, trn2File, root, folder, result, showProgress);
+                        world, index, decoder, trn2File, root, folder, result, showProgress, sectors);
                 }
+
+                if (sectors != null && result.SkippedOutsideSectors > 0)
+                    result.Warnings.Add("Skipped " + result.SkippedOutsideSectors +
+                        " world objects outside the selected sectors. Existing assets outside the selection were left in place.");
 
                 Progress(showProgress, "Saving map Prefab", 0.95f);
                 result.PrefabPath = folder + "/" + Sanitize(mapName) + ".prefab";
@@ -346,7 +360,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject root,
             WorldBundle world,
             Result result,
-            bool showProgress)
+            bool showProgress,
+            MapSectorFilter sectors)
         {
             var mapName = trn2File.Name;
             List<string> only = null;
@@ -365,6 +380,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     filter.Add(path.Replace('\\', '/').TrimStart('/'));
             }
 
+            PrefetchBuildingTextures(all, prefix, filter, index, decoder, sectors, showProgress);
             var buildingsRoot = new GameObject("Buildings");
             buildingsRoot.transform.SetParent(root.transform, false);
             var groups = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
@@ -398,7 +414,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 BuildingAssetImporter.Result imported;
                 try
                 {
-                    imported = BuildingAssetImporter.Import(file, index, decoder, showProgress: false);
+                    var parsed = new BmdParser(decoder).Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                    if (sectors != null && !sectors.Intersects(MapSectorFilter.BuildingBounds(parsed)))
+                    {
+                        result.SkippedOutsideSectors++;
+                        continue;
+                    }
+
+                    imported = BuildingAssetImporter.Import(
+                        file, index, decoder, showProgress: false, parsedDocument: parsed);
                 }
                 catch (Exception e) when (
                     e is IOException || e is InvalidDataException || e is InvalidOperationException ||
@@ -447,10 +471,152 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Object.DestroyImmediate(buildingsRoot);
         }
 
+        private static void PrefetchBuildingTextures(
+            List<GameDataFile> files,
+            string prefix,
+            HashSet<string> filter,
+            GameDataIndex index,
+            GfxTextDecoder decoder,
+            MapSectorFilter sectors,
+            bool showProgress)
+        {
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var parser = new BmdParser(decoder);
+            foreach (var file in files)
+            {
+                string relUnderMap;
+                if (!TryBuildingRelative(file, prefix, out relUnderMap))
+                    continue;
+                if (filter != null &&
+                    !filter.Contains(relUnderMap) &&
+                    !filter.Contains(file.Name + ".bmd"))
+                    continue;
+                try
+                {
+                    var parsed = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                    if (parsed.CollideOnly)
+                        continue;
+                    if (sectors != null && !sectors.Intersects(MapSectorFilter.BuildingBounds(parsed)))
+                        continue;
+                    if (parsed.Meshes == null)
+                        continue;
+                    foreach (var mesh in parsed.Meshes)
+                    {
+                        if (mesh == null || string.IsNullOrEmpty(mesh.Texture))
+                            continue;
+                        if (index.TryResolve(mesh.Texture, out var texture, out _, true))
+                            AssembledTextureImporter.StageNativeCopy(
+                                texture.FullPath, texture.RelativePath, false, pending);
+                    }
+                }
+                catch (Exception e) when (
+                    e is IOException || e is InvalidDataException || e is InvalidOperationException ||
+                    e is NotSupportedException || e is FileNotFoundException)
+                {
+                    // The import loop reports the same failure.
+                }
+            }
+
+            GameDataNativeImportBatch.Import(
+                pending, showProgress ? "Importing building textures" : null);
+        }
+
+        private static void PrefetchSounds(
+            IList<EcwldSound> sounds, GameDataIndex index, MapSectorFilter sectors)
+        {
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sound in sounds)
+            {
+                if (sectors != null && !sectors.IntersectsCircle(
+                        sound.Pos != null && sound.Pos.Length > 0 ? sound.Pos[0] : 0f,
+                        sound.Pos != null && sound.Pos.Length > 2 ? sound.Pos[2] : 0f,
+                        sound.MaxDistance))
+                    continue;
+                var rel = ("sfx/" + sound.Path).Replace('\\', '/');
+                if (!index.TryResolve(rel, out var file, out _) &&
+                    !index.TryResolve(rel, out file, out _, true))
+                    continue;
+                if (!string.Equals(Path.GetExtension(file.FullPath), ".wav", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                AssembledAudioImporter.StageNativeCopy(file.FullPath, file.RelativePath, false, pending);
+            }
+
+            GameDataNativeImportBatch.Import(pending);
+        }
+
+        private static void PrefetchGrassTextures(
+            List<EcbsdGrassArea> areas,
+            WorldBundle world,
+            GameDataIndex index,
+            GfxTextDecoder decoder)
+        {
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var area in areas)
+            {
+                if (area.TypeId >= (uint)world.Document.GrassTypes.Count)
+                    continue;
+                var type = world.Document.GrassTypes[(int)area.TypeId];
+                if (!GrassFileResolver.TryResolveModel(index, type.ModelPath, out var mox, out _))
+                    continue;
+                GrassTemplate template;
+                try { template = new MoxGrassParser(decoder).ParseFile(mox.FullPath); }
+                catch (Exception e) when (
+                    e is IOException || e is InvalidDataException || e is UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                if (template == null || string.IsNullOrEmpty(template.TextureName))
+                    continue;
+                if (GrassFileResolver.TryResolveTexture(
+                        index, mox.RelativePath, template.TextureName, out var texture, out _))
+                    AssembledTextureImporter.StageNativeCopy(
+                        texture.FullPath, texture.RelativePath, false, pending);
+            }
+
+            GameDataNativeImportBatch.Import(pending);
+        }
+
+        private static bool TryBuildingRelative(GameDataFile file, string prefix, out string relUnderMap)
+        {
+            relUnderMap = file.RelativePath.Replace('\\', '/');
+            var idx = relUnderMap.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                relUnderMap = relUnderMap.Substring(idx + prefix.Length);
+                return true;
+            }
+
+            var needle = "/litmodels/";
+            var mapNeedle = prefix.StartsWith("litmodels/", StringComparison.OrdinalIgnoreCase)
+                ? "/" + prefix
+                : needle;
+            idx = relUnderMap.IndexOf(mapNeedle, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return false;
+            relUnderMap = relUnderMap.Substring(idx + mapNeedle.Length);
+            return true;
+        }
+
         private static int PlaceWater(
-            WorldBundle world, GameDataIndex index, GameObject root, string folder, Result result)
+            WorldBundle world, GameDataIndex index, GameObject root, string folder, Result result,
+            MapSectorFilter sectors)
         {
             if (world.Bsd == null || world.Bsd.WaterAreas.Count == 0)
+                return 0;
+            var areas = new List<WorldWaterArea>();
+            foreach (var area in world.Bsd.WaterAreas)
+            {
+                if (sectors != null && !sectors.Intersects(MapSectorFilter.WaterBounds(area)))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
+                areas.Add(area);
+            }
+
+            if (areas.Count == 0)
                 return 0;
 
             var shader = AngelicaRenderPipeline.Find(HdrpWaterShaderName, WaterShaderName);
@@ -472,6 +638,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     try
                     {
+                        var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        AssembledTextureImporter.StageNativeCopy(nm.FullPath, nm.RelativePath, false, pending);
+                        GameDataNativeImportBatch.Import(pending);
                         var texResult = AssembledTextureImporter.ImportOrUpdate(nm.FullPath, nm.RelativePath);
                         if (texResult.Texture != null)
                             sharedMat.SetTexture("_NormalMap", texResult.Texture);
@@ -486,52 +655,55 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
                 else
                     result.Warnings.Add("Wasser-Normalmap " + WaterNormalMap + " nicht in den Spieldaten");
-
-                sharedMat = Save(sharedMat, folder + "/water/Water.mat");
             }
 
             var count = 0;
-            foreach (var area in world.Bsd.WaterAreas)
+            using (new GameDataAssetBatch())
             {
-                var meshData = WorldWaterAssembler.Build(area);
-                if (meshData == null)
-                    continue;
-                var mesh = new Mesh
-                {
-                    name = "water_" + count + "_" + area.Id,
-                    indexFormat = meshData.Positions.Length / 3 > 65535
-                        ? IndexFormat.UInt32
-                        : IndexFormat.UInt16
-                };
-                var verts = new Vector3[meshData.Positions.Length / 3];
-                var norms = new Vector3[verts.Length];
-                for (var i = 0; i < verts.Length; i++)
-                {
-                    verts[i] = new Vector3(
-                        meshData.Positions[i * 3],
-                        meshData.Positions[i * 3 + 1],
-                        meshData.Positions[i * 3 + 2]);
-                    norms[i] = new Vector3(
-                        meshData.Normals[i * 3],
-                        meshData.Normals[i * 3 + 1],
-                        meshData.Normals[i * 3 + 2]);
-                }
-
-                mesh.vertices = verts;
-                mesh.normals = norms;
-                mesh.triangles = meshData.Indices;
-                mesh.RecalculateBounds();
-                mesh = Save(mesh, folder + "/water/" + mesh.name + ".asset");
-
-                var go = new GameObject(mesh.name);
-                go.transform.SetParent(waterRoot.transform, false);
-                go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var renderer = go.AddComponent<MeshRenderer>();
                 if (sharedMat != null)
-                    renderer.sharedMaterial = sharedMat;
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
-                count++;
+                    sharedMat = Save(sharedMat, folder + "/water/Water.mat");
+                foreach (var area in areas)
+                {
+                    var meshData = WorldWaterAssembler.Build(area);
+                    if (meshData == null)
+                        continue;
+                    var mesh = new Mesh
+                    {
+                        name = "water_" + count + "_" + area.Id,
+                        indexFormat = meshData.Positions.Length / 3 > 65535
+                            ? IndexFormat.UInt32
+                            : IndexFormat.UInt16
+                    };
+                    var verts = new Vector3[meshData.Positions.Length / 3];
+                    var norms = new Vector3[verts.Length];
+                    for (var i = 0; i < verts.Length; i++)
+                    {
+                        verts[i] = new Vector3(
+                            meshData.Positions[i * 3],
+                            meshData.Positions[i * 3 + 1],
+                            meshData.Positions[i * 3 + 2]);
+                        norms[i] = new Vector3(
+                            meshData.Normals[i * 3],
+                            meshData.Normals[i * 3 + 1],
+                            meshData.Normals[i * 3 + 2]);
+                    }
+
+                    mesh.vertices = verts;
+                    mesh.normals = norms;
+                    mesh.triangles = meshData.Indices;
+                    mesh.RecalculateBounds();
+                    mesh = Save(mesh, folder + "/water/" + mesh.name + ".asset");
+
+                    var go = new GameObject(mesh.name);
+                    go.transform.SetParent(waterRoot.transform, false);
+                    go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    var renderer = go.AddComponent<MeshRenderer>();
+                    if (sharedMat != null)
+                        renderer.sharedMaterial = sharedMat;
+                    renderer.shadowCastingMode = ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
+                    count++;
+                }
             }
 
             return count;
@@ -611,11 +783,18 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject parent,
             GameDataIndex index,
             GfxTextDecoder decoder,
-            Result result)
+            Result result,
+            MapSectorFilter sectors)
         {
             var count = 0;
             foreach (var effect in effects)
             {
+                if (sectors != null && !sectors.Contains(effect.Pos))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
                 var name = Sanitize(Path.GetFileNameWithoutExtension(effect.Path.Replace('\\', '/'))) +
                     "_" + effect.Id;
                 var go = new GameObject(name);
@@ -674,7 +853,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataIndex index,
             GfxTextDecoder decoder,
             Result result,
-            bool showProgress)
+            bool showProgress,
+            MapSectorFilter sectors)
         {
             var count = 0;
             var resolver = new EcmModelResolver(index);
@@ -683,6 +863,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             var documents = new Dictionary<string, EcmDocument>(StringComparer.OrdinalIgnoreCase);
             foreach (var model in models)
             {
+                if (sectors != null && !sectors.Contains(model.Pos))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
                 Progress(showProgress, "ECModel " + model.Path, 0.8f);
                 var rel = model.Path.Replace('\\', '/').TrimStart('/');
                 if (!index.TryResolve(rel, out var ecmFile, out var err) &&
@@ -891,11 +1077,18 @@ namespace SilverEcho.ForsakenWorld.Editor
             IList<EcwldTree> trees,
             Dictionary<uint, string> treeTypes,
             GameObject parent,
-            Result result)
+            Result result,
+            MapSectorFilter sectors = null)
         {
             var count = 0;
             foreach (var tree in trees)
             {
+                if (sectors != null && !sectors.Contains(tree.Pos))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
                 var go = new GameObject("дерефа");
                 go.transform.SetParent(parent.transform, false);
 
@@ -945,12 +1138,23 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject parent,
             GameDataIndex index,
             string folder,
-            Result result)
+            Result result,
+            MapSectorFilter sectors)
         {
             EnsureFolder(folder + "/sounds");
+            PrefetchSounds(sounds, index, sectors);
             var count = 0;
             foreach (var sound in sounds)
             {
+                if (sectors != null && !sectors.IntersectsCircle(
+                        sound.Pos != null && sound.Pos.Length > 0 ? sound.Pos[0] : 0f,
+                        sound.Pos != null && sound.Pos.Length > 2 ? sound.Pos[2] : 0f,
+                        sound.MaxDistance))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
                 var rel = ("sfx/" + sound.Path).Replace('\\', '/');
                 GameDataFile file = null;
                 string err = null;
@@ -1020,10 +1224,29 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject root,
             string folder,
             Result result,
-            bool showProgress)
+            bool showProgress,
+            MapSectorFilter sectors = null)
         {
             if (world == null || world.Document == null || world.Bsd == null ||
                 world.Bsd.GrassAreas.Count == 0 || index == null)
+                return 0;
+
+            var grassAreas = new List<EcbsdGrassArea>();
+            foreach (var area in world.Bsd.GrassAreas)
+            {
+                EcwldGrassType type = null;
+                if (area.TypeId < (uint)world.Document.GrassTypes.Count)
+                    type = world.Document.GrassTypes[(int)area.TypeId];
+                if (sectors != null && !sectors.Intersects(MapSectorFilter.GrassBounds(area, type)))
+                {
+                    result.SkippedOutsideSectors++;
+                    continue;
+                }
+
+                grassAreas.Add(area);
+            }
+
+            if (grassAreas.Count == 0)
                 return 0;
 
             var shader = AngelicaRenderPipeline.Find(
@@ -1049,16 +1272,39 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             if (heightSource != null)
-                heights = TerrainHeightField.Load(heightSource, index, decoder, result.Warnings);
+            {
+                IReadOnlyCollection<int> heightSectors = null;
+                if (sectors != null)
+                {
+                    var needed = new HashSet<int>();
+                    var pad = sectors.Terrain.GridSize;
+                    foreach (var area in grassAreas)
+                    {
+                        EcwldGrassType type = null;
+                        if (area.TypeId < (uint)world.Document.GrassTypes.Count)
+                            type = world.Document.GrassTypes[(int)area.TypeId];
+                        var footprint = MapSectorFilter.GrassBounds(area, type);
+                        foreach (var indexSector in sectors.SectorsOverlapping(
+                            footprint.MinX - pad, footprint.MinZ - pad, footprint.MaxX + pad, footprint.MaxZ + pad))
+                            needed.Add(indexSector);
+                    }
+
+                    heightSectors = needed;
+                }
+
+                heights = TerrainHeightField.Load(
+                    heightSource, index, decoder, result.Warnings, heightSectors);
+            }
             else
                 result.Warnings.Add("Gras: kein .trn2, Höhe aus dem Gras-Zentrum.");
 
+            PrefetchGrassTextures(grassAreas, world, index, decoder);
             var grassRoot = new GameObject("Grass");
             grassRoot.transform.SetParent(root.transform, false);
             var materials = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
             var blades = 0;
             var chunkIndex = 0;
-            foreach (var area in world.Bsd.GrassAreas)
+            foreach (var area in grassAreas)
             {
                 Progress(showProgress, "Grass " + area.ExportId, 0.9f);
                 if (area.TypeId >= (uint)world.Document.GrassTypes.Count)
@@ -1279,10 +1525,10 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static T Save<T>(T value, string path) where T : Object
         {
             value.name = Path.GetFileNameWithoutExtension(path);
-            var existing = AssetDatabase.LoadAssetAtPath<T>(path);
+            var existing = GameDataAssetBatch.Load(path) as T;
             if (existing == null)
             {
-                AssetDatabase.CreateAsset(value, path);
+                GameDataAssetBatch.Create(value, path);
                 return value;
             }
 

@@ -83,14 +83,13 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             var extension = Path.GetExtension(sourceFullPath) ?? string.Empty;
-            var detected = TextureFileFormat.DetectFile(sourceFullPath);
-            if (detected != null && !extension.Equals(detected, StringComparison.OrdinalIgnoreCase) &&
-                !(extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) && detected == ".jpg"))
+            var rewritten = ApplyDetectedExtension(sourceFullPath, sourceRelativePath);
+            if (!string.Equals(rewritten, sourceRelativePath, StringComparison.Ordinal))
             {
                 // Keep the original filename as part of the destination so foo.dds (TGA)
                 // cannot overwrite an unrelated foo.tga. Never rename the source data.
-                sourceRelativePath += detected;
-                extension = detected;
+                sourceRelativePath = rewritten;
+                extension = TextureFileFormat.DetectFile(sourceFullPath) ?? extension;
                 header = null;
             }
             var isDds = extension.Equals(".dds", StringComparison.OrdinalIgnoreCase);
@@ -127,6 +126,110 @@ namespace SilverEcho.ForsakenWorld.Editor
             return result;
         }
 
+        /// <summary>
+        /// Copies changed sources and queues their asset paths. Does not import or load.
+        /// Call <see cref="GameDataNativeImportBatch.Import"/> before any code that needs the texture.
+        /// </summary>
+        public static void StageNativeCopy(
+            string sourceFullPath,
+            string sourceRelativePath,
+            bool forceReimport,
+            ISet<string> pending)
+        {
+            if (pending == null || string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
+                return;
+            if (GameDataAssetBatch.IsActive)
+                throw new InvalidOperationException(
+                    "Import texture dependencies before starting the asset write batch.");
+
+            sourceRelativePath = ApplyDetectedExtension(sourceFullPath, sourceRelativePath);
+            var assetPath = GetTextureAssetPath(sourceRelativePath, decodedAsset: false);
+            if (pending.Contains(assetPath) || GameDataNativeImportBatch.WasImported(assetPath))
+                return;
+
+            var absoluteDest = AssetPathToAbsolute(assetPath);
+            var destDir = Path.GetDirectoryName(absoluteDest);
+            if (!string.IsNullOrEmpty(destDir))
+                Directory.CreateDirectory(destDir);
+            EnsureAssetFolders(Path.GetDirectoryName(assetPath));
+
+            var force = forceReimport || GameDataImportSession.ForceReimport;
+            var same = !force && GameDataSourceFiles.SameContent(sourceFullPath, absoluteDest);
+            if (same && AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath) != null)
+                return;
+            if (!same)
+                File.Copy(sourceFullPath, absoluteDest, overwrite: true);
+            pending.Add(assetPath);
+        }
+
+        public static int ImportFiles(IEnumerable<GameDataFile> files, string progressLabel = null)
+        {
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (files != null)
+            {
+                foreach (var file in files)
+                {
+                    if (file == null)
+                        continue;
+                    StageNativeCopy(file.FullPath, file.RelativePath, GameDataImportSession.ForceReimport, pending);
+                }
+            }
+
+            return GameDataNativeImportBatch.Import(pending, progressLabel);
+        }
+
+        private static bool TryResolveSlotFile(
+            AssembledSurfaceMaterial slot, GameDataIndex index, out GameDataFile file)
+        {
+            string error;
+            return TryResolveSlotFile(slot, index, out file, out error);
+        }
+
+        private static bool TryResolveSlotFile(
+            AssembledSurfaceMaterial slot,
+            GameDataIndex index,
+            out GameDataFile file,
+            out string error)
+        {
+            file = null;
+            error = null;
+            if (slot == null || index == null || !slot.TextureResolved ||
+                string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                return false;
+            return index.TryResolve(slot.TextureSourcePath, out file, out error) ||
+                index.TryResolve(slot.TextureSourcePath, out file, out error, true);
+        }
+
+        private static bool TryResolveReflectMap(AssembledModel model, GameDataIndex index, out GameDataFile file)
+        {
+            file = null;
+            if (model == null || index == null || model.Skins == null)
+                return false;
+            var needsReflect = false;
+            foreach (var skin in model.Skins)
+            {
+                if (skin == null || skin.SurfaceMaterials == null)
+                    continue;
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    if (slot != null && slot.UsesReflectShader)
+                    {
+                        needsReflect = true;
+                        break;
+                    }
+                }
+
+                if (needsReflect)
+                    break;
+            }
+
+            if (!needsReflect)
+                return false;
+            string error;
+            return index.TryResolve(
+                AssembledUrpMaterialBuilder.ReflectMapCacheKey, out file, out error, true);
+        }
+
         public static ImportResult ImportForSlot(
             AssembledSurfaceMaterial slot,
             GameDataIndex index)
@@ -155,8 +258,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             GameDataFile file;
             string resolveError;
-            if (!index.TryResolve(slot.TextureSourcePath, out file, out resolveError) &&
-                !index.TryResolve(slot.TextureSourcePath, out file, out resolveError, true))
+            if (!TryResolveSlotFile(slot, index, out file, out resolveError))
             {
                 result.Missing = true;
                 result.Error = string.IsNullOrEmpty(resolveError)
@@ -184,6 +286,27 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (model == null)
                 return cache;
 
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (model.Skins != null)
+            foreach (var skin in model.Skins)
+            {
+                if (skin == null || skin.SurfaceMaterials == null)
+                    continue;
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    GameDataFile staged;
+                    if (TryResolveSlotFile(slot, index, out staged))
+                        StageNativeCopy(staged.FullPath, staged.RelativePath, false, pending);
+                }
+            }
+
+            GameDataFile reflect;
+            if (TryResolveReflectMap(model, index, out reflect))
+                StageNativeCopy(reflect.FullPath, reflect.RelativePath, false, pending);
+            GameDataNativeImportBatch.Import(pending);
+
+            if (model.Skins == null)
+                return cache;
             foreach (var skin in model.Skins)
             {
                 foreach (var slot in skin.SurfaceMaterials)
@@ -320,12 +443,23 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return result;
                 }
             }
+            if (GameDataNativeImportBatch.WasImported(result.AssetPath))
+            {
+                result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
+                if (result.Texture != null)
+                {
+                    result.Updated = existed;
+                    result.Created = !existed;
+                    return result;
+                }
+            }
             if (GameDataAssetBatch.IsActive)
                 throw new InvalidOperationException("Import texture dependencies before starting the asset write batch.");
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
             // ImportAsset is enough for LoadAssetAtPath; Refresh() here is O(project)
             // per texture and must not run inside batch StartAssetEditing loops.
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
+            GameDataNativeImportBatch.NoteImported(result.AssetPath);
             if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
             result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
@@ -459,6 +593,17 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static void EnsureAssetFolders(string folderPath)
         {
             AngelicaAssetFolders.Ensure(folderPath);
+        }
+
+        // A file named .dds that is actually TGA must not share a destination with a real .dds.
+        private static string ApplyDetectedExtension(string sourceFullPath, string sourceRelativePath)
+        {
+            var extension = Path.GetExtension(sourceFullPath) ?? string.Empty;
+            var detected = TextureFileFormat.DetectFile(sourceFullPath);
+            if (detected != null && !extension.Equals(detected, StringComparison.OrdinalIgnoreCase) &&
+                !(extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) && detected == ".jpg"))
+                return (sourceRelativePath ?? string.Empty) + detected;
+            return sourceRelativePath;
         }
 
         private static string CombineErrors(string prior, string next)

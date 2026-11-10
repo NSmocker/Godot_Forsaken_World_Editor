@@ -154,7 +154,13 @@ namespace SilverEcho.ForsakenWorld.Tests
             ushort indexA = 0,
             ushort indexB = 1,
             ushort indexC = 2,
-            bool extraColors = false)
+            bool extraColors = false,
+            float posX = 3f,
+            float posY = 4f,
+            float posZ = 5f,
+            float scaleX = 2f,
+            float scaleY = 1f,
+            float scaleZ = 1f)
         {
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream))
@@ -167,10 +173,10 @@ namespace SilverEcho.ForsakenWorld.Tests
                 }
 
                 writer.Write(0x10000002u);
-                WriteVec3(writer, 2f, 1f, 1f); // scale
+                WriteVec3(writer, scaleX, scaleY, scaleZ);
                 WriteVec3(writer, 0f, 0f, 1f); // dir
                 WriteVec3(writer, 0f, 1f, 0f); // up
-                WriteVec3(writer, 3f, 4f, 5f); // pos
+                WriteVec3(writer, posX, posY, posZ);
                 writer.Write(1); // mesh count
 
                 writer.Write(meshVersion);

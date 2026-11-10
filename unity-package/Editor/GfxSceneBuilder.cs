@@ -101,6 +101,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             GfxTextureResolver texResolver = index != null
                 ? new GfxTextureResolver(index)
                 : null;
+            PrefetchPlanAssets(plan, index, texResolver);
 
             foreach (var el in plan.Elements)
             {
@@ -805,6 +806,52 @@ namespace SilverEcho.ForsakenWorld.Editor
                     warnings.Add(file.RelativePath + ": " + e.Message);
                 return null;
             }
+        }
+
+        private static void PrefetchPlanAssets(
+            GfxRuntimePlan plan, GameDataIndex index, GfxTextureResolver texResolver)
+        {
+            if (plan == null || index == null || plan.Elements == null)
+                return;
+            var textures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sounds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var soundResolver = new GfxSoundResolver(index);
+            foreach (var element in plan.Elements)
+            {
+                if (element == null)
+                    continue;
+                var texFile = GfxPropertyValues.Get(element.Properties, "TexFile", string.Empty);
+                if (texResolver != null && !string.IsNullOrEmpty(texFile))
+                {
+                    var resolved = texResolver.Resolve(texFile);
+                    if (resolved != null && resolved.IsResolved && resolved.Resource != null &&
+                        resolved.Resource.File != null)
+                        AssembledTextureImporter.StageNativeCopy(
+                            resolved.Resource.File.FullPath,
+                            string.IsNullOrEmpty(resolved.RequestedRelativePath)
+                                ? resolved.Resource.File.RelativePath
+                                : resolved.RequestedRelativePath,
+                            false, textures);
+                }
+
+                if (element.SystemId != "170")
+                    continue;
+                var soundParams = GfxSoundParams.FromProperties(
+                    element.Properties, element.SystemId, element.Index);
+                if (soundParams.SoundPaths == null)
+                    continue;
+                foreach (var path in soundParams.SoundPaths)
+                {
+                    var resolved = soundResolver.Resolve(path);
+                    if (resolved != null && resolved.IsResolved && resolved.File != null)
+                        AssembledAudioImporter.StageNativeCopy(
+                            resolved.File.FullPath, resolved.File.RelativePath, false, sounds);
+                }
+            }
+
+            foreach (var path in sounds)
+                textures.Add(path);
+            GameDataNativeImportBatch.Import(textures);
         }
 
         public static bool TryResolveGfx(

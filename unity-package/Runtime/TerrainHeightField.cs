@@ -39,7 +39,8 @@ namespace SilverEcho.ForsakenWorld
             GameDataFile trn2,
             GameDataIndex index,
             GfxTextDecoder decoder,
-            List<string> warnings)
+            List<string> warnings,
+            IReadOnlyCollection<int> sectorIndices = null)
         {
             if (trn2 == null || index == null)
                 return null;
@@ -56,10 +57,16 @@ namespace SilverEcho.ForsakenWorld
                 return null;
             }
 
+            HashSet<int> wanted = null;
+            if (sectorIndices != null)
+                wanted = new HashSet<int>(sectorIndices);
             var blocks = new Dictionary<long, TerrainBlock>();
             var directory = (Path.GetDirectoryName(trn2.RelativePath) ?? string.Empty).Replace('\\', '/');
-            foreach (var sub in terrain.Subs)
+            for (var sector = 0; sector < terrain.Subs.Length; sector++)
             {
+                if (wanted != null && !wanted.Contains(sector))
+                    continue;
+                var sub = terrain.Subs[sector];
                 var path = string.IsNullOrEmpty(directory) ? sub.Name + ".t2bk" : directory + "/" + sub.Name + ".t2bk";
                 GameDataFile file;
                 if (!index.TryResolve(path, out file, out _))

@@ -90,11 +90,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (assembled.Surfaces.Length == 0)
                 throw new InvalidDataException(file.RelativePath + ": building has no drawable surfaces.");
 
-            // Complete native imports before pausing AssetDatabase for generated assets.
+            // Copy every texture, import them in one AssetDatabase chunk, then load.
+            // CreateMaterial runs inside the write batch and must not ImportAsset.
+            var pendingTextures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var surface in assembled.Surfaces)
                 if (!string.IsNullOrEmpty(surface.TextureName) &&
                     index.TryResolve(surface.TextureName, out var texture, out _, true))
-                    AssembledTextureImporter.ImportOrUpdate(texture.FullPath, texture.RelativePath);
+                    AssembledTextureImporter.StageNativeCopy(
+                        texture.FullPath, texture.RelativePath, false, pendingTextures);
+            GameDataNativeImportBatch.Import(
+                pendingTextures, showProgress ? "Importing building textures" : null);
+            foreach (var surface in assembled.Surfaces)
+                if (!string.IsNullOrEmpty(surface.TextureName) &&
+                    index.TryResolve(surface.TextureName, out var loaded, out _, true))
+                    AssembledTextureImporter.ImportOrUpdate(loaded.FullPath, loaded.RelativePath);
 
             string folder = GetOutputFolder(file.RelativePath);
             GameObject root = null;

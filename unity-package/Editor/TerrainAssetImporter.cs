@@ -286,6 +286,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             Texture2DArray array = null;
             try
             {
+                PrefetchGroundTextures(t, map, index);
                 int size = 4;
                 foreach (string texture in t.Textures)
                 {
@@ -320,6 +321,22 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (maps >= 0 && index.TryResolve(normalized.Substring(0, maps + 1) + texture, out var local, out _)) return local;
             return index.TryResolve(texture, out var file, out _, true) ? file : null;
         }
+        private static void PrefetchGroundTextures(TerrainDocument terrain, GameDataFile map, GameDataIndex index)
+        {
+            if (terrain == null || terrain.Textures == null || index == null)
+                return;
+            var files = new List<GameDataFile>();
+            foreach (var texture in terrain.Textures)
+            {
+                var file = ResolveTexture(index, map.RelativePath, texture);
+                if (file == null || TextureFileFormat.DetectFile(file.FullPath) == ".dds")
+                    continue;
+                files.Add(file);
+            }
+
+            AssembledTextureImporter.ImportFiles(files);
+        }
+
         private static GameDataFile ResolveRequired(GameDataIndex index, string path)
         {
             if (!index.TryResolve(path, out var file, out var error)) throw new FileNotFoundException(error);
