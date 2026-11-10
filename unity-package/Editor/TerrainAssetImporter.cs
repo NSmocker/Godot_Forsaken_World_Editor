@@ -293,9 +293,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                     Texture2D image = null;
                     try
                     {
-                        var file = ResolveTexture(index, map.RelativePath, texture);
-                        if (file == null) throw new FileNotFoundException("Ground texture not found: " + texture);
-                        image = TerrainTextureBuilder.LoadSource(file);
+                        var projectTexture = TerrainTextureBuilder.FindProjectTexture(texture);
+                        if (projectTexture != null)
+                            image = TerrainTextureBuilder.LoadProjectTexture(projectTexture);
+                        else
+                        {
+                            var file = ResolveTexture(index, map.RelativePath, texture);
+                            if (file == null) throw new FileNotFoundException("Ground texture not found: " + texture);
+                            image = TerrainTextureBuilder.LoadSource(file);
+                        }
                     }
                     catch (Exception e) when (e is IOException || e is NotSupportedException)
                     { warnings.Add(e.Message + " (magenta fallback)"); }
@@ -328,6 +334,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var files = new List<GameDataFile>();
             foreach (var texture in terrain.Textures)
             {
+                if (TerrainTextureBuilder.FindProjectTexture(texture) != null) continue;
                 var file = ResolveTexture(index, map.RelativePath, texture);
                 if (file == null || TextureFileFormat.DetectFile(file.FullPath) == ".dds")
                     continue;

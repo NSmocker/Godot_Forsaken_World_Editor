@@ -1806,9 +1806,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                     Selection.activeObject = instance;
                 }
                 else
-                    Selection.activeObject = prefab;
+                    Selection.activeObject = result.SectorPrefabPaths.Count > 0
+                        ? AssetDatabase.LoadMainAssetAtPath(MapAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/Sectors")
+                        : prefab;
                 status = (instantiate ? "Instantiated map " : "Imported map prefab ") + result.PrefabPath +
                     " (terrain areas=" + result.TerrainAreas +
+                    ", sector prefabs=" + result.SectorPrefabPaths.Count +
                     ", buildings=" + result.Buildings +
                     ", unused_bmd=" + result.UnusedBuildings +
                     (result.SkippedOutsideSectors > 0

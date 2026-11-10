@@ -65,6 +65,10 @@ namespace SilverEcho.ForsakenWorld.Tests
 
             var result = ImportMap(3, 1, 1); // Duplicate and unordered input must not duplicate sectors.
             Assert.AreEqual(2, result.TerrainAreas);
+            Assert.AreEqual(2, result.SectorPrefabPaths.Count);
+            var sectorOne = AssetDatabase.LoadAssetAtPath<GameObject>(result.SectorPrefabPaths[0]);
+            Assert.IsNotNull(sectorOne.transform.Find("Terrain/sub1/Area_0001"));
+            Assert.IsNull(sectorOne.transform.Find("Terrain/sub3"));
             var terrain = LoadMapTerrain(result);
             CollectionAssert.AreEqual(new[] { "sub1", "sub3" },
                 Enumerable.Range(0, terrain.childCount).Select(i => terrain.GetChild(i).name).ToArray());
@@ -75,6 +79,61 @@ namespace SilverEcho.ForsakenWorld.Tests
             string folder = TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath);
             Assert.IsNull(AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/Area_0000_Mesh.asset"));
             Assert.IsNull(AssetDatabase.LoadAssetAtPath<Material>(folder + "/Area_0002.mat"));
+        }
+
+        [TestCase(0)] // No external texture at all.
+        [TestCase(1)] // Corrupt external texture must never be read.
+        [TestCase(2)] // Different external content must not overwrite the project copy.
+        [TestCase(3)] // No project copy: retain source fallback.
+        public void GroundTexturesPreferProjectFilesBeforeExternalSources(int sourceMode)
+        {
+            string relative = "textures/" + mapFile.Name + "/ground.dds";
+            string assetPath = AssembledTextureImporter.GetTextureAssetPath(relative);
+            string absolute = AssembledTextureImporter.AssetPathToAbsolute(assetPath);
+            var bytes = DdsHeaderParserTests.BuildDds(4, 4, "DXT1", 1, 8);
+            bytes[128] = 0; bytes[129] = 248; // RGB565 red endpoint.
+            bytes[130] = 224; bytes[131] = 7; // Green endpoint.
+            bytes[134] = 85; bytes[135] = 85; // Last two rows use green.
+            var other = (byte[])bytes.Clone();
+            other[128] = 31; other[129] = 0;
+            string external = Path.Combine(sourceRoot, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(external));
+            if (sourceMode != 0)
+                File.WriteAllBytes(external, sourceMode == 1 ? new byte[] { 0 } : sourceMode == 3 ? bytes : other);
+            File.WriteAllBytes(mapFile.FullPath, TerrainParserTests.BuildTrn2(
+                width: 4, length: 4, subRows: 2, subColumns: 2, textureName: relative.Replace('/', '\\')));
+            index.Scan();
+            try
+            {
+                if (sourceMode != 3)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(absolute));
+                    File.WriteAllBytes(absolute, bytes);
+                    AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+                    var project = TerrainTextureBuilder.FindProjectTexture(relative.Replace('/', '\\'));
+                    Assert.IsNotNull(project);
+                    var loaded = TerrainTextureBuilder.LoadProjectTexture(project);
+                    var expected = TerrainTextureBuilder.DecodeDds(bytes, relative);
+                    try { CollectionAssert.AreEqual(expected.GetPixels32(), loaded.GetPixels32()); }
+                    finally { UnityEngine.Object.DestroyImmediate(loaded); UnityEngine.Object.DestroyImmediate(expected); }
+                }
+                var result = TerrainAssetImporter.Import(mapFile, index, decoder, false,
+                    selectedSectorIndices: new[] { 0 });
+                Assert.AreEqual(1, result.Areas);
+                Assert.IsFalse(result.Warnings.Any(w => w.Contains("magenta fallback")), string.Join("\n", result.Warnings));
+                Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2DArray>(
+                    TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/Layers.asset"));
+                if (sourceMode != 3) CollectionAssert.AreEqual(bytes, File.ReadAllBytes(absolute));
+            }
+            finally { AssetDatabase.DeleteAsset(Path.GetDirectoryName(assetPath).Replace('\\', '/')); }
+        }
+
+        [TestCase("../outside.dds")]
+        [TestCase("/outside.dds")]
+        [TestCase("C:/outside.dds")]
+        public void ProjectGroundTextureLookupRejectsNonRelativePaths(string path)
+        {
+            Assert.IsNull(TerrainTextureBuilder.FindProjectTexture(path));
         }
 
         [TestCase(false)]

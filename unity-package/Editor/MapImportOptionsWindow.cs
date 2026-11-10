@@ -58,6 +58,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             EditorGUILayout.Space();
 
             EditorGUILayout.LabelField("Select sectors to import:", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Select All", GUILayout.Height(22)))
+                SetAllSectors(true);
+            if (GUILayout.Button("Deselect All", GUILayout.Height(22)))
+                SetAllSectors(false);
+            EditorGUILayout.EndHorizontal();
             scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(300));
 
             for (int i = 0; i < TerrainDoc.Subs.Length; i++)
@@ -88,6 +94,13 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 Close();
             }
+        }
+
+        private void SetAllSectors(bool value)
+        {
+            if (selectedSectors == null) return;
+            for (int i = 0; i < selectedSectors.Length; i++)
+                selectedSectors[i] = value;
         }
 
         private void ConfirmSelection()

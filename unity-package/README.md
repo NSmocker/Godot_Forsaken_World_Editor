@@ -94,6 +94,7 @@ tests are included; execution and visual comparison are left to the user.
 
 The browser's **Import terrain Prefab**, **Import map Prefab**, and **Instantiate map in scene**
 buttons all open the sector selection dialog before importing terrain (TRN2 sub-terrains).
+**Select All** and **Deselect All** buttons above the sector list toggle every checkbox at once.
 Terrain geometry import reads block, mask, and lightmap files only for selected sectors;
 their original coordinates, area names, and height offsets are preserved. At least one sector
 must be selected. This selection applies to terrain only; world objects still use the existing

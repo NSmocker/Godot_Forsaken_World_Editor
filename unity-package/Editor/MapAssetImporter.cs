@@ -30,6 +30,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             public string PrefabPath = string.Empty;
             public string TerrainPrefabPath = string.Empty;
+            public readonly List<string> SectorPrefabPaths = new List<string>();
+            public string EnvironmentPrefabPath = string.Empty;
             public int TerrainAreas;
             public int Buildings;
             public int UnusedBuildings;
@@ -229,6 +231,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                     PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out saved);
                 if (!saved)
                     throw new IOException("Could not save map prefab: " + result.PrefabPath);
+                if (includeTerrain)
+                {
+                    var terrainDocument = sectors?.Terrain ?? new TerrainParser(decoder).Parse(
+                        File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
+                    result.SectorPrefabPaths.AddRange(MapSectorPrefabExporter.Export(root, terrainDocument,
+                        folder, options?.SelectedSectorIndices, showProgress, out result.EnvironmentPrefabPath));
+                }
                 GameDataImportSession.SaveAssets();
                 return result;
             }

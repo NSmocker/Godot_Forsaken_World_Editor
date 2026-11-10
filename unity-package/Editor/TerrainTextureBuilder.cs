@@ -52,7 +52,37 @@ namespace SilverEcho.ForsakenWorld.Editor
             // reverse Unity's image orientation to the file-row convention used by DDS/masks.
             var imported = AssembledTextureImporter.ImportOrUpdate(file.FullPath, file.RelativePath);
             if (imported.Texture == null) throw new InvalidDataException(imported.Error);
-            Texture2D copy = Readback(imported.Texture, imported.Texture.width, imported.Texture.height, true);
+            return CopyFileRows(imported.Texture);
+        }
+
+        /// <summary>Exact game-relative lookup; never searches by basename or reads the external source.</summary>
+        public static GameDataFile FindProjectTexture(string gamePath)
+        {
+            if (string.IsNullOrWhiteSpace(gamePath)) return null;
+            string relative = gamePath.Replace('\\', '/');
+            if (Path.IsPathRooted(relative) || relative.Contains(":")) return null;
+            foreach (var part in relative.Split('/'))
+                if (part == ".." || part == "." || part.Length == 0) return null;
+            string assetPath = AssembledTextureImporter.GetTextureAssetPath(relative);
+            string absolute = AssembledTextureImporter.AssetPathToAbsolute(assetPath);
+            return File.Exists(absolute) ? new GameDataFile(absolute, relative) : null;
+        }
+
+        public static Texture2D LoadProjectTexture(GameDataFile file)
+        {
+            // Terrain arrays use original DDS rows and gamma bytes. Decode the project
+            // copy to avoid Unity import resizing/compression changing those inputs.
+            if (TextureFileFormat.DetectFile(file.FullPath) == ".dds")
+                return DecodeDds(File.ReadAllBytes(file.FullPath), file.RelativePath);
+            string path = AssembledTextureImporter.GetTextureAssetPath(file.RelativePath);
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (texture == null) throw new InvalidDataException("Project ground texture is not imported: " + path);
+            return CopyFileRows(texture);
+        }
+
+        private static Texture2D CopyFileRows(Texture2D source)
+        {
+            Texture2D copy = Readback(source, source.width, source.height, true);
             var pixels = copy.GetPixels32();
             for (int y = 0; y < copy.height / 2; y++)
                 for (int x = 0; x < copy.width; x++)
