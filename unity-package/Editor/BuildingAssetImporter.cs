@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
@@ -22,6 +23,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         public const string ImportRoot = "Assets/ForsakenWorld/Imported/Buildings";
         public const float DefaultAlphaRef = 84f / 255f;
         public const float DefaultBrightness = 2f;
+        // Original LitModel rendering already applies MODULATE2X; no additional boost.
+        public const float DefaultLitModelBrightness = 1f;
 
         public sealed class Result
         {
@@ -165,6 +168,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var normals = new List<Vector3>();
             var uvs = new List<Vector2>();
             var colors = new List<Color>();
+            var nightColors = new List<Vector3>();
             var submeshIndices = new List<int>[building.Surfaces.Length];
 
             for (var s = 0; s < building.Surfaces.Length; s++)
@@ -172,6 +176,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var surface = building.Surfaces[s];
                 var vertexOffset = positions.Count;
                 var vertexCount = surface.Positions.Length / 3;
+                bool hasNightColors = surface.NightColors != null && surface.NightColors.Length == vertexCount * 3;
                 for (var v = 0; v < vertexCount; v++)
                 {
                     positions.Add(new Vector3(
@@ -189,6 +194,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     var cg = surface.Colors.Length > v * 3 + 1 ? surface.Colors[v * 3 + 1] : 1f;
                     var cb = surface.Colors.Length > v * 3 + 2 ? surface.Colors[v * 3 + 2] : 1f;
                     colors.Add(new Color(cr, cg, cb, 1f));
+                    nightColors.Add(hasNightColors
+                        ? new Vector3(surface.NightColors[v * 3], surface.NightColors[v * 3 + 1], surface.NightColors[v * 3 + 2])
+                        : new Vector3(cr, cg, cb));
                 }
 
                 var indices = new List<int>(surface.Indices.Length);
@@ -206,6 +214,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             mesh.SetNormals(normals);
             mesh.SetUVs(0, uvs);
             mesh.SetColors(colors);
+            // TEXCOORD2 (Unity UV3) carries encoded RGB, not texture coordinates.
+            // UV0 remains albedo, UV1 is reserved for lightmap coordinates.
+            mesh.SetUVs(2, nightColors);
             mesh.subMeshCount = submeshIndices.Length;
             for (var i = 0; i < submeshIndices.Length; i++)
                 mesh.SetTriangles(submeshIndices[i], i);
@@ -230,7 +241,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 name = string.IsNullOrEmpty(surface.Name) ? "LitModel" : surface.Name
             };
             material.SetFloat("_AlphaRef", DefaultAlphaRef);
-            material.SetFloat("_Brightness", DefaultBrightness);
+            material.SetFloat("_Brightness", DefaultLitModelBrightness);
+            material.SetFloat("_HasDayNightColors", 1f);
             material.SetFloat("_Cull", surface.TwoSided ? (float)CullMode.Off : (float)CullMode.Back);
 
             if (string.IsNullOrEmpty(surface.TextureName))
@@ -247,7 +259,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 textureFile.FullPath,
                 textureFile.RelativePath);
             if (imported.Texture != null)
+            {
                 material.SetTexture("_Albedo", imported.Texture);
+                material.SetFloat("_AlbedoIsSRGB", GraphicsFormatUtility.IsSRGBFormat(imported.Texture.graphicsFormat) ? 1f : 0f);
+            }
             else if (!string.IsNullOrEmpty(imported.Error))
                 warnings.Add(imported.Error);
             return material;

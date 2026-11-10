@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
+using SilverEcho.ForsakenWorld.Editor;
+using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld.Tests
 {
@@ -84,6 +87,40 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(1.0, xLen, 0.001);
             Assert.AreEqual(1.0, yLen, 0.001);
             Assert.AreEqual(1.0, zLen, 0.001);
+        }
+
+        [Test]
+        public void CarriesIndependentNightColorsThroughAssemblyAndUnityMesh()
+        {
+            var document = new BmdParser().Parse(BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04));
+            var building = BmdMeshAssembler.Assemble(document);
+            Assert.AreNotSame(document.Meshes[0].NightColors, building.Surfaces[0].NightColors);
+            var mesh = BuildingAssetImporter.BuildMesh(building, "DayNightFixture");
+            try
+            {
+                var night = new List<Vector3>();
+                mesh.GetUVs(2, night);
+                Assert.AreEqual(mesh.vertexCount, night.Count);
+                Assert.AreEqual(Color.red, mesh.colors[0]);
+                Assert.AreEqual(new Vector3(0, 0, 1), night[0]);
+                Assert.AreEqual(new Vector2(0, 0.5f), mesh.uv[0]);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ManuallyConstructedSurfaceWithoutNightColorsFallsBackToDay()
+        {
+            var document = new BmdParser().Parse(BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04));
+            document.Meshes[0].NightColors = Array.Empty<float>();
+            var mesh = BuildingAssetImporter.BuildMesh(BmdMeshAssembler.Assemble(document), "LegacyColors");
+            try
+            {
+                var night = new List<Vector3>();
+                mesh.GetUVs(2, night);
+                Assert.AreEqual(new Vector3(1, 0, 0), night[0]);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
     }
 }

@@ -68,7 +68,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private bool showFolderTree = true;
         private string scanTime = string.Empty;
 
-        [MenuItem("Tools/Forsaken World/Game Data Browser")]
+        [MenuItem("Tools/Angelica 2.x/Game Data Browser")]
         private static void Open()
         {
             GetWindow<GameDataBrowserWindow>("FW Data");
@@ -1741,6 +1741,16 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private void ImportSelectedMap()
         {
+            ImportMapSelection(instantiate: false);
+        }
+
+        private void InstantiateSelectedMap()
+        {
+            ImportMapSelection(instantiate: true);
+        }
+
+        private void SelectTerrainSectors(Action<GameDataFile, GameDataIndex, GfxTextDecoder, MapImportOptions> import)
+        {
             if (selectedFile == null ||
                 selectedFile.Extension != "trn2" ||
                 selectedTerrain == null ||
@@ -1749,14 +1759,55 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return;
             }
 
-            try
+            // The browser selection may change while the utility window is open.
+            var mapFile = selectedFile;
+            var mapIndex = index;
+            var decoder = GetGameDataDecoder();
+            MapImportOptionsWindow.ShowWindow(
+                selectedTerrain,
+                mapFile,
+                mapIndex,
+                decoder,
+                options =>
+                {
+                    try
+                    {
+                        import(mapFile, mapIndex, decoder, options);
+                    }
+                    catch (Exception exception) when (
+                        exception is IOException || exception is UnauthorizedAccessException ||
+                        exception is ArgumentException || exception is InvalidOperationException ||
+                        exception is InvalidDataException || exception is NotSupportedException ||
+                        exception is OperationCanceledException ||
+                        exception is UnityException)
+                    {
+                        status = "Import failed: " + exception.Message;
+                        Debug.LogError(status);
+                    }
+                    if (this != null) Repaint();
+                }, owner: this);
+        }
+
+        private void ImportMapSelection(bool instantiate)
+        {
+            SelectTerrainSectors((mapFile, mapIndex, decoder, options) =>
             {
                 var result = MapAssetImporter.Import(
-                    selectedFile,
-                    index,
-                    GetGameDataDecoder(),
-                    showProgress: true);
-                status = "Imported map prefab " + result.PrefabPath +
+                    mapFile, mapIndex, decoder, showProgress: true, options: options);
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
+                if (prefab == null)
+                    throw new IOException("Map prefab was not created: " + result.PrefabPath);
+                if (instantiate)
+                {
+                    var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                    if (instance == null)
+                        instance = UnityEngine.Object.Instantiate(prefab);
+                    Undo.RegisterCreatedObjectUndo(instance, "Instantiate Forsaken Map");
+                    Selection.activeObject = instance;
+                }
+                else
+                    Selection.activeObject = prefab;
+                status = (instantiate ? "Instantiated map " : "Imported map prefab ") + result.PrefabPath +
                     " (terrain areas=" + result.TerrainAreas +
                     ", buildings=" + result.Buildings +
                     ", unused_bmd=" + result.UnusedBuildings +
@@ -1766,61 +1817,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                     ", trees=" + result.Trees +
                     ", grass=" + result.GrassBlades +
                     ", sounds=" + result.Sounds +
-                    (result.HasLight ? ", light" : "") +
-                    (result.Warnings.Count > 0
-                        ? ", " + result.Warnings.Count + " warnings"
-                        : string.Empty) +
-                    ")";
+                    (result.HasLight ? ", light" : "") + ")";
                 foreach (var warning in result.Warnings)
                     Debug.LogWarning(warning);
-                AssetDatabase.Refresh();
-                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
-            }
-            catch (Exception exception) when (
-                exception is IOException ||
-                exception is UnauthorizedAccessException ||
-                exception is ArgumentException ||
-                exception is InvalidOperationException ||
-                exception is InvalidDataException ||
-                exception is NotSupportedException ||
-                exception is OperationCanceledException ||
-                exception is UnityException)
-            {
-                status = "Map import failed: " + exception.Message;
-                Debug.LogError(status);
-            }
-        }
-
-        private void InstantiateSelectedMap()
-        {
-            if (selectedFile == null || selectedFile.Extension != "trn2" || index == null)
-                return;
-            try
-            {
-                var result = MapAssetImporter.Import(
-                    selectedFile, index, GetGameDataDecoder(), showProgress: true);
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
-                if (prefab == null)
-                    throw new IOException("Map prefab was not created: " + result.PrefabPath);
-                var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                if (instance == null)
-                    instance = UnityEngine.Object.Instantiate(prefab);
-                Undo.RegisterCreatedObjectUndo(instance, "Instantiate Forsaken Map");
-                Selection.activeObject = instance;
-                status = "Instantiated map with " + result.Trees + " tree labels and " +
-                    result.GrassBlades + " grass blades. " + result.PrefabPath;
-                foreach (var warning in result.Warnings)
-                    Debug.LogWarning(warning);
-            }
-            catch (Exception exception) when (
-                exception is IOException || exception is UnauthorizedAccessException ||
-                exception is ArgumentException || exception is InvalidOperationException ||
-                exception is InvalidDataException || exception is NotSupportedException ||
-                exception is OperationCanceledException || exception is UnityException)
-            {
-                status = "Map instantiate failed: " + exception.Message;
-                Debug.LogError(status);
-            }
+            });
         }
 
         private void InstantiateSelectedWorld()
@@ -1857,21 +1857,11 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private void ImportSelectedTerrain()
         {
-            if (selectedFile == null ||
-                selectedFile.Extension != "trn2" ||
-                selectedTerrain == null ||
-                index == null)
-            {
-                return;
-            }
-
-            try
+            SelectTerrainSectors((mapFile, mapIndex, decoder, options) =>
             {
                 var result = TerrainAssetImporter.Import(
-                    selectedFile,
-                    index,
-                    GetGameDataDecoder(),
-                    showProgress: true);
+                    mapFile, mapIndex, decoder, showProgress: true,
+                    selectedSectorIndices: options.SelectedSectorIndices);
                 status = "Imported terrain prefab " + result.PrefabPath +
                     " (" + result.Areas + " areas, " +
                     result.HiddenAreas + " hidden, " +
@@ -1885,20 +1875,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     Debug.LogWarning(warning);
                 AssetDatabase.Refresh();
                 Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
-            }
-            catch (Exception exception) when (
-                exception is IOException ||
-                exception is UnauthorizedAccessException ||
-                exception is ArgumentException ||
-                exception is InvalidOperationException ||
-                exception is InvalidDataException ||
-                exception is NotSupportedException ||
-                exception is OperationCanceledException ||
-                exception is UnityException)
-            {
-                status = "Terrain import failed: " + exception.Message;
-                Debug.LogError(status);
-            }
+            });
         }
 
         private void ImportAssembledModelPrefab()

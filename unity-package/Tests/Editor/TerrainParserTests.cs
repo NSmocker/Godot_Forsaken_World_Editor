@@ -135,8 +135,11 @@ namespace SilverEcho.ForsakenWorld.Tests
             int blockGrid = 2,
             int textures = 1,
             string textureName = "tex.dds",
-            string subName = "sub0")
+            string subName = "sub0",
+            int subRows = 1,
+            int subColumns = 1)
         {
+            int subCount = subRows * subColumns;
             var body = new List<byte>();
             // Fixed header through offset 140, then sub heights, textures, loader section.
             AddUInt32(body, 0x54524e32);
@@ -145,16 +148,16 @@ namespace SilverEcho.ForsakenWorld.Tests
             AddFloat(body, length);
             AddFloat(body, 2f); // block_size
             AddInt32(body, blockGrid);
-            AddInt32(body, 1); // num_block
-            AddInt32(body, 1); // block_rows
-            AddInt32(body, 1); // block_cols
+            AddInt32(body, subCount); // num_block
+            AddInt32(body, subRows); // block_rows
+            AddInt32(body, subColumns); // block_cols
             AddInt32(body, textures);
-            AddInt32(body, 1); // num_mask_area
+            AddInt32(body, subCount); // num_mask_area
             AddInt32(body, 1); // mask_block
             AddInt32(body, blockGrid); // mask_grid
-            AddInt32(body, 1); // num_sub
-            AddInt32(body, 1); // sub_rows
-            AddInt32(body, 1); // sub_cols
+            AddInt32(body, subCount); // num_sub
+            AddInt32(body, subRows); // sub_rows
+            AddInt32(body, subColumns); // sub_cols
             AddInt32(body, blockGrid); // sub_grid
             AddFloat(body, 1f); // grid_size
             var textureOffsetAt = body.Count;
@@ -164,8 +167,11 @@ namespace SilverEcho.ForsakenWorld.Tests
             AddInt32(body, 0); // loader_offset placeholder
             while (body.Count < 140)
                 body.Add(0);
-            AddFloat(body, -1f);
-            AddFloat(body, 3f);
+            for (int i = 0; i < subCount; i++)
+            {
+                AddFloat(body, -1f + i);
+                AddFloat(body, 3f + i);
+            }
 
             WriteInt32(body, textureOffsetAt, body.Count);
             for (var i = 0; i < textures; i++)
@@ -173,11 +179,12 @@ namespace SilverEcho.ForsakenWorld.Tests
 
             WriteInt32(body, loaderOffsetAt, body.Count);
             AddInt32(body, 8); // mask_map_size
-            AddString(body, subName);
+            for (int i = 0; i < subCount; i++)
+                AddString(body, subCount == 1 ? subName : "sub" + i);
             return body.ToArray();
         }
 
-        internal static byte[] BuildT2bk(int version, bool compressed, bool noRender)
+        internal static byte[] BuildT2bk(int version, bool compressed, bool noRender, int row = 0, int column = 0)
         {
             const int blockGrid = 2;
             var vertices = (blockGrid + 1) * (blockGrid + 1);
@@ -209,8 +216,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             int infoSize = new[] { 0, 16, 24, 28, 32, 32, 36 }[Math.Min(version, 6)];
             var block = new List<byte>();
             AddInt32(block, 0); // mask area
-            AddUInt16(block, 0); // row
-            AddUInt16(block, 0); // col
+            AddUInt16(block, (ushort)row);
+            AddUInt16(block, (ushort)column);
             AddInt32(block, 0);
             AddInt32(block, 0);
             if (version >= 2)

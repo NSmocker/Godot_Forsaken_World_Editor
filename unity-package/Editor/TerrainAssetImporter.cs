@@ -36,17 +36,31 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        /// <summary>Imports a full terrain prefab. Does not modify the current scene.</summary>
+        /// <summary>
+        /// Imports a terrain prefab without modifying the current scene. Null sector indices
+        /// import all sub-terrains; an explicit selection must contain at least one valid index.
+        /// </summary>
         public static Result Import(GameDataFile file, GameDataIndex index, GfxTextDecoder decoder,
-            bool showProgress = true)
+            bool showProgress = true, IReadOnlyCollection<int> selectedSectorIndices = null)
         {
             if (file == null || index == null) throw new ArgumentNullException();
+            var parser = new TerrainParser(decoder);
+            var t = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+            HashSet<int> selectedSectors = null;
+            if (selectedSectorIndices != null)
+            {
+                selectedSectors = new HashSet<int>(selectedSectorIndices);
+                if (selectedSectors.Count == 0)
+                    throw new ArgumentException("Select at least one terrain sector.", nameof(selectedSectorIndices));
+                foreach (int sector in selectedSectors)
+                    if (sector < 0 || sector >= t.Subs.Length)
+                        throw new ArgumentOutOfRangeException(nameof(selectedSectorIndices), sector,
+                            file.RelativePath + ": sector index must be between 0 and " + (t.Subs.Length - 1) + ".");
+            }
             if (!SystemInfo.supports2DArrayTextures) throw new NotSupportedException("Terrain requires Texture2DArray support.");
             var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
             if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader))
                 throw new InvalidOperationException("Angelica Terrain shader is unavailable. Use a URP project and resolve shader compilation errors.");
-            var parser = new TerrainParser(decoder);
-            var t = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
             var result = new Result();
             string folder = GetOutputFolder(file.RelativePath);
             GameObject root = null;
@@ -58,9 +72,15 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Progress(showProgress, "Reading ground textures", 0);
                 var layers = Save(BuildLayers(t, file, index, result.Warnings), folder + "/Layers.asset");
                 root = new GameObject(file.Name + "_Terrain");
+                int sectorCount = selectedSectors?.Count ?? t.Subs.Length;
+                int sectorOrdinal = 0;
                 for (int s = 0; s < t.Subs.Length; s++)
                 {
-                    Progress(showProgress, "Reading " + t.Subs[s].Name, (float)s / Math.Max(1, t.Subs.Length));
+                    // Keep s as the source index: area coordinates, names and height offsets
+                    // belong to the full map even when earlier sectors are omitted.
+                    if (selectedSectors != null && !selectedSectors.Contains(s)) continue;
+                    int progressIndex = sectorOrdinal++;
+                    Progress(showProgress, "Reading " + t.Subs[s].Name, (float)progressIndex / sectorCount);
                     GameDataFile blockFile;
                     GameDataFile maskFile;
                     try
@@ -106,7 +126,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     for (int a = 0; a < masks.Areas.Length; a++)
                     {
                         Progress(showProgress, t.Subs[s].Name + ": area " + (a + 1) + "/" + masks.Areas.Length,
-                            (s + (float)a / Math.Max(1, masks.Areas.Length)) / Math.Max(1, t.Subs.Length));
+                            (progressIndex + (float)a / Math.Max(1, masks.Areas.Length)) / sectorCount);
                         int row = s / t.SubColumns * perSide + a / perSide, col = s % t.SubColumns * perSide + a % perSide;
                         string areaName = "Area_" + (row * t.AreaColumns + col).ToString("D4"), prefix = folder + "/" + areaName;
                         TerrainMeshData meshData;
@@ -140,7 +160,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                         result.Areas++; result.Vertices += mesh.vertexCount; result.Triangles += meshData.Indices.Length / 3;
                     }
                 }
-                if (result.Areas == 0) throw new InvalidDataException("Terrain contains no visible areas.");
+                if (result.Areas == 0) throw new InvalidDataException(
+                    selectedSectors == null ? "Terrain contains no visible areas." :
+                    "Selected terrain sectors contain no readable visible areas. Check their block and mask files.");
                 result.PrefabPath = folder + "/" + root.name + ".prefab";
                 PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool saved);
                 if (!saved) throw new IOException("Could not save terrain prefab: " + result.PrefabPath);

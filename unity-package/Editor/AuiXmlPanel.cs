@@ -28,7 +28,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private List<string> files = new List<string>();
         private string selectedFile = string.Empty;
 
-        [MenuItem("Tools/Forsaken World/AUI XML")]
+        [MenuItem("Tools/Angelica 2.x/AUI XML")]
         public static void Open()
         {
             GetWindow<AuiXmlPanel>("AUI-XML");

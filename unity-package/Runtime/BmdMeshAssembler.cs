@@ -50,6 +50,7 @@ namespace SilverEcho.ForsakenWorld
                     Normals = (float[])(mesh.Normals ?? Array.Empty<float>()).Clone(),
                     Uvs = (float[])(mesh.Uvs ?? Array.Empty<float>()).Clone(),
                     Colors = (float[])(mesh.Colors ?? Array.Empty<float>()).Clone(),
+                    NightColors = (float[])(mesh.NightColors ?? Array.Empty<float>()).Clone(),
                     Indices = (int[])mesh.Indices.Clone()
                 });
             }

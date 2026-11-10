@@ -1,12 +1,17 @@
 Shader "Forsaken World/HDRP/Angelica LitModel"
 {
     // HDRP twin of Forsaken World/Angelica LitModel.
-    // vertex day color * texture * 2 * brightness, alpha clip 84/255.
+    // Blended baked day/night color * texture * 2, alpha clip 84/255.
     Properties
     {
         _Albedo ("Albedo", 2D) = "white" {}
         _AlphaRef ("Alpha reference", Range(0, 1)) = 0.3294
-        _Brightness ("Brightness", Range(0, 4)) = 2
+        _Brightness ("Brightness (1 = original)", Range(0, 4)) = 1
+        _DayNight ("Day / Night (0 = day, 1 = night)", Range(0, 1)) = 0
+        [ToggleUI] _UseMapDayNight ("Follow map day/night", Float) = 1
+        [HideInInspector] _MapDayNight ("Map day/night override", Float) = -1
+        [HideInInspector] _HasDayNightColors ("Has baked day/night colors", Float) = 0
+        [HideInInspector] _AlbedoIsSRGB ("Albedo uses sRGB sampling", Float) = 1
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
     SubShader

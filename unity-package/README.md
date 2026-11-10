@@ -1,4 +1,4 @@
-# Forsaken World Editor Unity package
+# Angelica 2.x Editor Unity package
 
 How each supported format pulls other files (versions, search order, drag-and-drop
 closure) is specified in [DEPENDENCIES.md](DEPENDENCIES.md).
@@ -66,12 +66,43 @@ imported. Morph, supple, and muscle mesh families remain unsupported; PHY and TC
 yet. Binary `MOXB` ECM files remain unsupported. `.trn2` terrain (Loader B) can be previewed and
 imported as a Prefab with area meshes, layer masks, and daytime lightmaps. Individual buildings
 (`.bmd` litmodels) can be previewed and imported as Prefabs under
-`Assets/ForsakenWorld/Imported/Buildings` with the Angelica LitModel URP shader (vertex day color ×
+`Assets/ForsakenWorld/Imported/Buildings` with the Angelica LitModel URP shader (baked day/night color ×
 texture × 2, alpha test 84/255, optional two-sided). Full map import (Godot `import_map` parity) reads sibling `.ecwld`/`.ecbsd` (+ `BSData.dat`
 water), filters buildings by ornament lists, and builds a map Prefab under
 `Assets/ForsakenWorld/Imported/Maps` with water (`Angelica Water` URP shader), lights,
 ECModels (existing ECM Prefab path), AudioSource sounds (AudioClip via AssembledAudioImporter for .wav), day/night + load-radius
 controller, and GFX effects (`GfxSceneBuilder` → `GfxPlayer` hierarchy when `.gfx` resolves; else `WorldGfxPlaceholder`).
+
+LitModel materials in both URP and HDRP support baked **Day / Night** colors from BMD.
+Reimport existing buildings or their map once: old generated meshes only contain daytime colors.
+On a map, select its **Objects** child and toggle **World Objects Controller → Night**.
+For an individual material, disable **Follow map day/night** and adjust **Day / Night** from
+0 (day) to 1 (night), including intermediate lighting. Without a map controller the material
+slider works directly. Map switching uses renderer overrides, leaving shared material assets
+and other map instances untouched. Disabling the controller releases its lighting override.
+
+The vertex-color path follows the local Angelica source `A3DLitMesh::UpdateColors`:
+8-bit day/night weights, integer truncation before vertex interpolation, then encoded RGB
+texture × lighting × 2 (`A3DTOP_MODULATE2X`). New building imports use **Brightness = 1**;
+the previous extra ×2 brightness boost is removed for buildings. Linear projects undo
+sRGB texture sampling before this encoded-color calculation and convert the final result
+back to linear. BMD v2 duplicates its diffuse colors for day and night, as the original loader
+does. V6 extra lighting arrays are retained separately; the primary pair is rendered as in
+the original vertex-color path. Separate BMD lightmap textures/UVs, fog and post-processing
+parity are outside this vertex-color implementation. New parser/mesh/controller regression
+tests are included; execution and visual comparison are left to the user.
+
+The browser's **Import terrain Prefab**, **Import map Prefab**, and **Instantiate map in scene**
+buttons all open the sector selection dialog before importing terrain (TRN2 sub-terrains).
+Terrain geometry import reads block, mask, and lightmap files only for selected sectors;
+their original coordinates, area names, and height offsets are preserved. At least one sector
+must be selected. This selection applies to terrain only; world objects still use the existing
+map import behavior (grass can still read heights across the map). Drag & Drop and calls
+without options import the full terrain.
+For code callers, `MapImportOptions.SelectedSectorIndices = null` means all sectors; an explicit
+empty list or an out-of-range index is rejected. Reimport updates the same map/terrain Prefabs
+in place and replaces their terrain hierarchy with the new selection. Previously generated
+area assets remain on disk so other references stay valid.
 
 `BinaryDataReader` provides bounded little-endian reads and explicit signature/version checks.
 `SmdParser` uses it to read the Angelica SMD v8 manifest. `BonParser` reads BON v6 skeleton

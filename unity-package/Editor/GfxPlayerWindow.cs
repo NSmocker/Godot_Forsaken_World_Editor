@@ -18,7 +18,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private bool dragging;
         private bool resumeAfterDrag;
 
-        [MenuItem("Tools/Forsaken World/GFX-Player")]
+        [MenuItem("Tools/Angelica 2.x/GFX-Player")]
         public static void Open()
         {
             GetWindow<GfxPlayerWindow>("GFX-Player");

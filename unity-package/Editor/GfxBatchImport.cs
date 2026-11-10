@@ -20,7 +20,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         public const float SpawnSpacingZ = 20f;
         public const int ItemsPerRow = 30;
 
-        [MenuItem("Tools/Forsaken World/GFX Ausführen")]
+        [MenuItem("Tools/Angelica 2.x/GFX Ausführen")]
         public static void Ausfuehren()
         {
             var absolute = ToAbsolute(LoadDirAsset);

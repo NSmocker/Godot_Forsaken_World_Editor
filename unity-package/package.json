@@ -1,7 +1,7 @@
 {
   "name": "com.silverechogames.forsaken-world-editor",
   "version": "0.1.0",
-  "displayName": "Forsaken World Editor",
+  "displayName": "Angelica 2.x Editor",
   "description": "Tools for inspecting and importing Forsaken World game data.",
   "unity": "6000.0",
   "author": {

@@ -110,14 +110,51 @@ namespace SilverEcho.ForsakenWorld.Tests
             return new BmdParser(new GfxTextDecoder(() => Encoding.GetEncoding(28591)));
         }
 
-        private static byte[] BuildBmd(
+        [TestCase(0x10000002u)]
+        [TestCase(0x10000003u)]
+        [TestCase(0x10000004u)]
+        [TestCase(0x10000005u)]
+        [TestCase(0x10000006u)]
+        [TestCase(0x10000100u)]
+        public void PreservesBakedDayAndNightRgbForEverySupportedMeshVersion(uint version)
+        {
+            var mesh = CreateParser().Parse(BuildBmd(true, false, version)).Meshes[0];
+            CollectionAssert.AreEqual(new[] { 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f }, mesh.Colors);
+            CollectionAssert.AreEqual(version == BmdParser.MeshVersion02 ? mesh.Colors :
+                new[] { 0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f }, mesh.NightColors);
+            Assert.AreNotSame(mesh.Colors, mesh.NightColors);
+        }
+
+        [Test]
+        public void KeepsV6ExtraLightingSeparateFromPrimaryDayNightColors()
+        {
+            var mesh = CreateParser().Parse(BuildBmd(true, false, BmdParser.MeshVersion06,
+                twoSided: true, extraColors: true)).Meshes[0];
+            CollectionAssert.AreEqual(new[] { 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f, 0f }, mesh.ExtraDayColors);
+            CollectionAssert.AreEqual(new[] { 1f, 1f, 0f, 1f, 1f, 0f, 1f, 1f, 0f }, mesh.ExtraNightColors);
+            Assert.AreEqual(1f, mesh.Colors[0]);
+            Assert.AreEqual(1f, mesh.NightColors[2]);
+            Assert.IsTrue(mesh.TwoSided, "Extra colors must not shift the material section.");
+        }
+
+        [Test]
+        public void RejectsTruncatedNightColorPayload()
+        {
+            var bytes = BuildBmd(true, false, BmdParser.MeshVersion04);
+            // Header + mesh header + vertices + indices + normals + day + incomplete night.
+            Array.Resize(ref bytes, 65 + 332 + 3 * 24 + 6 + 3 * 12 + 3 * 4 + 2 * 4);
+            Assert.Throws<InvalidDataException>(() => CreateParser().Parse(bytes));
+        }
+
+        internal static byte[] BuildBmd(
             bool withFlags,
             bool collideOnly,
             uint meshVersion,
             bool twoSided = false,
             ushort indexA = 0,
             ushort indexB = 1,
-            ushort indexC = 2)
+            ushort indexC = 2,
+            bool extraColors = false)
         {
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream))
@@ -142,7 +179,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 writer.Write(3); // nv
                 writer.Write(1); // nf
                 if (meshVersion == 0x10000006u)
-                    writer.Write((byte)0);
+                    writer.Write((byte)(extraColors ? 1 : 0));
 
                 var vertexSize = meshVersion <= 0x10000003u ? 28 : 24;
                 // three vertices: positions + diffuse/specular padding + uv
@@ -183,6 +220,12 @@ namespace SilverEcho.ForsakenWorld.Tests
                         writer.Write(PackArgb(255, 255, 0, 0));
                     for (var i = 0; i < 3; i++)
                         writer.Write(PackArgb(255, 0, 0, 255));
+                }
+
+                if (meshVersion == BmdParser.MeshVersion06 && extraColors)
+                {
+                    for (var i = 0; i < 3; i++) writer.Write(PackArgb(255, 0, 255, 0));
+                    for (var i = 0; i < 3; i++) writer.Write(PackArgb(255, 255, 255, 0));
                 }
 
                 // AABB 12 floats

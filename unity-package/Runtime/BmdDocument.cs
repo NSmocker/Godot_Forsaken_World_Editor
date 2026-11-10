@@ -29,6 +29,11 @@ namespace SilverEcho.ForsakenWorld
         public float[] Uvs = Array.Empty<float>();
         /// <summary>Daytime vertex colors as RGB floats 0..1 (A3DCOLOR ARGB, alpha discarded like Godot Color8).</summary>
         public float[] Colors = Array.Empty<float>();
+        /// <summary>Nighttime baked RGB. Legacy v2 uses the same diffuse colors for day and night.</summary>
+        public float[] NightColors = Array.Empty<float>();
+        // Optional v6 editor lighting data. The original runtime renders the primary pair.
+        public float[] ExtraDayColors = Array.Empty<float>();
+        public float[] ExtraNightColors = Array.Empty<float>();
         /// <summary>On-disk triangle winding preserved for Unity LH (Godot swaps indices 1/2).</summary>
         public int[] Indices = Array.Empty<int>();
     }
@@ -55,6 +60,7 @@ namespace SilverEcho.ForsakenWorld
         public float[] Normals = Array.Empty<float>();
         public float[] Uvs = Array.Empty<float>();
         public float[] Colors = Array.Empty<float>();
+        public float[] NightColors = Array.Empty<float>();
         public int[] Indices = Array.Empty<int>();
     }
 }

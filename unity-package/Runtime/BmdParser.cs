@@ -137,24 +137,26 @@ namespace SilverEcho.ForsakenWorld
             var normalBytes = reader.ReadBytes(vertexCount * 12);
 
             byte[] dayColorBytes;
+            byte[] nightColorBytes;
             int colorStride;
             int colorOffset;
             if (version == MeshVersion02)
             {
                 dayColorBytes = vertexBytes;
+                nightColorBytes = vertexBytes; // A3DLitMesh::Load v2 copies diffuse to both arrays.
                 colorStride = vertexSize;
                 colorOffset = 12; // diffuse in A3DLVERTEX
             }
             else
             {
                 dayColorBytes = reader.ReadBytes(vertexCount * 4);
-                reader.Skip(vertexCount * 4); // night colors unused
+                nightColorBytes = reader.ReadBytes(vertexCount * 4);
                 colorStride = 4;
                 colorOffset = 0;
             }
 
-            if (extra)
-                reader.Skip(vertexCount * 8); // extra day/night colors unused
+            var extraDayColors = extra ? DecodeColors(reader.ReadBytes(vertexCount * 4), vertexCount, 4, 0) : Array.Empty<float>();
+            var extraNightColors = extra ? DecodeColors(reader.ReadBytes(vertexCount * 4), vertexCount, 4, 0) : Array.Empty<float>();
 
             reader.Skip(48); // AABB
 
@@ -178,7 +180,8 @@ namespace SilverEcho.ForsakenWorld
             var positions = new float[vertexCount * 3];
             var normals = new float[vertexCount * 3];
             var uvs = new float[vertexCount * 2];
-            var colors = new float[vertexCount * 3];
+            var colors = DecodeColors(dayColorBytes, vertexCount, colorStride, colorOffset);
+            var nightColors = DecodeColors(nightColorBytes, vertexCount, colorStride, colorOffset);
 
             for (var i = 0; i < vertexCount; i++)
             {
@@ -193,16 +196,6 @@ namespace SilverEcho.ForsakenWorld
                 normals[i * 3 + 1] = BitConverter.ToSingle(normalBytes, i * 12 + 4);
                 normals[i * 3 + 2] = BitConverter.ToSingle(normalBytes, i * 12 + 8);
 
-                var colorOffsetBytes = i * colorStride + colorOffset;
-                var argb = (uint)(
-                    dayColorBytes[colorOffsetBytes] |
-                    (dayColorBytes[colorOffsetBytes + 1] << 8) |
-                    (dayColorBytes[colorOffsetBytes + 2] << 16) |
-                    (dayColorBytes[colorOffsetBytes + 3] << 24));
-                // Godot Color8((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) — discard alpha.
-                colors[i * 3] = ((argb >> 16) & 0xFFu) / 255f;
-                colors[i * 3 + 1] = ((argb >> 8) & 0xFFu) / 255f;
-                colors[i * 3 + 2] = (argb & 0xFFu) / 255f;
             }
 
             // Preserve on-disk winding for Unity LH. Godot swaps c1/c2 for RH.
@@ -229,6 +222,9 @@ namespace SilverEcho.ForsakenWorld
                 Normals = normals,
                 Uvs = uvs,
                 Colors = colors,
+                NightColors = nightColors,
+                ExtraDayColors = extraDayColors,
+                ExtraNightColors = extraNightColors,
                 Indices = indices
             };
         }
@@ -243,6 +239,20 @@ namespace SilverEcho.ForsakenWorld
             var slice = new byte[length];
             Buffer.BlockCopy(bytes, 0, slice, 0, length);
             return decoder.DecodeGbk(slice);
+        }
+
+        private static float[] DecodeColors(byte[] bytes, int count, int stride, int offset)
+        {
+            var colors = new float[count * 3];
+            for (int i = 0; i < count; i++)
+            {
+                int at = i * stride + offset;
+                // Little-endian A3DCOLOR is BGRA. A3DLitMesh::UpdateColors forces alpha to 255.
+                colors[i * 3] = bytes[at + 2] / 255f;
+                colors[i * 3 + 1] = bytes[at + 1] / 255f;
+                colors[i * 3 + 2] = bytes[at] / 255f;
+            }
+            return colors;
         }
 
         private static float[] ReadVector3(BinaryDataReader reader)

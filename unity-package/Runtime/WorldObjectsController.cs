@@ -1,28 +1,34 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// Day/night + load-radius visibility for map objects, matching
-    /// gfx_importer/angelica_world_objects.gd. Also swaps Sun / ambient colors.
+    /// gfx_importer/angelica_world_objects.gd. Also swaps Sun / ambient and LitModel baked colors.
     /// </summary>
     [ExecuteAlways]
     public sealed class WorldObjectsController : MonoBehaviour
     {
         public const float DefaultUpdateInterval = 0.25f;
 
-        [SerializeField] private bool night;
+        [SerializeField, Tooltip("Switches world lighting, object visibility and baked LitModel day/night colors.")]
+        private bool night;
         [SerializeField] private float loadRadius = 250f;
         [SerializeField] private bool animateInEditor = true;
         [SerializeField] private float updateInterval = DefaultUpdateInterval;
 
         private float next;
         private bool? lightNight;
+        private Transform lightMap;
+        private MaterialPropertyBlock lightingBlock;
+        private readonly List<Renderer> litModelRenderers = new List<Renderer>();
+        private static readonly int MapDayNightId = Shader.PropertyToID("_MapDayNight");
 
         public bool Night
         {
             get { return night; }
-            set { night = value; next = 0f; }
+            set { night = value; lightNight = null; next = 0f; }
         }
 
         public float LoadRadius
@@ -42,6 +48,26 @@ namespace SilverEcho.ForsakenWorld
             ApplyTime();
         }
 
+        private void OnEnable()
+        {
+            lightNight = null;
+            next = 0f;
+        }
+
+        private void OnValidate()
+        {
+            // Renderer API calls run on the next Update, not during serialization/validation.
+            lightNight = null;
+            next = 0f;
+        }
+
+        private void OnDisable()
+        {
+            ReleaseLitModelLighting();
+            lightNight = null;
+            lightMap = null;
+        }
+
         private void Update()
         {
             next -= Time.deltaTime;
@@ -59,11 +85,51 @@ namespace SilverEcho.ForsakenWorld
                 camPos = Camera.main.transform.position;
 
             ApplyNode(transform, camPos);
-            if (lightNight == null || lightNight.Value != night)
+            if (lightNight == null || lightNight.Value != night || lightMap != transform.parent)
             {
+                ReleaseLitModelLighting();
+                lightMap = transform.parent;
                 lightNight = night;
                 ApplyLight();
+                ApplyLitModelLighting();
             }
+        }
+
+        private void ApplyLitModelLighting()
+        {
+            if (lightMap == null) return;
+            if (lightingBlock == null) lightingBlock = new MaterialPropertyBlock();
+            // Buildings are siblings of Objects, so search the owning map, including inactive
+            // buildings. Per-renderer overrides keep shared materials and other maps untouched.
+            foreach (var renderer in lightMap.GetComponentsInChildren<Renderer>(true))
+            {
+                bool supportsDayNight = false;
+                foreach (var material in renderer.sharedMaterials)
+                    if (material != null && material.HasProperty(MapDayNightId))
+                    {
+                        supportsDayNight = true;
+                        break;
+                    }
+                if (!supportsDayNight) continue;
+                renderer.GetPropertyBlock(lightingBlock);
+                lightingBlock.SetFloat(MapDayNightId, night ? 1f : 0f);
+                renderer.SetPropertyBlock(lightingBlock);
+                litModelRenderers.Add(renderer);
+            }
+        }
+
+        private void ReleaseLitModelLighting()
+        {
+            if (lightingBlock != null)
+                foreach (var renderer in litModelRenderers)
+                {
+                    if (renderer == null) continue;
+                    renderer.GetPropertyBlock(lightingBlock);
+                    // Negative means use the material's own Day/Night slider. Retain other overrides.
+                    lightingBlock.SetFloat(MapDayNightId, -1f);
+                    renderer.SetPropertyBlock(lightingBlock);
+                }
+            litModelRenderers.Clear();
         }
 
         private void ApplyLight()

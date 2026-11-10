@@ -9,6 +9,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
+using SilverEcho.ForsakenWorld;
 
 namespace SilverEcho.ForsakenWorld.Editor
 {
@@ -119,7 +120,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataIndex index,
             GfxTextDecoder decoder,
             bool showProgress = true,
-            bool includeTerrain = true)
+            bool includeTerrain = true,
+            MapImportOptions options = null)
         {
             if (trn2File == null || index == null)
                 throw new ArgumentNullException();
@@ -136,7 +138,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 {
                     if (includeTerrain)
                     {
-                        var terrain = TerrainAssetImporter.Import(trn2File, index, decoder, showProgress: false);
+                        var terrain = TerrainAssetImporter.Import(trn2File, index, decoder, showProgress: false,
+                            selectedSectorIndices: options?.SelectedSectorIndices);
                         result.TerrainPrefabPath = terrain.PrefabPath;
                         result.TerrainAreas = terrain.Areas;
                         result.Warnings.AddRange(terrain.Warnings);
@@ -164,6 +167,13 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                 Progress(showProgress, "World (.ecwld/.ecbsd)", 0.35f);
                 var world = LoadWorld(trn2File, index, decoder, result);
+
+                // Add source tracking for round-trip editing
+                var sourceInfo = root.AddComponent<MapSourceInfo>();
+                sourceInfo.Trn2FullPath = trn2File.FullPath;
+                sourceInfo.EcwldFullPath = world.EcwldFullPath ?? "";
+                sourceInfo.EcbsdFullPath = world.EcbsdFullPath ?? "";
+                sourceInfo.ImportDate = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
                 Progress(showProgress, "Buildings", 0.5f);
                 if (includeTerrain)
@@ -216,6 +226,10 @@ namespace SilverEcho.ForsakenWorld.Editor
             public string EcwldRelativePath = string.Empty;
             public string EcbsdRelativePath = string.Empty;
             public string EcbsdDirectory = string.Empty;
+
+            // For round-trip export
+            public string EcwldFullPath = string.Empty;
+            public string EcbsdFullPath = string.Empty;
         }
 
         private static WorldBundle LoadWorld(
@@ -408,6 +422,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                     instance = new GameObject(Sanitize(file.DisplayName));
                 instance.name = Sanitize(file.DisplayName);
                 instance.transform.SetParent(group, false);
+
+                // Add round-trip tracking for buildings
+                var litInstance = instance.AddComponent<LitModelInstance>();
+                litInstance.OriginalBmdPath = file.RelativePath;
+                litInstance.OriginalEcwldIndex = -1; // Will be filled from ecwld if available
+                litInstance.RecordOriginalTransform();
+
                 result.Buildings++;
                 result.BuildingPaths.Add(imported.PrefabPath);
                 used++;
