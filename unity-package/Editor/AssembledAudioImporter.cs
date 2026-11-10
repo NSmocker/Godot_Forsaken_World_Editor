@@ -61,6 +61,8 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         public static ImportResult ImportOrUpdate(string sourceFullPath, string sourceRelativePath, bool forceReimport = false)
         {
+            // Explicit requests must not be satisfied by an earlier session cache entry.
+            if (forceReimport) return ImportOrUpdateCore(sourceFullPath, sourceRelativePath, true);
             return GameDataImportSession.Once(GameDataImportSession.ResourceKey("audio", sourceFullPath, sourceRelativePath) + "|" + forceReimport,
                 () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, forceReimport || GameDataImportSession.ForceReimport));
         }
@@ -114,7 +116,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "Import audio dependencies before starting the asset write batch.");
 
             var assetPath = GetSoundAssetPath(sourceRelativePath);
-            if (pending.Contains(assetPath) || GameDataNativeImportBatch.WasImported(assetPath))
+            if (pending.Contains(assetPath))
                 return;
 
             var absoluteDest = AssetPathToAbsolute(assetPath);
@@ -188,21 +190,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return result;
                 }
             }
-            if (GameDataNativeImportBatch.WasImported(result.AssetPath))
-            {
-                result.Clip = AssetDatabase.LoadAssetAtPath<AudioClip>(result.AssetPath);
-                if (result.Clip != null)
-                {
-                    result.Updated = existed;
-                    result.Created = !existed;
-                    return result;
-                }
-            }
             if (GameDataAssetBatch.IsActive)
                 throw new InvalidOperationException("Import audio dependencies before starting the asset write batch.");
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
-            GameDataNativeImportBatch.NoteImported(result.AssetPath);
             if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
             result.Clip = AssetDatabase.LoadAssetAtPath<AudioClip>(result.AssetPath);

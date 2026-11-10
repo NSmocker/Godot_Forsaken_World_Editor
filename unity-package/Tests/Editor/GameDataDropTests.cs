@@ -62,6 +62,22 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void UnwritableTextureDestinationDoesNotAbortOtherRoots()
+        {
+            string bad = prefix + "/bad.tga", good = prefix + "/good.tga";
+            Write(bad, Tga()); Write(good, Tga());
+            string blocked = AssembledTextureImporter.AssetPathToAbsolute(
+                AssembledTextureImporter.GetTextureAssetPath(bad));
+            // A directory at the file destination deterministically prevents File.Copy.
+            Directory.CreateDirectory(blocked);
+            var result = GameDataDropImporter.Import(Index(), new[] { bad, good }, decoder, false);
+            Assert.IsTrue(result.Errors.Any(e => e.Contains("bad.tga")));
+            Assert.AreEqual(1, result.Assets.Count);
+            Assert.AreEqual(AssembledTextureImporter.GetTextureAssetPath(good),
+                AssetDatabase.GetAssetPath(result.Assets[0]));
+        }
+
+        [Test]
         public void ModelClosureIsOutgoingDeduplicatedAndDependenciesPrecedeRoot()
         {
             Model("models/hero");

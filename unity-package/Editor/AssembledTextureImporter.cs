@@ -64,6 +64,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                 "|" + header.HeaderByteSize + "|" + header.RgbBitCount + "|" + header.RedMask +
                 "|" + header.GreenMask + "|" + header.BlueMask + "|" + header.AlphaMask +
                 "|" + header.PitchOrLinearSize + "|" + header.HeaderFlags + "|" + header.LikelyUnityNativeImport;
+            // Explicit requests must not be satisfied by an earlier session cache entry.
+            if (forceReimport) return ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header, true);
             return GameDataImportSession.Once(key + "|" + forceReimport,
                 () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header,
                     forceReimport || GameDataImportSession.ForceReimport));
@@ -144,7 +146,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             sourceRelativePath = ApplyDetectedExtension(sourceFullPath, sourceRelativePath);
             var assetPath = GetTextureAssetPath(sourceRelativePath, decodedAsset: false);
-            if (pending.Contains(assetPath) || GameDataNativeImportBatch.WasImported(assetPath))
+            if (pending.Contains(assetPath))
                 return;
 
             var absoluteDest = AssetPathToAbsolute(assetPath);
@@ -443,23 +445,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                     return result;
                 }
             }
-            if (GameDataNativeImportBatch.WasImported(result.AssetPath))
-            {
-                result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
-                if (result.Texture != null)
-                {
-                    result.Updated = existed;
-                    result.Created = !existed;
-                    return result;
-                }
-            }
             if (GameDataAssetBatch.IsActive)
                 throw new InvalidOperationException("Import texture dependencies before starting the asset write batch.");
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
             // ImportAsset is enough for LoadAssetAtPath; Refresh() here is O(project)
             // per texture and must not run inside batch StartAssetEditing loops.
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
-            GameDataNativeImportBatch.NoteImported(result.AssetPath);
             if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
             result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);

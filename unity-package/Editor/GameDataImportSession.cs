@@ -25,8 +25,6 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             previous = current;
             owner = previous?.owner ?? this;
-            if (previous == null)
-                GameDataNativeImportBatch.Reset();
             results = previous?.results ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             Statistics = previous?.Statistics ?? new ImportStatistics();
             this.forceReimport = forceReimport || (previous?.forceReimport ?? false);

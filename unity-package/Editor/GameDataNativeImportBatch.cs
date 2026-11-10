@@ -17,25 +17,6 @@ namespace SilverEcho.ForsakenWorld.Editor
         // small enough to keep a cancellation point and a bounded import spike.
         public const int ChunkSize = 64;
 
-        private static readonly HashSet<string> importedPaths =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        internal static void Reset()
-        {
-            importedPaths.Clear();
-        }
-
-        internal static bool WasImported(string assetPath)
-        {
-            return !string.IsNullOrEmpty(assetPath) && importedPaths.Contains(assetPath);
-        }
-
-        internal static void NoteImported(string assetPath)
-        {
-            if (!string.IsNullOrEmpty(assetPath))
-                importedPaths.Add(assetPath);
-        }
-
         public static int Import(ICollection<string> assetPaths, string progressLabel = null)
         {
             if (assetPaths == null || assetPaths.Count == 0)
@@ -48,7 +29,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in assetPaths)
             {
-                if (string.IsNullOrEmpty(path) || importedPaths.Contains(path) || !seen.Add(path))
+                if (string.IsNullOrEmpty(path) || !seen.Add(path))
                     continue;
                 unique.Add(path);
             }
@@ -80,8 +61,6 @@ namespace SilverEcho.ForsakenWorld.Editor
                     AssetDatabase.StopAssetEditing();
                 }
 
-                for (var i = 0; i < count; i++)
-                    NoteImported(unique[offset + i]);
                 imported += count;
                 if (GameDataImportSession.Metrics != null)
                 {

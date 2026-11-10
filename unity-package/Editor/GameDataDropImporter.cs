@@ -95,25 +95,32 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             if (graph == null)
                 return;
-            var textures = new List<GameDataFile>();
-            var sounds = new List<GameDataFile>();
+            var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var node in graph.ImportOrder)
             {
-                if (node == null || !node.CanImport || node.File == null)
-                    continue;
-                switch (node.File.Extension)
+                if (node == null || !node.CanImport || node.File == null) continue;
+                try
                 {
-                    case "dds": case "bmp": case "tga": case "png": case "jpg": case "jpeg":
-                        textures.Add(node.File);
-                        break;
-                    case "wav": case "ogg": case "mp3":
-                        sounds.Add(node.File);
-                        break;
+                    var file = node.File;
+                    switch (file.Extension)
+                    {
+                        case "dds": case "bmp": case "tga": case "png": case "jpg": case "jpeg":
+                            AssembledTextureImporter.StageNativeCopy(file.FullPath, file.RelativePath, false, pending);
+                            break;
+                        case "wav": case "ogg": case "mp3":
+                            AssembledAudioImporter.StageNativeCopy(file.FullPath, file.RelativePath, false, pending);
+                            break;
+                    }
+                }
+                catch (Exception e) when (IsImportError(e))
+                {
+                    node.Errors.Add("Dependency preparation failed: " + e.Message);
                 }
             }
-
-            AssembledTextureImporter.ImportFiles(textures);
-            AssembledAudioImporter.ImportFiles(sounds);
+            // If the bulk importer itself fails, per-node imports below retry and attribute
+            // errors to their own dependency rather than aborting unrelated roots.
+            try { GameDataNativeImportBatch.Import(pending); }
+            catch (Exception e) when (IsImportError(e)) { }
         }
 
         private static Object ImportData(GameDataDependencyGraph.Node node)

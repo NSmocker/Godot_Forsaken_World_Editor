@@ -154,6 +154,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             }
             finally
             {
+                // Delete the parent first so removing its nested building prefab does
+                // not trigger a missing-prefab error during test cleanup.
+                AssetDatabase.DeleteAsset(MapAssetImporter.GetOutputFolder(mapFile.RelativePath));
                 AssetDatabase.DeleteAsset(insideFolder);
                 AssetDatabase.DeleteAsset(outsideFolder);
             }

@@ -75,6 +75,74 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void DirectCallsAfterSessionImportChangedBytes()
+        {
+            using (new GameDataImportSession())
+                Assert.IsNotNull(AssembledTextureImporter.ImportOrUpdate(source, relative).Texture);
+            File.WriteAllBytes(source, Tga(17));
+            var changed = AssembledTextureImporter.ImportOrUpdate(source, relative);
+            Assert.IsNotNull(changed.Texture, changed.Error);
+            CollectionAssert.AreEqual(File.ReadAllBytes(source),
+                File.ReadAllBytes(AssembledTextureImporter.AssetPathToAbsolute(output)));
+            File.WriteAllBytes(source, Tga(33));
+            AssembledTextureImporter.ImportOrUpdate(source, relative);
+            CollectionAssert.AreEqual(File.ReadAllBytes(source),
+                File.ReadAllBytes(AssembledTextureImporter.AssetPathToAbsolute(output)));
+        }
+
+        [Test]
+        public void AudioDirectChangesAndRepeatedForcePreserveGuid()
+        {
+            string audioSource = Path.Combine(directory, "tone.wav");
+            string audioRelative = Path.ChangeExtension(relative, ".wav");
+            string audioPath = AssembledAudioImporter.GetSoundAssetPath(audioRelative);
+            try
+            {
+                WriteWave(audioSource, 1);
+                using (new GameDataImportSession())
+                    Assert.IsNotNull(AssembledAudioImporter.ImportOrUpdate(audioSource, audioRelative).Clip);
+                string guid = AssetDatabase.AssetPathToGUID(audioPath);
+                WriteWave(audioSource, 2);
+                Assert.IsNotNull(AssembledAudioImporter.ImportOrUpdate(audioSource, audioRelative).Clip);
+                CollectionAssert.AreEqual(File.ReadAllBytes(audioSource),
+                    File.ReadAllBytes(AssembledAudioImporter.AssetPathToAbsolute(audioPath)));
+                using (var session = new GameDataImportSession())
+                {
+                    AssembledAudioImporter.ImportOrUpdate(audioSource, audioRelative, true);
+                    AssembledAudioImporter.ImportOrUpdate(audioSource, audioRelative, true);
+                    Assert.AreEqual(2, session.Statistics.NativeImports);
+                }
+                Assert.AreEqual(guid, AssetDatabase.AssetPathToGUID(audioPath));
+            }
+            finally { AssetDatabase.DeleteAsset(Path.GetDirectoryName(audioPath).Replace('\\', '/')); }
+        }
+
+        private static void WriteWave(string path, short value)
+        {
+            using (var writer = new BinaryWriter(File.Create(path)))
+            {
+                writer.Write(Encoding.ASCII.GetBytes("RIFF")); writer.Write(36 + 200);
+                writer.Write(Encoding.ASCII.GetBytes("WAVEfmt ")); writer.Write(16);
+                writer.Write((short)1); writer.Write((short)1); writer.Write(8000);
+                writer.Write(16000); writer.Write((short)2); writer.Write((short)16);
+                writer.Write(Encoding.ASCII.GetBytes("data")); writer.Write(200);
+                for (int i = 0; i < 100; i++) writer.Write(value);
+            }
+        }
+
+        [Test]
+        public void ExplicitForceExecutesEveryTimeWithinTheSameSession()
+        {
+            using (var session = new GameDataImportSession())
+            {
+                AssembledTextureImporter.ImportOrUpdate(source, relative);
+                AssembledTextureImporter.ImportOrUpdate(source, relative, forceReimport: true);
+                AssembledTextureImporter.ImportOrUpdate(source, relative, forceReimport: true);
+                Assert.AreEqual(3, session.Statistics.NativeImports);
+            }
+        }
+
+        [Test]
         public void ForceReimportOverridesUnchangedContent()
         {
             AssembledTextureImporter.ImportOrUpdate(source, relative);
