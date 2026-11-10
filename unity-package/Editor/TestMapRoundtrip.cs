@@ -33,15 +33,15 @@ namespace SilverEcho.ForsakenWorld.Editor
             var trn2File = index.Search("a05", "trn2").FirstOrDefault() ?? index.Search("", "trn2").FirstOrDefault(f => f.RelativePath.Contains("a05"));
             var result = MapAssetImporter.Import(trn2File, index, GameDataBrowserWindow.GetGameDataDecoder(), showProgress: false);
 
-            if (result == null || string.IsNullOrEmpty(result.PrefabPath))
+            if (result == null || result.SectorPrefabPaths.Count == 0)
             {
                 Debug.LogError("Map import failed");
                 return;
             }
 
-            Debug.Log("Map imported successfully: " + result.PrefabPath);
+            Debug.Log("Map imported successfully: " + result.SectorPrefabPaths.Count + " sectors");
 
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.SectorPrefabPaths[0]);
             if (prefab == null)
             {
                 Debug.LogError("Could not load prefab");

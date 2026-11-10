@@ -39,41 +39,15 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                 int Owner(Vector3 point)
                 {
-                    float side = terrain.SubGrid * terrain.GridSize;
-                    int column = Mathf.FloorToInt((point.x + terrain.Width * 0.5f) / side);
-                    int row = Mathf.FloorToInt((terrain.Length * 0.5f - point.z) / side);
-                    int cell = row * terrain.SubColumns + column;
-                    if (column >= 0 && column < terrain.SubColumns && row >= 0 && roots.ContainsKey(cell))
-                        return cell;
-                    int owner = roots.First().Key;
-                    float best = float.PositiveInfinity;
-                    foreach (var pair in roots)
-                    {
-                        var b = MapSectorFilter.SectorBounds(terrain, pair.Key);
-                        float dx = point.x - Mathf.Clamp(point.x, b.MinX, b.MaxX);
-                        float dz = point.z - Mathf.Clamp(point.z, b.MinZ, b.MaxZ);
-                        float distance = dx * dx + dz * dz;
-                        // Sorted order gives shared edges a deterministic single owner.
-                        if (distance < best) { best = distance; owner = pair.Key; }
-                    }
-                    return owner;
+                    var candidates = new List<int>(roots.Keys);
+                    return MapSectorFilter.Owner(terrain, candidates, point.x, point.z);
                 }
 
                 var buildings = map.transform.Find("Buildings");
                 if (buildings != null)
                     foreach (Transform group in buildings)
                         foreach (Transform building in group)
-                        {
-                            var renderers = building.GetComponentsInChildren<Renderer>(true);
-                            var point = building.position;
-                            if (renderers.Length > 0)
-                            {
-                                var bounds = renderers[0].bounds;
-                                foreach (var renderer in renderers) bounds.Encapsulate(renderer.bounds);
-                                point = bounds.center;
-                            }
-                            Copy(building, Group(Group(roots[Owner(point)].transform, "Buildings"), group.name));
-                        }
+                            Copy(building, Group(Group(roots[Owner(building.position)].transform, "Buildings"), group.name));
 
                 var objects = map.transform.Find("Objects");
                 if (objects != null)
@@ -90,7 +64,31 @@ namespace SilverEcho.ForsakenWorld.Editor
                             Copy(item, Group(target, category.name));
                         }
 
-                foreach (string category in new[] { "Water", "Grass" })
+                var grass = map.transform.Find("Grass");
+                if (grass != null)
+                {
+                    foreach (Transform item in grass)
+                    {
+                        int sector;
+                        if (TrySectorGroup(item.name, out sector))
+                        {
+                            if (!roots.ContainsKey(sector))
+                            {
+                                var bounds = MapSectorFilter.SectorBounds(terrain, sector);
+                                sector = Owner(new Vector3(
+                                    (bounds.MinX + bounds.MaxX) * 0.5f, 0f, (bounds.MinZ + bounds.MaxZ) * 0.5f));
+                            }
+                            var target = Group(roots[sector].transform, "Grass");
+                            foreach (Transform chunk in item)
+                                Copy(chunk, target);
+                            continue;
+                        }
+
+                        Copy(item, Group(roots[Owner(item.position)].transform, "Grass"));
+                    }
+                }
+
+                foreach (string category in new[] { "Water" })
                 {
                     var source = map.transform.Find(category);
                     if (source == null) continue;
@@ -197,6 +195,14 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return result;
             }
             catch { Object.DestroyImmediate(result); throw; }
+        }
+
+        private static bool TrySectorGroup(string name, out int sector)
+        {
+            sector = -1;
+            const string prefix = "Sector_";
+            return name != null && name.StartsWith(prefix, StringComparison.Ordinal) &&
+                int.TryParse(name.Substring(prefix.Length), out sector) && sector >= 0;
         }
 
         private static Transform Group(Transform parent, string name)

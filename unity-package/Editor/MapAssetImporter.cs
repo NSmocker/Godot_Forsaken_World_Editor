@@ -50,8 +50,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         /// <summary>
-        /// Replaces the Grass child of an already imported map prefab. Used when only
-        /// grass materials need to be rebuilt, without reimporting buildings.
+        /// Replaces grass in the sector prefabs. Used when only grass materials need
+        /// to be rebuilt, without reimporting buildings.
         /// </summary>
         public static int RebuildGrass(
             GameDataFile trn2File,
@@ -62,46 +62,96 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             if (trn2File == null || index == null)
                 throw new ArgumentNullException();
-            if (string.IsNullOrEmpty(prefabPath) ||
-                AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath) == null)
-                throw new FileNotFoundException("Map prefab is missing: " + prefabPath);
+            var sectorFolder = folder + "/Sectors";
+            if (!AssetDatabase.IsValidFolder(sectorFolder))
+                throw new FileNotFoundException("Map sector folder is missing: " + sectorFolder);
 
             var result = new Result();
             var world = LoadWorld(trn2File, index, decoder, result);
-            var root = PrefabUtility.LoadPrefabContents(prefabPath);
+            var terrain = new TerrainParser(decoder).Parse(
+                File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
+            var staging = new GameObject("GrassRebuild");
             try
             {
-                var stripped = StripMissingScripts(root);
-                if (stripped > 0)
-                    Debug.Log("A37_GRASS_STRIPPED_MISSING_SCRIPTS " + stripped);
-                RestoreLightColors(world, root);
-
-                var existing = root.transform.Find("Grass");
-                if (existing != null)
-                    Object.DestroyImmediate(existing.gameObject);
                 var blades = PlaceGrass(
-                    world, index, decoder, trn2File, root, folder, result, false);
+                    world, index, decoder, trn2File, staging, folder, result, false, null, terrain, null);
                 foreach (var warning in result.Warnings)
                     Debug.LogWarning("A37_GRASS_WARN " + warning);
+                var grass = staging.transform.Find("Grass");
+                if (grass == null)
+                    return 0;
+                foreach (Transform group in grass)
+                {
+                    int sector;
+                    if (!int.TryParse(group.name.StartsWith("Sector_") ? group.name.Substring(7) : "", out sector))
+                        continue;
+                    var path = sectorFolder + "/Sector_" + sector.ToString("D4") + ".prefab";
+                    if (AssetDatabase.LoadAssetAtPath<GameObject>(path) == null)
+                        continue;
+                    var contents = PrefabUtility.LoadPrefabContents(path);
+                    try
+                    {
+                        var existing = contents.transform.Find("Grass");
+                        if (existing != null)
+                            Object.DestroyImmediate(existing.gameObject);
+                        var replacement = new GameObject("Grass");
+                        replacement.transform.SetParent(contents.transform, false);
+                        foreach (Transform chunk in group)
+                        {
+                            var copy = Object.Instantiate(chunk.gameObject, replacement.transform, false);
+                            copy.name = chunk.name;
+                        }
+                        bool saved;
+                        PrefabUtility.SaveAsPrefabAsset(contents, path, out saved);
+                        if (!saved)
+                            throw new IOException("Could not save sector prefab: " + path);
+                    }
+                    finally
+                    {
+                        PrefabUtility.UnloadPrefabContents(contents);
+                    }
+                }
 
-                var grass = root.transform.Find("Grass");
-                var sample = grass != null ? grass.GetComponentInChildren<MeshRenderer>() : null;
-                var sampleMat = sample != null ? sample.sharedMaterial : null;
-                var sampleTex = sampleMat != null ? sampleMat.GetTexture("_Albedo") : null;
-                Debug.Log("A37_GRASS_MAT " + (sampleMat != null ? sampleMat.name : "none") +
-                    " albedo=" + (sampleTex != null ? sampleTex.name : "missing"));
-
-                bool saved;
-                PrefabUtility.SaveAsPrefabAsset(root, prefabPath, out saved);
-                if (!saved)
-                    throw new IOException("Could not save map prefab: " + prefabPath);
                 AssetDatabase.SaveAssets();
                 return blades;
             }
             finally
             {
-                PrefabUtility.UnloadPrefabContents(root);
+                Object.DestroyImmediate(staging);
             }
+        }
+
+        /// <summary>
+        /// Scene-only parent. Sector and Environment prefabs stay separate assets.
+        /// </summary>
+        public static GameObject InstantiateLoadedMap(Result result, string mapName)
+        {
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+            var parent = new GameObject(string.IsNullOrEmpty(mapName) ? "Map" : Sanitize(mapName));
+            foreach (var path in result.SectorPrefabPaths)
+            {
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab == null)
+                    continue;
+                var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                if (instance == null)
+                    continue;
+                instance.transform.SetParent(parent.transform, false);
+            }
+
+            if (!string.IsNullOrEmpty(result.EnvironmentPrefabPath))
+            {
+                var environment = AssetDatabase.LoadAssetAtPath<GameObject>(result.EnvironmentPrefabPath);
+                if (environment != null)
+                {
+                    var instance = PrefabUtility.InstantiatePrefab(environment) as GameObject;
+                    if (instance != null)
+                        instance.transform.SetParent(parent.transform, false);
+                }
+            }
+
+            return parent;
         }
 
         public static string GetOutputFolder(string relativePath)
@@ -215,28 +265,36 @@ namespace SilverEcho.ForsakenWorld.Editor
                     result.Trees = PlaceTrees(world.Document.Trees, world.Document.TreeTypes, trees, result, sectors);
                     result.Sounds = PlaceSounds(world.Document.Sounds, sounds, index, folder, result, sectors);
                     Progress(showProgress, "Grass", 0.9f);
+                    var grassTerrain = sectors?.Terrain;
+                    if (grassTerrain == null && includeTerrain)
+                        grassTerrain = new TerrainParser(decoder).Parse(
+                            File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
                     result.GrassBlades = PlaceGrass(
-                        world, index, decoder, trn2File, root, folder, result, showProgress, sectors);
+                        world, index, decoder, trn2File, root, folder, result, showProgress, sectors,
+                        grassTerrain, options?.SelectedSectorIndices);
                 }
 
                 if (sectors != null && result.SkippedOutsideSectors > 0)
                     result.Warnings.Add("Skipped " + result.SkippedOutsideSectors +
                         " world objects outside the selected sectors. Existing assets outside the selection were left in place.");
 
-                Progress(showProgress, "Saving map Prefab", 0.95f);
-                result.PrefabPath = folder + "/" + Sanitize(mapName) + ".prefab";
-                bool saved;
+                Progress(showProgress, "Saving sector Prefabs", 0.95f);
+                var combinedPath = folder + "/" + Sanitize(mapName) + ".prefab";
+                if (AssetDatabase.LoadAssetAtPath<GameObject>(combinedPath) != null)
+                    AssetDatabase.DeleteAsset(combinedPath);
+                result.PrefabPath = string.Empty;
                 using (new GameDataAssetBatch())
                 using (new GameDataPrefabAssets(root, folder + "/Effects"))
-                    PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out saved);
-                if (!saved)
-                    throw new IOException("Could not save map prefab: " + result.PrefabPath);
-                if (includeTerrain)
                 {
-                    var terrainDocument = sectors?.Terrain ?? new TerrainParser(decoder).Parse(
-                        File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
-                    result.SectorPrefabPaths.AddRange(MapSectorPrefabExporter.Export(root, terrainDocument,
-                        folder, options?.SelectedSectorIndices, showProgress, out result.EnvironmentPrefabPath));
+                    if (!includeTerrain)
+                        result.Warnings.Add("Map sectors were not written because terrain was not imported.");
+                    else
+                    {
+                        var terrainDocument = sectors?.Terrain ?? new TerrainParser(decoder).Parse(
+                            File.ReadAllBytes(trn2File.FullPath), trn2File.RelativePath);
+                        result.SectorPrefabPaths.AddRange(MapSectorPrefabExporter.Export(root, terrainDocument,
+                            folder, options?.SelectedSectorIndices, showProgress, out result.EnvironmentPrefabPath));
+                    }
                 }
                 GameDataImportSession.SaveAssets();
                 return result;
@@ -1075,19 +1133,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             var root = new GameObject(Sanitize(Path.GetFileNameWithoutExtension(document.SourcePath)) + "_world");
             var trees = new GameObject("Trees");
             trees.transform.SetParent(root.transform, false);
-            PlaceTrees(document.Trees, document.TreeTypes, trees, new Result());
+            var preview = new Result();
+            PlaceTrees(document.Trees, document.TreeTypes, trees, preview);
             if (bsd != null && index != null)
             {
-                var result = new Result();
                 var folder = string.IsNullOrEmpty(document.SourcePath)
                     ? null
                     : GetOutputFolder(document.SourcePath);
                 PlaceGrass(
                     new WorldBundle { Document = document, Bsd = bsd },
-                    index, decoder, terrainFile, root, folder, result, false);
-                if (warnings != null)
-                    warnings.AddRange(result.Warnings);
+                    index, decoder, terrainFile, root, folder, preview, false);
             }
+
+            if (warnings != null)
+                warnings.AddRange(preview.Warnings);
 
             return root;
         }
@@ -1100,6 +1159,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             MapSectorFilter sectors = null)
         {
             var count = 0;
+            // One console warning per missing .spt path, not per placed instance.
+            var warnedMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var tree in trees)
             {
                 if (sectors != null && !sectors.Contains(tree.Pos))
@@ -1108,12 +1169,75 @@ namespace SilverEcho.ForsakenWorld.Editor
                     continue;
                 }
 
-                var go = new GameObject("дерефа");
+                string sptPath;
+                if (treeTypes != null && treeTypes.TryGetValue(tree.Type, out sptPath))
+                {
+                    // The resolved path stays as stored ("trees\<base>.spt").
+                }
+                else
+                {
+                    sptPath = "trees/unknown_type_" + tree.Type + ".spt";
+                    result.Warnings.Add("Tree type " + tree.Type + " has no resolved .spt path; using fallback.");
+                }
+
+                // Use the unpacked OBJ export instead of a text placeholder when available.
+                GameObject objModel = null;
+                List<string> objWarnings = null;
+                try
+                {
+                    objModel = WorldTreeObjBuilder.Build(sptPath, out objWarnings);
+                }
+                catch (Exception e) when (
+                    e is IOException || e is UnauthorizedAccessException ||
+                    e is InvalidOperationException || e is NotSupportedException)
+                {
+                    objWarnings = new List<string> { "Tree OBJ build failed for " + sptPath + ": " + e.Message };
+                }
+
+                if (objModel != null)
+                {
+                    objModel.transform.SetParent(parent.transform, false);
+                    // Position from the tree record (X is always stored, Y/Z available in v12).
+                    objModel.transform.localPosition = new Vector3(tree.Pos[0], tree.Pos[1], tree.Pos[2]);
+                    objModel.transform.localRotation = Quaternion.identity;
+                    objModel.transform.localScale = Vector3.one;
+                    var objPlaceholder = objModel.AddComponent<WorldTreePlaceholder>();
+                    objPlaceholder.TreeTypeId = tree.Type;
+                    objPlaceholder.TreeRelativePath = sptPath;
+                    if (objWarnings != null)
+                        result.Warnings.AddRange(objWarnings);
+                    count++;
+                    continue;
+                }
+
+                if (warnedMissing.Add(sptPath))
+                {
+                    if (objWarnings != null && objWarnings.Count > 0)
+                    {
+                        result.Warnings.AddRange(objWarnings);
+                        foreach (var warning in objWarnings)
+                            Debug.LogWarning("[Angelica 2.x] " + warning);
+                    }
+                    else
+                    {
+                        var message = "Tree '" + sptPath + "' was not found as OBJ under " +
+                            WorldTreeObjBuilder.TreesRoot + "; placed a text placeholder.";
+                        result.Warnings.Add(message);
+                        Debug.LogWarning("[Angelica 2.x] " + message);
+                    }
+                }
+
+                // Show the tree base name (badtree.spt → "badtree") on the fallback label.
+                var label = WorldTreeObjBuilder.ExtractBaseName(sptPath);
+                if (label.Length == 0)
+                    label = "дерефа"; // Original placeholder label for records without a base name.
+
+                var go = new GameObject(label);
                 go.transform.SetParent(parent.transform, false);
 
                 // TextMeshPro text showing the tree name.
                 var tmp = go.AddComponent<TextMeshPro>();
-                tmp.text = "дерефа";
+                tmp.text = label;
                 tmp.fontSize = 6f;
                 tmp.color = Color.white;
                 tmp.alignment = TextAlignmentOptions.Center;
@@ -1137,14 +1261,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // Script with path to the tree (.spt file resolved from tree type ID).
                 var placeholder = go.AddComponent<WorldTreePlaceholder>();
                 placeholder.TreeTypeId = tree.Type;
-                string sptPath;
-                if (treeTypes != null && treeTypes.TryGetValue(tree.Type, out sptPath))
-                    placeholder.TreeRelativePath = sptPath;
-                else
-                {
-                    placeholder.TreeRelativePath = "trees/unknown_type_" + tree.Type + ".spt";
-                    result.Warnings.Add("Tree type " + tree.Type + " has no resolved .spt path; using fallback.");
-                }
+                placeholder.TreeRelativePath = sptPath;
 
                 count++;
             }
@@ -1244,7 +1361,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             string folder,
             Result result,
             bool showProgress,
-            MapSectorFilter sectors = null)
+            MapSectorFilter sectors = null,
+            TerrainDocument grassTerrain = null,
+            IReadOnlyCollection<int> grassSectors = null)
         {
             if (world == null || world.Document == null || world.Bsd == null ||
                 world.Bsd.GrassAreas.Count == 0 || index == null)
@@ -1357,6 +1476,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 float fallbackY = area.Center != null && area.Center.Length > 1 ? area.Center[1] : 0f;
+                Func<float, float, int> partition = null;
+                if (grassTerrain != null && grassTerrain.Subs != null && grassTerrain.Subs.Length > 0 &&
+                    grassTerrain.SubColumns > 0 && grassTerrain.SubGrid > 0 && grassTerrain.GridSize > 0f)
+                    partition = (x, z) => MapSectorFilter.Owner(grassTerrain, grassSectors, x, z);
                 var chunks = GrassMeshBuilder.Build(
                     area, type, template,
                     (x, z) =>
@@ -1364,7 +1487,8 @@ namespace SilverEcho.ForsakenWorld.Editor
                         float h;
                         return heights != null && heights.TrySample(x, z, out h) ? h : fallbackY;
                     },
-                    result.Warnings);
+                    result.Warnings,
+                    partition);
                 foreach (var chunk in chunks)
                 {
                     var mesh = BuildGrassMesh(chunk, chunkIndex);
@@ -1407,7 +1531,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                     if (!string.IsNullOrEmpty(folder))
                         mesh = Save(mesh, folder + "/grass/" + mesh.name + ".asset");
                     var go = new GameObject(mesh.name);
-                    go.transform.SetParent(grassRoot.transform, false);
+                    var grassParent = grassRoot.transform;
+                    if (chunk.Partition >= 0)
+                        grassParent = Group(grassRoot, "Sector_" + chunk.Partition.ToString("D4")).transform;
+                    go.transform.SetParent(grassParent, false);
                     go.AddComponent<MeshFilter>().sharedMesh = mesh;
                     var renderer = go.AddComponent<MeshRenderer>();
                     if (material != null)

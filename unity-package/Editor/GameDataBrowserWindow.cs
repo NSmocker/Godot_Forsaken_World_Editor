@@ -1794,22 +1794,19 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 var result = MapAssetImporter.Import(
                     mapFile, mapIndex, decoder, showProgress: true, options: options);
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
-                if (prefab == null)
-                    throw new IOException("Map prefab was not created: " + result.PrefabPath);
+                if (result.SectorPrefabPaths.Count == 0)
+                    throw new IOException("Map sector prefabs were not created.");
                 if (instantiate)
                 {
-                    var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                    if (instance == null)
-                        instance = UnityEngine.Object.Instantiate(prefab);
+                    var instance = MapAssetImporter.InstantiateLoadedMap(result, mapFile.Name);
                     Undo.RegisterCreatedObjectUndo(instance, "Instantiate Forsaken Map");
                     Selection.activeObject = instance;
                 }
                 else
-                    Selection.activeObject = result.SectorPrefabPaths.Count > 0
-                        ? AssetDatabase.LoadMainAssetAtPath(MapAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/Sectors")
-                        : prefab;
-                status = (instantiate ? "Instantiated map " : "Imported map prefab ") + result.PrefabPath +
+                    Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(
+                        MapAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/Sectors");
+                status = (instantiate ? "Instantiated map sectors " : "Imported map sectors ") +
+                    result.SectorPrefabPaths.Count +
                     " (terrain areas=" + result.TerrainAreas +
                     ", sector prefabs=" + result.SectorPrefabPaths.Count +
                     ", buildings=" + result.Buildings +

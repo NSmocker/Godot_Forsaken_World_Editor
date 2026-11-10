@@ -11,6 +11,8 @@ namespace SilverEcho.ForsakenWorld
         public float[] Uvs = Array.Empty<float>();
         public int[] Indices = Array.Empty<int>();
         public int Blades;
+        /// <summary>-1 when the chunk was not split by spawn sector.</summary>
+        public int Partition = -1;
     }
 
     /// <summary>
@@ -29,7 +31,8 @@ namespace SilverEcho.ForsakenWorld
             EcwldGrassType type,
             GrassTemplate template,
             Func<float, float, float> heightAt,
-            List<string> warnings)
+            List<string> warnings,
+            Func<float, float, int> partition = null)
         {
             var chunks = new List<GrassMeshChunk>();
             if (area == null || type == null || template == null || area.Bits == null)
@@ -50,11 +53,8 @@ namespace SilverEcho.ForsakenWorld
             var originZ = area.Center[2] + area.GridSize * area.Rows * 0.5f;
             var size = type.Size <= 0f ? 1f : type.Size;
             var sizeVar = type.SizeVar < 0f ? 0f : type.SizeVar;
-            var positions = new List<float>();
-            var uvs = new List<float>();
-            var indices = new List<int>();
+            var buckets = new Dictionary<int, BladeBuffer>();
             var total = 0;
-            var chunkBlades = 0;
             var truncated = false;
 
             for (var top = 0; top < area.Rows && !truncated; top += BlockSize)
@@ -84,11 +84,15 @@ namespace SilverEcho.ForsakenWorld
                             var px = originX + x * area.GridSize + jitterX;
                             var pz = originZ - y * area.GridSize + jitterZ;
                             var py = (heightAt != null ? heightAt(px, pz) : area.Center[1]) - GroundOffset;
-                            AppendBlade(template, positions, uvs, indices, px, py, pz, yaw, scale);
+                            var key = partition != null ? partition(px, pz) : -1;
+                            BladeBuffer buffer;
+                            if (!buckets.TryGetValue(key, out buffer))
+                                buckets[key] = buffer = new BladeBuffer();
+                            AppendBlade(template, buffer.Positions, buffer.Uvs, buffer.Indices, px, py, pz, yaw, scale);
                             total++;
-                            chunkBlades++;
-                            if (positions.Count / 3 >= MaxVerticesPerChunk)
-                                Flush(chunks, type, template, positions, uvs, indices, ref chunkBlades);
+                            buffer.Blades++;
+                            if (buffer.Positions.Count / 3 >= MaxVerticesPerChunk)
+                                Flush(chunks, type, template, buffer, key);
                         }
                     }
                 }
@@ -96,8 +100,17 @@ namespace SilverEcho.ForsakenWorld
 
             if (truncated && warnings != null)
                 warnings.Add("Gras " + area.ExportId + ": mehr als " + MaxBladesPerArea + " Halme, Rest ausgelassen.");
-            Flush(chunks, type, template, positions, uvs, indices, ref chunkBlades);
+            foreach (var pair in buckets)
+                Flush(chunks, type, template, pair.Value, pair.Key);
             return chunks;
+        }
+
+        private sealed class BladeBuffer
+        {
+            public readonly List<float> Positions = new List<float>();
+            public readonly List<float> Uvs = new List<float>();
+            public readonly List<int> Indices = new List<int>();
+            public int Blades;
         }
 
         public static GrassTemplate FallbackCard()
@@ -170,26 +183,25 @@ namespace SilverEcho.ForsakenWorld
             List<GrassMeshChunk> chunks,
             EcwldGrassType type,
             GrassTemplate template,
-            List<float> positions,
-            List<float> uvs,
-            List<int> indices,
-            ref int blades)
+            BladeBuffer buffer,
+            int partition)
         {
-            if (indices.Count == 0)
+            if (buffer == null || buffer.Indices.Count == 0)
                 return;
             chunks.Add(new GrassMeshChunk
             {
                 Name = string.IsNullOrEmpty(type.ModelPath) ? "Grass" : type.ModelPath,
                 TextureName = template.TextureName ?? string.Empty,
-                Positions = positions.ToArray(),
-                Uvs = uvs.ToArray(),
-                Indices = indices.ToArray(),
-                Blades = blades
+                Positions = buffer.Positions.ToArray(),
+                Uvs = buffer.Uvs.ToArray(),
+                Indices = buffer.Indices.ToArray(),
+                Blades = buffer.Blades,
+                Partition = partition
             });
-            positions.Clear();
-            uvs.Clear();
-            indices.Clear();
-            blades = 0;
+            buffer.Positions.Clear();
+            buffer.Uvs.Clear();
+            buffer.Indices.Clear();
+            buffer.Blades = 0;
         }
 
         public static bool BitSet(byte[] bits, int columns, int x, int y)

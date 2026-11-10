@@ -66,7 +66,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             foreach (var warning in result.Warnings)
                 Debug.LogWarning("A37_IMPORT_WARN " + warning);
             Debug.Log(
-                "A37_IMPORT_OK prefab=" + result.PrefabPath +
+                "A37_IMPORT_OK sectors=" + result.SectorPrefabPaths.Count +
                 " terrainAreas=" + result.TerrainAreas +
                 " buildings=" + result.Buildings +
                 " skippedOutside=" + result.SkippedOutsideSectors +
@@ -75,7 +75,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 " models=" + result.Models +
                 " grass=" + result.GrassBlades +
                 " warnings=" + result.Warnings.Count);
-            return !string.IsNullOrEmpty(result.PrefabPath);
+            return result.SectorPrefabPaths.Count > 0;
         }
 
         private static bool RebuildGrass(string relative)

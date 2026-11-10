@@ -16,6 +16,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             public GameDataDependencyGraph Graph;
             public readonly List<Object> Assets = new List<Object>();
+            public readonly List<MapAssetImporter.Result> Maps = new List<MapAssetImporter.Result>();
             public readonly List<string> Errors = new List<string>();
             public readonly List<string> Warnings = new List<string>();
             public int ImportedFiles;
@@ -171,7 +172,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     var terrain = file.Extension == "trn2" ? file : graph.Sibling(file, "trn2");
                     var map = MapAssetImporter.Import(terrain ?? file, graph.Index, decoder, false, terrain != null);
                     result.Warnings.AddRange(map.Warnings);
-                    return AssetDatabase.LoadAssetAtPath<GameObject>(map.PrefabPath);
+                    result.Maps.Add(map);
+                    return map.SectorPrefabPaths.Count == 0 ? null :
+                        AssetDatabase.LoadMainAssetAtPath(Path.GetDirectoryName(map.SectorPrefabPaths[0]).Replace('\\', '/'));
                 case "gfx":
                     var gfxBuild = GfxSceneBuilder.BuildFromFile(file.FullPath, decoder, graph.Index);
                     result.Warnings.AddRange(gfxBuild.Warnings);

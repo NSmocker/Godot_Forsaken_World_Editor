@@ -28,7 +28,7 @@
 | Розширення | Хто посилається | Як шукається зараз |
 | --- | --- | --- |
 | `.gphy` | `.gfx` ID 220, сусід з тим самим ім'ям | обхід теки `.gfx` на диску, не індекс |
-| `.spt` | `.ecwld` tree type | шлях лише зберігається, файл не читається |
+| `.spt` | `.ecwld` tree type | файл `.spt` не читається; імпорт шукає OBJ з тим самим ім'ям у `WorldTreeObjBuilder.TreesRoot` |
 | `.phy` | `.smd` `PhysicsPath` | рядок зберігається, файл не резолвиться |
 | `.tck` | `.smd` v8 `TrackCollectionPath` | це тека/маніфест треків, не файл анімації |
 | `.stf` `.dcf` | AUI layout / string table | файлова система поруч з `interfaces/`, не індекс |
@@ -74,7 +74,7 @@ Drag-and-drop має використовувати ті самі резолве
    ├──<map>.ecwld ──effects──► .gfx
    │              ├──models──► .ecm
    │              ├──sounds──► sfx/ .wav
-   │              ├──trees──► .spt          (не читається)
+   │              ├──trees──► .spt stem ──► OBJ у TreesRoot (інакше заглушка + warning)
    │              └── ornament/water/box offsets──► <map>.ecbsd
    │                     └── BSData\<n>.dat (вода; текстур у записі немає)
    └──litmodels/<map>/*.bmd ──mesh texture──► текстура (suffix-match)
@@ -260,7 +260,7 @@ ID 170 може мати додатковий audio-event шлях (`UseCustom`,
 | effect `Path` | `.gfx` | м'яка | шлях відносно `gfx\`, далі `TryResolveGfx` і граф GFX |
 | model `Path` | `.ecm` | м'яка | шлях від кореня даних, exact + suffix, далі граф ECM. `Action` — ім'я дії, не файл |
 | sound `Path` | `.wav` | м'яка | `sfx/<Path>`. На відміну від GFX, карта приймає **лише `.wav`** |
-| tree type | `.spt` | записана | два AString на тип; перший — шлях `.spt`, другий (composite map) не використовується. Файл не читається, в індексі його немає |
+| tree type | `.spt` | м'яка | два AString на тип; перший — шлях `.spt`, другий (composite map) не використовується. Сам `.spt` не в індексі і не парситься. Імпорт мапи бере ім'я файла і шукає `<ім'я>_Branch/_Fronds/_Leaves.obj` під `WorldTreeObjBuilder.TreesRoot` (`B:\Git\PW146RUUnpackedAssets\trees`, рекурсивно). Немає OBJ — текстова заглушка і одне попередження на шлях |
 | ornament ref | offset у `.ecbsd` | блокуюча для фільтра будівель | не шлях, а зсув |
 | water ref | offset у `.ecbsd` → `BSData` | м'яка | немає води, якщо `.dat` не знайдено |
 | box ref | світло в `.ecbsd` | немає файлу | кольори й напрям у самому `.ecbsd` |

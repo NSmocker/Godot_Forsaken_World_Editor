@@ -65,18 +65,20 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.IsNull(west.GetComponentInChildren<Light>());
                 Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<GameObject>(environment).GetComponentInChildren<Light>());
                 foreach (var prefab in new[] { west, east })
-                    foreach (string category in new[] { "Grass", "Water" })
-                    {
-                        var part = prefab.transform.Find(category + "/AcrossBorder");
-                        var saved = part.GetComponent<MeshFilter>().sharedMesh;
-                        Assert.AreEqual(3, saved.vertexCount);
-                        Assert.AreEqual(3, saved.triangles.Length);
-                        CollectionAssert.AreEqual(new[] { Vector2.zero, Vector2.right, Vector2.up }, saved.uv);
-                        Assert.AreEqual(Color.gray, saved.colors[0]);
-                        Assert.AreSame(material, part.GetComponent<MeshRenderer>().sharedMaterial);
-                    }
+                {
+                    var water = prefab.transform.Find("Water/AcrossBorder");
+                    var saved = water.GetComponent<MeshFilter>().sharedMesh;
+                    Assert.AreEqual(3, saved.vertexCount);
+                    Assert.AreEqual(3, saved.triangles.Length);
+                    CollectionAssert.AreEqual(new[] { Vector2.zero, Vector2.right, Vector2.up }, saved.uv);
+                    Assert.AreEqual(Color.gray, saved.colors[0]);
+                    Assert.AreSame(material, water.GetComponent<MeshRenderer>().sharedMaterial);
+                }
+                // Grass without a spawn-sector group stays whole and follows its pivot.
+                var grassOwners = new[] { west, east }.Count(p => p.transform.Find("Grass/AcrossBorder") != null);
+                Assert.AreEqual(1, grassOwners);
                 string guid = AssetDatabase.AssetPathToGUID(paths[1]);
-                string geometry = AssetDatabase.GetAssetPath(east.transform.Find("Grass/AcrossBorder").GetComponent<MeshFilter>().sharedMesh);
+                string geometry = AssetDatabase.GetAssetPath(east.transform.Find("Water/AcrossBorder").GetComponent<MeshFilter>().sharedMesh);
                 string meshGuid = AssetDatabase.AssetPathToGUID(geometry);
                 var again = MapSectorPrefabExporter.Export(root, terrain, folder, null, false, out _);
                 Assert.AreEqual(guid, AssetDatabase.AssetPathToGUID(again[1]));

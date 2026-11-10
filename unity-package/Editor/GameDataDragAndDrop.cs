@@ -145,6 +145,23 @@ namespace SilverEcho.ForsakenWorld.Editor
                     Undo.IncrementCurrentGroup();
                     var undoGroup = Undo.GetCurrentGroup();
                     Undo.SetCurrentGroupName("Drop Forsaken World assets");
+                    if (instantiate)
+                    {
+                        foreach (var map in result.Maps)
+                        {
+                            if (map.SectorPrefabPaths.Count == 0)
+                                continue;
+                            var instance = MapAssetImporter.InstantiateLoadedMap(map, "Map");
+                            if (parent != null)
+                                instance.transform.SetParent(parent, false);
+                            else
+                                instance.transform.position = position;
+                            if (scene.IsValid() && scene.isLoaded && instance.scene != scene)
+                                SceneManager.MoveGameObjectToScene(instance, scene);
+                            Undo.RegisterCreatedObjectUndo(instance, "Drop Forsaken World asset");
+                            selection.Add(instance);
+                        }
+                    }
                     foreach (var asset in result.Assets)
                     {
                         if (instantiate && asset is GameObject prefab)

@@ -258,7 +258,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 { node.Warnings.Add("World sound is not WAV: " + path); continue; }
                 Resolve(node, "sfx/" + path, true);
             }
-            if (world.TreeTypes.Count > 0) node.Warnings.Add("SPT tree meshes are not supported.");
+            if (world.TreeTypes.Count > 0) node.Warnings.Add(
+                "SPT tree meshes are not supported; unpacked OBJ trees from " +
+                WorldTreeObjBuilder.TreesRoot + " are used when present.");
             foreach (var grass in world.GrassTypes)
             {
                 if (GrassFileResolver.TryResolveModel(Index, grass.ModelPath, out var mox, out var error))

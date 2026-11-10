@@ -50,6 +50,77 @@ namespace SilverEcho.ForsakenWorld
             return new MapSectorFilter(terrain, selected);
         }
 
+        /// <summary>
+        /// One owner for a world XZ point. A point inside a candidate sector uses that
+        /// sector. A point outside every candidate, including a partial selection, uses
+        /// the nearest candidate. Shared edges have one owner.
+        /// </summary>
+        public static int Owner(TerrainDocument terrain, IReadOnlyCollection<int> candidates, float x, float z)
+        {
+            if (terrain == null)
+                throw new ArgumentNullException(nameof(terrain));
+            if (terrain.Subs == null || terrain.Subs.Length == 0 || terrain.SubColumns <= 0 ||
+                terrain.SubGrid <= 0 || terrain.GridSize <= 0f)
+                throw new ArgumentException("Terrain has no sector grid.", nameof(terrain));
+
+            var pool = new List<int>();
+            if (candidates == null)
+            {
+                for (var i = 0; i < terrain.Subs.Length; i++)
+                    pool.Add(i);
+            }
+            else
+            {
+                foreach (var sector in candidates)
+                {
+                    if (sector < 0 || sector >= terrain.Subs.Length)
+                        throw new ArgumentOutOfRangeException(nameof(candidates), sector,
+                            "Sector index must be between 0 and " + (terrain.Subs.Length - 1) + ".");
+                    if (!pool.Contains(sector))
+                        pool.Add(sector);
+                }
+            }
+
+            if (pool.Count == 0)
+                throw new ArgumentException("Select at least one terrain sector.", nameof(candidates));
+            pool.Sort();
+
+            var side = terrain.SubGrid * terrain.GridSize;
+            var column = (int)Math.Floor((x + terrain.Width * 0.5f) / side);
+            var row = (int)Math.Floor((terrain.Length * 0.5f - z) / side);
+            var rows = terrain.Subs.Length / terrain.SubColumns;
+            if (column >= 0 && column < terrain.SubColumns && row >= 0 && row < rows)
+            {
+                var cell = row * terrain.SubColumns + column;
+                if (cell >= 0 && cell < terrain.Subs.Length && pool.Contains(cell))
+                    return cell;
+            }
+
+            var owner = pool[0];
+            var best = double.PositiveInfinity;
+            foreach (var sector in pool)
+            {
+                var bounds = SectorBounds(terrain, sector);
+                var dx = x - Clamp(x, bounds.MinX, bounds.MaxX);
+                var dz = z - Clamp(z, bounds.MinZ, bounds.MaxZ);
+                var distance = dx * dx + dz * dz;
+                if (distance < best)
+                {
+                    best = distance;
+                    owner = sector;
+                }
+            }
+
+            return owner;
+        }
+
+        private static float Clamp(float value, float min, float max)
+        {
+            if (value < min)
+                return min;
+            return value > max ? max : value;
+        }
+
         public static Footprint SectorBounds(TerrainDocument terrain, int sector)
         {
             if (terrain == null)

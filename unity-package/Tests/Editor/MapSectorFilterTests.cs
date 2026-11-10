@@ -80,6 +80,15 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void OwnerUsesTheSectorContainingThePointAndTheNearestSelectedSectorOutsideIt()
+        {
+            Assert.AreEqual(0, MapSectorFilter.Owner(terrain, new[] { 0, 1 }, -1f, 1f));
+            Assert.AreEqual(1, MapSectorFilter.Owner(terrain, new[] { 0, 1 }, 1f, 1f));
+            Assert.AreEqual(1, MapSectorFilter.Owner(terrain, new[] { 0, 1 }, 8f, 8f));
+            Assert.AreEqual(0, MapSectorFilter.Owner(terrain, null, -1f, 1f));
+        }
+
+        [Test]
         public void BuildingBoundsUseTransformedVerticesNotJustThePivot()
         {
             var rotated = new BmdDocument
