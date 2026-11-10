@@ -87,6 +87,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             string rootName = null,
             EcmDocument ecmDocument = null)
         {
+            using (new GameDataImportSession())
+            using (GameDataImportSession.Stage("Models"))
+                return ExportCore(model, index, sourceRelativePath, fromEcm, rootName, ecmDocument);
+        }
+
+        private static ExportResult ExportCore(AssembledModel model, GameDataIndex index,
+            string sourceRelativePath, bool fromEcm, string rootName, EcmDocument ecmDocument)
+        {
             var result = new ExportResult();
             if (model == null)
             {
@@ -109,29 +117,6 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameObject root = null;
             try
             {
-                var meshAssets = new List<Mesh>();
-                foreach (var skin in model.Skins)
-                {
-                    var built = AssembledModelUnityBuilder.BuildCombinedMesh(skin);
-                    if (built == null)
-                    {
-                        meshAssets.Add(null);
-                        continue;
-                    }
-
-                    var meshPath = GetMeshAssetPath(skin.SourcePath);
-                    Mesh saved;
-                    bool created;
-                    bool updated;
-                    SaveOrUpdateMesh(built, meshPath, out saved, out created, out updated);
-                    meshAssets.Add(saved);
-                    result.MeshPaths.Add(meshPath);
-                    if (created)
-                        result.MeshesCreated++;
-                    if (updated)
-                        result.MeshesUpdated++;
-                }
-
                 List<string> textureErrors;
                 var textures = AssembledTextureImporter.ImportTexturesForModel(
                     model,
@@ -143,69 +128,96 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (textureErrors != null)
                     result.Warnings.AddRange(textureErrors);
 
+                var meshAssets = new List<Mesh>();
                 var materialLookup = new Dictionary<string, Material>(StringComparer.Ordinal);
-                foreach (var skin in model.Skins)
+                var clipAssets = new List<AnimationClip>();
+                using (new GameDataAssetBatch())
                 {
-                    foreach (var slot in skin.SurfaceMaterials)
+                    foreach (var skin in model.Skins)
                     {
-                        Texture2D albedo = null;
-                        if (slot.TextureResolved &&
-                            !string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                        var built = AssembledModelUnityBuilder.BuildCombinedMesh(skin);
+                        if (built == null)
                         {
-                            textures.TryGetValue(
-                                slot.TextureSourcePath.Replace('\\', '/'),
-                                out albedo);
+                            meshAssets.Add(null);
+                            continue;
                         }
 
-                        var reflect = slot.UsesReflectShader
-                            ? AssembledUrpMaterialBuilder.FindReflectMap(textures)
-                            : null;
-                        var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo, reflect);
-                        var materialPath = AssembledUrpMaterialBuilder.GetMaterialAssetPath(
-                            skin.SourcePath,
-                            slot);
-                        Material savedMaterial;
+                        var meshPath = GetMeshAssetPath(skin.SourcePath);
+                        Mesh saved;
                         bool created;
                         bool updated;
-                        SaveOrUpdateMaterial(
-                            material,
-                            materialPath,
-                            out savedMaterial,
-                            out created,
-                            out updated);
-                        materialLookup[SlotKey(skin.SourcePath, slot.TextureIndex, slot.MaterialIndex)] =
-                            savedMaterial;
-                        result.MaterialPaths.Add(materialPath);
+                        SaveOrUpdateMesh(built, meshPath, out saved, out created, out updated);
+                        meshAssets.Add(saved);
+                        result.MeshPaths.Add(meshPath);
                         if (created)
-                            result.MaterialsCreated++;
+                            result.MeshesCreated++;
                         if (updated)
-                            result.MaterialsUpdated++;
+                            result.MeshesUpdated++;
                     }
-                }
 
-                var clipAssets = new List<AnimationClip>();
-                if (model.Animations.Count > 0)
-                {
-                    var clips = AssembledAnimationClipBuilder.CreateClips(model.Animations);
-                    var smdPath = string.IsNullOrEmpty(model.SourceSmdPath)
-                        ? sourceRelativePath
-                        : model.SourceSmdPath;
-                    foreach (var clip in clips)
+                    foreach (var skin in model.Skins)
                     {
-                        if (clip == null)
-                            continue;
-                        var clipPath = GetAnimationClipAssetPath(smdPath, clip.name);
-                        AnimationClip savedClip;
-                        bool created;
-                        bool updated;
-                        SaveOrUpdateClip(clip, clipPath, out savedClip, out created, out updated);
-                        clipAssets.Add(savedClip);
-                        result.ClipPaths.Add(clipPath);
-                        if (created)
-                            result.ClipsCreated++;
-                        if (updated)
-                            result.ClipsUpdated++;
+                        foreach (var slot in skin.SurfaceMaterials)
+                        {
+                            Texture2D albedo = null;
+                            if (slot.TextureResolved &&
+                                !string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                            {
+                                textures.TryGetValue(
+                                    slot.TextureSourcePath.Replace('\\', '/'),
+                                    out albedo);
+                            }
+
+                            var reflect = slot.UsesReflectShader
+                                ? AssembledUrpMaterialBuilder.FindReflectMap(textures)
+                                : null;
+                            var material = AssembledUrpMaterialBuilder.CreateMaterial(slot, albedo, reflect);
+                            var materialPath = AssembledUrpMaterialBuilder.GetMaterialAssetPath(
+                                skin.SourcePath,
+                                slot);
+                            Material savedMaterial;
+                            bool created;
+                            bool updated;
+                            SaveOrUpdateMaterial(
+                                material,
+                                materialPath,
+                                out savedMaterial,
+                                out created,
+                                out updated);
+                            materialLookup[SlotKey(skin.SourcePath, slot.TextureIndex, slot.MaterialIndex)] =
+                                savedMaterial;
+                            result.MaterialPaths.Add(materialPath);
+                            if (created)
+                                result.MaterialsCreated++;
+                            if (updated)
+                                result.MaterialsUpdated++;
+                        }
                     }
+
+                    if (model.Animations.Count > 0)
+                    {
+                        var clips = AssembledAnimationClipBuilder.CreateClips(model.Animations);
+                        var smdPath = string.IsNullOrEmpty(model.SourceSmdPath)
+                            ? sourceRelativePath
+                            : model.SourceSmdPath;
+                        foreach (var clip in clips)
+                        {
+                            if (clip == null)
+                                continue;
+                            var clipPath = GetAnimationClipAssetPath(smdPath, clip.name);
+                            AnimationClip savedClip;
+                            bool created;
+                            bool updated;
+                            SaveOrUpdateClip(clip, clipPath, out savedClip, out created, out updated);
+                            clipAssets.Add(savedClip);
+                            result.ClipPaths.Add(clipPath);
+                            if (created)
+                                result.ClipsCreated++;
+                            if (updated)
+                                result.ClipsUpdated++;
+                        }
+                    }
+
                 }
 
                 Func<AssembledSurfaceMaterial, Texture> albedoLookup = slot =>
@@ -241,6 +253,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // AssetDatabase.StartAssetEditing the prefab file is written but the
                 // returned object is null until import resumes.
                 bool prefabSaved;
+                using (new GameDataAssetBatch())
                 using (new GameDataPrefabAssets(root, Path.ChangeExtension(result.PrefabPath, null) + "_effects"))
                     PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out prefabSaved);
                 if (!prefabSaved)
@@ -251,7 +264,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 else
                     result.PrefabCreated = true;
 
-                AssetDatabase.SaveAssets();
+                GameDataImportSession.SaveAssets();
             }
             catch (Exception exception) when (
                 exception is IOException ||
@@ -350,7 +363,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             created = false;
             updated = false;
-            var existing = AssetDatabase.LoadMainAssetAtPath(assetPath);
+            var existing = GameDataAssetBatch.Load(assetPath);
             if (existing != null)
             {
                 if (!(existing is Mesh))
@@ -369,7 +382,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "A file already exists at the output path but is not a Unity asset: " +
                     assetPath);
             EnsureAssetFolders(Path.GetDirectoryName(assetPath));
-            AssetDatabase.CreateAsset(mesh, assetPath);
+            GameDataAssetBatch.Create(mesh, assetPath);
             saved = mesh;
             created = true;
         }
@@ -383,7 +396,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             created = false;
             updated = false;
-            var existing = AssetDatabase.LoadMainAssetAtPath(assetPath);
+            var existing = GameDataAssetBatch.Load(assetPath);
             if (existing != null)
             {
                 if (!(existing is Material))
@@ -402,7 +415,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "A file already exists at the output path but is not a Unity asset: " +
                     assetPath);
             EnsureAssetFolders(Path.GetDirectoryName(assetPath));
-            AssetDatabase.CreateAsset(material, assetPath);
+            GameDataAssetBatch.Create(material, assetPath);
             saved = material;
             created = true;
         }
@@ -416,7 +429,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         {
             created = false;
             updated = false;
-            var existing = AssetDatabase.LoadMainAssetAtPath(assetPath);
+            var existing = GameDataAssetBatch.Load(assetPath);
             if (existing != null)
             {
                 if (!(existing is AnimationClip))
@@ -435,7 +448,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "A file already exists at the output path but is not a Unity asset: " +
                     assetPath);
             EnsureAssetFolders(Path.GetDirectoryName(assetPath));
-            AssetDatabase.CreateAsset(clip, assetPath);
+            GameDataAssetBatch.Create(clip, assetPath);
             saved = clip;
             created = true;
         }

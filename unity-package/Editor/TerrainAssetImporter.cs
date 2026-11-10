@@ -43,6 +43,14 @@ namespace SilverEcho.ForsakenWorld.Editor
         public static Result Import(GameDataFile file, GameDataIndex index, GfxTextDecoder decoder,
             bool showProgress = true, IReadOnlyCollection<int> selectedSectorIndices = null)
         {
+            using (new GameDataImportSession())
+            using (GameDataImportSession.Stage("Terrain"))
+                return ImportCore(file, index, decoder, showProgress, selectedSectorIndices);
+        }
+
+        private static Result ImportCore(GameDataFile file, GameDataIndex index, GfxTextDecoder decoder,
+            bool showProgress, IReadOnlyCollection<int> selectedSectorIndices)
+        {
             if (file == null || index == null) throw new ArgumentNullException();
             var parser = new TerrainParser(decoder);
             var t = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
@@ -121,44 +129,49 @@ namespace SilverEcho.ForsakenWorld.Editor
                     }
                     if (lightmaps.Length != masks.Areas.Length)
                         result.Warnings.Add(t.Subs[s].Name + ": missing/incomplete daytime lightmaps; affected areas use unlit textures.");
-                    var subRoot = new GameObject(t.Subs[s].Name);
-                    subRoot.transform.SetParent(root.transform, false);
-                    for (int a = 0; a < masks.Areas.Length; a++)
+                    using (new GameDataAssetBatch())
                     {
-                        Progress(showProgress, t.Subs[s].Name + ": area " + (a + 1) + "/" + masks.Areas.Length,
-                            (progressIndex + (float)a / Math.Max(1, masks.Areas.Length)) / sectorCount);
-                        int row = s / t.SubColumns * perSide + a / perSide, col = s % t.SubColumns * perSide + a % perSide;
-                        string areaName = "Area_" + (row * t.AreaColumns + col).ToString("D4"), prefix = folder + "/" + areaName;
-                        TerrainMeshData meshData;
-                        try { meshData = TerrainMeshAssembler.BuildArea(t, blocks, row, col); }
-                        catch (InvalidDataException e)
+                        var subRoot = new GameObject(t.Subs[s].Name);
+                        subRoot.transform.SetParent(root.transform, false);
+                        for (int a = 0; a < masks.Areas.Length; a++)
                         {
-                            result.Warnings.Add(e.Message);
-                            continue;
-                        }
-                        if (meshData.Indices.Length == 0) { result.HiddenAreas++; continue; }
-                        // Godot _area_material still builds the area with layer_count 0 (black).
-                        var mesh = Save(BuildMesh(meshData, areaName), prefix + "_Mesh.asset");
-                        var mat = BuildMaterial(t, masks, a, s, layers, shader, prefix, result.Warnings);
-                        if (a < lightmaps.Length)
-                        {
-                            try
+                            Progress(showProgress, t.Subs[s].Name + ": area " + (a + 1) + "/" + masks.Areas.Length,
+                                (progressIndex + (float)a / Math.Max(1, masks.Areas.Length)) / sectorCount);
+                            int row = s / t.SubColumns * perSide + a / perSide, col = s % t.SubColumns * perSide + a % perSide;
+                            string areaName = "Area_" + (row * t.AreaColumns + col).ToString("D4"), prefix = folder + "/" + areaName;
+                            TerrainMeshData meshData;
+                            try { meshData = TerrainMeshAssembler.BuildArea(t, blocks, row, col); }
+                            catch (InvalidDataException e)
                             {
-                                var lm = TerrainTextureBuilder.Lightmap(lightmaps[a], lmPath + " area " + a);
-                                lm.wrapMode = TextureWrapMode.Clamp; lm.filterMode = FilterMode.Bilinear;
-                                mat.SetTexture("_Lightmap", Save(lm, prefix + "_Lightmap.asset"));
-                                mat.SetFloat("_UseLightmap", 1);
+                                result.Warnings.Add(e.Message);
+                                continue;
                             }
-                            catch (InvalidDataException e) { result.Warnings.Add(e.Message); }
+                            if (meshData.Indices.Length == 0) { result.HiddenAreas++; continue; }
+                            // Godot _area_material still builds the area with layer_count 0 (black).
+                            var mesh = Save(BuildMesh(meshData, areaName), prefix + "_Mesh.asset");
+                            var mat = BuildMaterial(t, masks, a, s, layers, shader, prefix, result.Warnings);
+                            if (a < lightmaps.Length)
+                            {
+                                try
+                                {
+                                    var lm = TerrainTextureBuilder.Lightmap(lightmaps[a], lmPath + " area " + a);
+                                    lm.wrapMode = TextureWrapMode.Clamp; lm.filterMode = FilterMode.Bilinear;
+                                    mat.SetTexture("_Lightmap", Save(lm, prefix + "_Lightmap.asset"));
+                                    mat.SetFloat("_UseLightmap", 1);
+                                }
+                                catch (InvalidDataException e) { result.Warnings.Add(e.Message); }
+                            }
+                            mat = Save(mat, prefix + ".mat");
+                            var go = new GameObject(areaName);
+                            go.transform.SetParent(subRoot.transform, false);
+                            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                            var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = mat;
+                            renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
+                            result.Areas++; result.Vertices += mesh.vertexCount; result.Triangles += meshData.Indices.Length / 3;
                         }
-                        mat = Save(mat, prefix + ".mat");
-                        var go = new GameObject(areaName);
-                        go.transform.SetParent(subRoot.transform, false);
-                        go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                        var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = mat;
-                        renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
-                        result.Areas++; result.Vertices += mesh.vertexCount; result.Triangles += meshData.Indices.Length / 3;
                     }
+                    GameDataImportSession.SaveAssets();
+                    GameDataImportSession.FlushSave();
                 }
                 if (result.Areas == 0) throw new InvalidDataException(
                     selectedSectors == null ? "Terrain contains no visible areas." :
@@ -166,7 +179,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 result.PrefabPath = folder + "/" + root.name + ".prefab";
                 PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool saved);
                 if (!saved) throw new IOException("Could not save terrain prefab: " + result.PrefabPath);
-                AssetDatabase.SaveAssets();
+                GameDataImportSession.SaveAssets();
                 return result;
             }
             finally
@@ -325,8 +338,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static T Save<T>(T value, string path) where T : Object
         {
             value.name = Path.GetFileNameWithoutExtension(path);
-            var existing = AssetDatabase.LoadAssetAtPath<T>(path);
-            if (existing == null) { AssetDatabase.CreateAsset(value, path); return value; }
+            var existing = GameDataAssetBatch.Load(path) as T;
+            if (existing == null) { GameDataAssetBatch.Create(value, path); return value; }
             EditorUtility.CopySerialized(value, existing); EditorUtility.SetDirty(existing); Object.DestroyImmediate(value);
             return existing;
         }

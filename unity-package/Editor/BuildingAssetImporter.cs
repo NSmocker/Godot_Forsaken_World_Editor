@@ -57,7 +57,15 @@ namespace SilverEcho.ForsakenWorld.Editor
             GameDataFile file,
             GameDataIndex index,
             GfxTextDecoder decoder,
-            bool showProgress = true)
+            bool showProgress = true, BmdDocument parsedDocument = null)
+        {
+            using (new GameDataImportSession())
+            using (GameDataImportSession.Stage("Buildings"))
+                return ImportCore(file, index, decoder, showProgress, parsedDocument);
+        }
+
+        private static Result ImportCore(GameDataFile file, GameDataIndex index,
+            GfxTextDecoder decoder, bool showProgress, BmdDocument parsedDocument)
         {
             if (file == null || index == null)
                 throw new ArgumentNullException();
@@ -68,7 +76,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "Angelica LitModel shader is unavailable. Use a URP project and resolve shader compilation errors.");
 
             var parser = new BmdParser(decoder);
-            var document = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+            var document = parsedDocument ?? parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
             var assembled = BmdMeshAssembler.Assemble(document);
             var result = new Result { CollideOnly = assembled.CollideOnly };
             result.Warnings.AddRange(assembled.Warnings);
@@ -82,8 +90,15 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (assembled.Surfaces.Length == 0)
                 throw new InvalidDataException(file.RelativePath + ": building has no drawable surfaces.");
 
+            // Complete native imports before pausing AssetDatabase for generated assets.
+            foreach (var surface in assembled.Surfaces)
+                if (!string.IsNullOrEmpty(surface.TextureName) &&
+                    index.TryResolve(surface.TextureName, out var texture, out _, true))
+                    AssembledTextureImporter.ImportOrUpdate(texture.FullPath, texture.RelativePath);
+
             string folder = GetOutputFolder(file.RelativePath);
             GameObject root = null;
+            using (new GameDataAssetBatch())
             try
             {
                 EnsureFolder(folder);
@@ -147,7 +162,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool saved);
                 if (!saved)
                     throw new IOException("Could not save building prefab: " + result.PrefabPath);
-                AssetDatabase.SaveAssets();
+                GameDataImportSession.SaveAssets();
                 return result;
             }
             finally
@@ -284,10 +299,10 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static T Save<T>(T value, string path) where T : Object
         {
             value.name = Path.GetFileNameWithoutExtension(path);
-            var existing = AssetDatabase.LoadAssetAtPath<T>(path);
+            var existing = GameDataAssetBatch.Load(path) as T;
             if (existing == null)
             {
-                AssetDatabase.CreateAsset(value, path);
+                GameDataAssetBatch.Create(value, path);
                 return value;
             }
 

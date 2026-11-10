@@ -24,6 +24,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             public string AssetPath = string.Empty;
             public bool Created;
             public bool Updated;
+            public bool Unchanged;
             public bool UsedNativeDds;
             public bool UsedDecodedFallback;
             public bool Missing;
@@ -55,14 +56,23 @@ namespace SilverEcho.ForsakenWorld.Editor
         public static ImportResult ImportOrUpdate(
             string sourceFullPath,
             string sourceRelativePath,
-            DdsDocument header = null)
+            DdsDocument header = null, bool forceReimport = false)
         {
-            return GameDataImportSession.Once("texture:" + sourceFullPath + ":" + sourceRelativePath,
-                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header));
+            var key = GameDataImportSession.ResourceKey("texture", sourceFullPath, sourceRelativePath);
+            // Supplied headers affect fallback decoding; do not alias different policies in a session.
+            if (header != null) key += "|" + header.Width + "|" + header.Height + "|" + header.Compression +
+                "|" + header.HeaderByteSize + "|" + header.RgbBitCount + "|" + header.RedMask +
+                "|" + header.GreenMask + "|" + header.BlueMask + "|" + header.AlphaMask +
+                "|" + header.PitchOrLinearSize + "|" + header.HeaderFlags + "|" + header.LikelyUnityNativeImport;
+            return GameDataImportSession.Once(key + "|" + forceReimport,
+                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header,
+                    forceReimport || GameDataImportSession.ForceReimport));
         }
 
-        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath, DdsDocument header)
+        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath, DdsDocument header, bool forceReimport)
         {
+            if (GameDataAssetBatch.IsActive)
+                throw new InvalidOperationException("Prepare uncached texture dependencies before the asset write batch.");
             var result = new ImportResult();
             if (string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
             {
@@ -90,7 +100,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 try
                 {
-                    result = ImportNativeFile(sourceFullPath, sourceRelativePath);
+                    result = ImportNativeFile(sourceFullPath, sourceRelativePath, forceReimport);
                     if (result.Texture != null)
                         return result;
                     if (!isDds)
@@ -284,7 +294,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath)
+        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath, bool forceReimport)
         {
             var result = new ImportResult
             {
@@ -300,10 +310,23 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             var existed = File.Exists(absoluteDest) ||
                 AssetDatabase.LoadMainAssetAtPath(result.AssetPath) != null;
+            if (!forceReimport && GameDataSourceFiles.SameContent(sourceFullPath, absoluteDest))
+            {
+                result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
+                if (result.Texture != null)
+                {
+                    result.Unchanged = true;
+                    if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.UnchangedFiles++;
+                    return result;
+                }
+            }
+            if (GameDataAssetBatch.IsActive)
+                throw new InvalidOperationException("Import texture dependencies before starting the asset write batch.");
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
             // ImportAsset is enough for LoadAssetAtPath; Refresh() here is O(project)
             // per texture and must not run inside batch StartAssetEditing loops.
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
+            if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
             result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
             if (result.Texture == null)

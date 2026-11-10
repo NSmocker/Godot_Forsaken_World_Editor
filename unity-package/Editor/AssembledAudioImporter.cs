@@ -24,6 +24,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             public string AssetPath = string.Empty;
             public bool Created;
             public bool Updated;
+            public bool Unchanged;
             public bool Missing;
             public bool UnsupportedExtension;
             public string Error;
@@ -57,14 +58,16 @@ namespace SilverEcho.ForsakenWorld.Editor
             return SoundImportRoot + "/" + joined;
         }
 
-        public static ImportResult ImportOrUpdate(string sourceFullPath, string sourceRelativePath)
+        public static ImportResult ImportOrUpdate(string sourceFullPath, string sourceRelativePath, bool forceReimport = false)
         {
-            return GameDataImportSession.Once("audio:" + sourceFullPath + ":" + sourceRelativePath,
-                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath));
+            return GameDataImportSession.Once(GameDataImportSession.ResourceKey("audio", sourceFullPath, sourceRelativePath) + "|" + forceReimport,
+                () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, forceReimport || GameDataImportSession.ForceReimport));
         }
 
-        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath)
+        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath, bool forceReimport)
         {
+            if (GameDataAssetBatch.IsActive)
+                throw new InvalidOperationException("Prepare uncached audio dependencies before the asset write batch.");
             var result = new ImportResult();
             if (string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
             {
@@ -85,7 +88,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             try
             {
-                return ImportNativeFile(sourceFullPath, sourceRelativePath);
+                return ImportNativeFile(sourceFullPath, sourceRelativePath, forceReimport);
             }
             catch (Exception exception)
             {
@@ -108,7 +111,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             return ImportOrUpdate(file.FullPath, file.RelativePath);
         }
 
-        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath)
+        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath, bool forceReimport)
         {
             var result = new ImportResult
             {
@@ -124,9 +127,21 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             var existed = File.Exists(absoluteDest) ||
                 AssetDatabase.LoadMainAssetAtPath(result.AssetPath) != null;
+            if (!forceReimport && GameDataSourceFiles.SameContent(sourceFullPath, absoluteDest))
+            {
+                result.Clip = AssetDatabase.LoadAssetAtPath<AudioClip>(result.AssetPath);
+                if (result.Clip != null)
+                {
+                    result.Unchanged = true;
+                    if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.UnchangedFiles++;
+                    return result;
+                }
+            }
+            if (GameDataAssetBatch.IsActive)
+                throw new InvalidOperationException("Import audio dependencies before starting the asset write batch.");
             File.Copy(sourceFullPath, absoluteDest, overwrite: true);
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
-            AssetDatabase.Refresh();
+            if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
             result.Clip = AssetDatabase.LoadAssetAtPath<AudioClip>(result.AssetPath);
             if (result.Clip == null)

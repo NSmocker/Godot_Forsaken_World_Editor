@@ -123,6 +123,13 @@ namespace SilverEcho.ForsakenWorld.Editor
             bool includeTerrain = true,
             MapImportOptions options = null)
         {
+            using (new GameDataImportSession("Map " + trn2File?.RelativePath))
+                return ImportCore(trn2File, index, decoder, showProgress, includeTerrain, options);
+        }
+
+        private static Result ImportCore(GameDataFile trn2File, GameDataIndex index,
+            GfxTextDecoder decoder, bool showProgress, bool includeTerrain, MapImportOptions options)
+        {
             if (trn2File == null || index == null)
                 throw new ArgumentNullException();
 
@@ -203,11 +210,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Progress(showProgress, "Saving map Prefab", 0.95f);
                 result.PrefabPath = folder + "/" + Sanitize(mapName) + ".prefab";
                 bool saved;
+                using (new GameDataAssetBatch())
                 using (new GameDataPrefabAssets(root, folder + "/Effects"))
                     PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out saved);
                 if (!saved)
                     throw new IOException("Could not save map prefab: " + result.PrefabPath);
-                AssetDatabase.SaveAssets();
+                GameDataImportSession.SaveAssets();
                 return result;
             }
             finally
@@ -671,6 +679,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             var count = 0;
             var resolver = new EcmModelResolver(index);
             var ecmParser = new EcmParser(decoder);
+            var prefabs = new Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
+            var documents = new Dictionary<string, EcmDocument>(StringComparer.OrdinalIgnoreCase);
             foreach (var model in models)
             {
                 Progress(showProgress, "ECModel " + model.Path, 0.8f);
@@ -682,126 +692,132 @@ namespace SilverEcho.ForsakenWorld.Editor
                     continue;
                 }
 
-                EcmDocument ecmDoc;
-                try { ecmDoc = ecmParser.Parse(File.ReadAllBytes(ecmFile.FullPath)); }
-                catch (Exception e) when (
-                    e is IOException || e is InvalidDataException || e is InvalidOperationException ||
-                    e is NotSupportedException)
+                if (!prefabs.TryGetValue(ecmFile.FullPath, out var prefab))
                 {
-                    result.Warnings.Add(ecmFile.RelativePath + ": " + e.Message);
-                    continue;
-                }
-
-                var prep = resolver.Prepare(ecmDoc, ecmFile.RelativePath);
-                result.Warnings.AddRange(prep.Warnings);
-                if (prep.HasBlockingErrors)
-                {
-                    foreach (var e in prep.Errors)
-                        result.Warnings.Add(e);
-                    continue;
-                }
-
-                AssembledModel assembled;
-                try
-                {
-                    var smdFile = prep.SkinModel.File;
-                    var smd = new SmdParser(decoder).Parse(
-                        File.ReadAllBytes(smdFile.FullPath), smdFile.RelativePath);
-                    var addi = ecmDoc.AdditionalSkinPaths.Count > 0
-                        ? new List<string>(ecmDoc.AdditionalSkinPaths)
-                        : prep.AdditionalSkins.ConvertAll(s => s.RequestedPath);
-                    var resolution = resolver.ResolveSmdWithAdditionalSkins(
-                        smd, smdFile.RelativePath, addi, prep.Warnings);
-                    if (resolution.Skeleton == null || !resolution.Skeleton.IsResolved)
+                    EcmDocument ecmDoc;
+                    try { ecmDoc = ecmParser.Parse(File.ReadAllBytes(ecmFile.FullPath)); }
+                    catch (Exception e) when (
+                        e is IOException || e is InvalidDataException || e is InvalidOperationException ||
+                        e is NotSupportedException)
                     {
-                        result.Warnings.Add(ecmFile.RelativePath + ": skeleton unresolved");
+                        result.Warnings.Add(ecmFile.RelativePath + ": " + e.Message);
                         continue;
                     }
 
-                    var skeleton = new BonParser(decoder).Parse(
-                        File.ReadAllBytes(resolution.Skeleton.File.FullPath),
-                        resolution.Skeleton.File.RelativePath);
-                    var skins = new List<SkiDocument>();
-                    var skinPaths = new List<string>();
-                    foreach (var skinRef in resolution.Skins)
+                    var prep = resolver.Prepare(ecmDoc, ecmFile.RelativePath);
+                    result.Warnings.AddRange(prep.Warnings);
+                    if (prep.HasBlockingErrors)
                     {
-                        if (!skinRef.IsResolved)
-                            continue;
-                        skins.Add(new SkiParser(decoder).Parse(
-                            File.ReadAllBytes(skinRef.File.FullPath), skinRef.File.RelativePath));
-                        skinPaths.Add(skinRef.File.RelativePath);
+                        foreach (var e in prep.Errors)
+                            result.Warnings.Add(e);
+                        continue;
                     }
 
-                    assembled = new ModelAssembler().Assemble(
-                        smd, smdFile.RelativePath, skeleton, resolution.Skeleton.File.RelativePath,
-                        skins, skinPaths, resolution);
-
-                    if (resolution.ActionTracks.Count > 0)
+                    AssembledModel assembled;
+                    try
                     {
-                        var sources = new List<ActionAnimationSource>();
-                        foreach (var action in resolution.ActionTracks)
+                        var smdFile = prep.SkinModel.File;
+                        var smd = new SmdParser(decoder).Parse(
+                            File.ReadAllBytes(smdFile.FullPath), smdFile.RelativePath);
+                        var addi = ecmDoc.AdditionalSkinPaths.Count > 0
+                            ? new List<string>(ecmDoc.AdditionalSkinPaths)
+                            : prep.AdditionalSkins.ConvertAll(s => s.RequestedPath);
+                        var resolution = resolver.ResolveSmdWithAdditionalSkins(
+                            smd, smdFile.RelativePath, addi, prep.Warnings);
+                        if (resolution.Skeleton == null || !resolution.Skeleton.IsResolved)
                         {
-                            if (action == null)
-                                continue;
-                            var source = new ActionAnimationSource
-                            {
-                                ActionName = action.ActionName,
-                                StartFrame = action.StartFrame,
-                                EndFrame = action.EndFrame,
-                                TrackSourcePath = action.Track != null && action.Track.IsResolved
-                                    ? action.Track.File.RelativePath
-                                    : (action.Track != null ? action.Track.RequestedPath : string.Empty)
-                            };
-                            if (action.Track != null && action.Track.IsResolved)
-                            {
-                                try
-                                {
-                                    source.Track = new StckParser().Parse(
-                                        File.ReadAllBytes(action.Track.File.FullPath),
-                                        action.Track.File.RelativePath);
-                                }
-                                catch (Exception stckEx) when (
-                                    stckEx is IOException || stckEx is InvalidDataException ||
-                                    stckEx is NotSupportedException)
-                                {
-                                    assembled.Warnings.Add(
-                                        "Action " + action.ActionName + ": " + stckEx.Message);
-                                }
-                            }
-
-                            sources.Add(source);
+                            result.Warnings.Add(ecmFile.RelativePath + ": skeleton unresolved");
+                            continue;
                         }
 
-                        new ModelAnimationAssembler().Build(assembled, sources);
+                        var skeleton = new BonParser(decoder).Parse(
+                            File.ReadAllBytes(resolution.Skeleton.File.FullPath),
+                            resolution.Skeleton.File.RelativePath);
+                        var skins = new List<SkiDocument>();
+                        var skinPaths = new List<string>();
+                        foreach (var skinRef in resolution.Skins)
+                        {
+                            if (!skinRef.IsResolved)
+                                continue;
+                            skins.Add(new SkiParser(decoder).Parse(
+                                File.ReadAllBytes(skinRef.File.FullPath), skinRef.File.RelativePath));
+                            skinPaths.Add(skinRef.File.RelativePath);
+                        }
+
+                        assembled = new ModelAssembler().Assemble(
+                            smd, smdFile.RelativePath, skeleton, resolution.Skeleton.File.RelativePath,
+                            skins, skinPaths, resolution);
+
+                        if (resolution.ActionTracks.Count > 0)
+                        {
+                            var sources = new List<ActionAnimationSource>();
+                            foreach (var action in resolution.ActionTracks)
+                            {
+                                if (action == null)
+                                    continue;
+                                var source = new ActionAnimationSource
+                                {
+                                    ActionName = action.ActionName,
+                                    StartFrame = action.StartFrame,
+                                    EndFrame = action.EndFrame,
+                                    TrackSourcePath = action.Track != null && action.Track.IsResolved
+                                        ? action.Track.File.RelativePath
+                                        : (action.Track != null ? action.Track.RequestedPath : string.Empty)
+                                };
+                                if (action.Track != null && action.Track.IsResolved)
+                                {
+                                    try
+                                    {
+                                        source.Track = new StckParser().Parse(
+                                            File.ReadAllBytes(action.Track.File.FullPath),
+                                            action.Track.File.RelativePath);
+                                    }
+                                    catch (Exception stckEx) when (
+                                        stckEx is IOException || stckEx is InvalidDataException ||
+                                        stckEx is NotSupportedException)
+                                    {
+                                        assembled.Warnings.Add(
+                                            "Action " + action.ActionName + ": " + stckEx.Message);
+                                    }
+                                }
+
+                                sources.Add(source);
+                            }
+
+                            new ModelAnimationAssembler().Build(assembled, sources);
+                        }
+
+                        new ModelMaterialAssembler(new SkiTextureResolver(index)).BuildForModel(assembled, index);
+                    }
+                    catch (Exception e) when (
+                        e is InvalidDataException || e is ArgumentException || e is InvalidOperationException ||
+                        e is IOException || e is NotSupportedException)
+                    {
+                        result.Warnings.Add(ecmFile.RelativePath + ": assemble failed (" + e.Message + ")");
+                        continue;
                     }
 
-                    new ModelMaterialAssembler(new SkiTextureResolver(index)).BuildForModel(assembled, index);
-                }
-                catch (Exception e) when (
-                    e is InvalidDataException || e is ArgumentException || e is InvalidOperationException ||
-                    e is IOException || e is NotSupportedException)
-                {
-                    result.Warnings.Add(ecmFile.RelativePath + ": assemble failed (" + e.Message + ")");
-                    continue;
-                }
+                    if (assembled == null || !assembled.IsValid)
+                    {
+                        result.Warnings.Add(ecmFile.RelativePath + ": assembled model invalid");
+                        continue;
+                    }
 
-                if (assembled == null || !assembled.IsValid)
-                {
-                    result.Warnings.Add(ecmFile.RelativePath + ": assembled model invalid");
-                    continue;
-                }
+                    var export = AssembledModelAssetExporter.Export(
+                        assembled, index, ecmFile.RelativePath, fromEcm: true,
+                        ecmDocument: ecmDoc);
+                    result.Warnings.AddRange(export.Warnings);
+                    if (!export.Succeeded)
+                    {
+                        result.Warnings.Add(export.Error ?? "ECM prefab export failed");
+                        continue;
+                    }
 
-                var export = AssembledModelAssetExporter.Export(
-                    assembled, index, ecmFile.RelativePath, fromEcm: true,
-                    ecmDocument: ecmDoc);
-                result.Warnings.AddRange(export.Warnings);
-                if (!export.Succeeded)
-                {
-                    result.Warnings.Add(export.Error ?? "ECM prefab export failed");
-                    continue;
+                    prefab = AssetDatabase.LoadAssetAtPath<GameObject>(export.PrefabPath);
+                    if (prefab == null) throw new IOException("Model prefab is unavailable after import: " + export.PrefabPath);
+                    prefabs[ecmFile.FullPath] = prefab;
+                    documents[ecmFile.FullPath] = ecmDoc;
                 }
-
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(export.PrefabPath);
                 var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
                 if (instance == null)
                     instance = new GameObject(Sanitize(ecmFile.Name) + "_" + model.Id);
@@ -819,7 +835,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 host.EcmRelativePath = ecmFile.RelativePath;
                 host.ActionName = model.Action ?? string.Empty;
                 var bases = new List<string>();
-                foreach (var action in ecmDoc.CombinedActions)
+                foreach (var action in documents[ecmFile.FullPath].CombinedActions)
                 {
                     if (action != null &&
                         string.Equals(action.Name, model.Action, StringComparison.OrdinalIgnoreCase))

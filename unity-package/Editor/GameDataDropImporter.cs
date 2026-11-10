@@ -28,7 +28,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             decoder = decoder ?? GameDataBrowserWindow.GetGameDataDecoder();
             var result = new Result { Graph = new GameDataDependencyGraph(index, decoder) };
             var assets = new Dictionary<GameDataDependencyGraph.Node, Object>();
-            using (new GameDataImportSession())
+            using (new GameDataImportSession("Drag and drop"))
             try
             {
                 foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -72,7 +72,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     }
                     catch (Exception e) when (IsImportError(e)) { node.Errors.Add(e.Message); }
                 }
-                AssetDatabase.SaveAssets();
+                GameDataImportSession.SaveAssets();
             }
             catch (OperationCanceledException) { result.Cancelled = true; }
             finally

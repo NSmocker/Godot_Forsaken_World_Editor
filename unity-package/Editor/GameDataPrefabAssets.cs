@@ -33,7 +33,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var path = folder + "/" + replacements.Count.ToString("D4") + ".asset";
             replacements[value] = value;
             Rewrite(value);
-            saved = AssetDatabase.LoadMainAssetAtPath(path);
+            saved = GameDataAssetBatch.Load(path);
             if (saved != null)
             {
                 if (saved.GetType() != value.GetType()) throw new IOException("Incompatible generated asset at " + path);
@@ -44,7 +44,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             else
             {
                 AngelicaAssetFolders.Ensure(folder);
-                AssetDatabase.CreateAsset(value, path);
+                GameDataAssetBatch.Create(value, path);
                 saved = value;
             }
             replacements[value] = saved;
