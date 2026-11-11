@@ -128,9 +128,14 @@ namespace SilverEcho.ForsakenWorld
                 }
             }
 
+            var dats = new Dictionary<int, BsDataFile>();
+            var waterIndex = new Dictionary<uint, int>();
+            var grassIndex = new Dictionary<uint, int>();
+            if (document.Version >= 7 && loadBsData != null)
+                RepairSwappedDataIndices(data, document, waterRefs, grassRefs, dats, loadBsData, waterIndex, grassIndex);
+
             if (waterRefs != null && waterRefs.Count > 0 && loadBsData != null)
             {
-                var dats = new Dictionary<int, BsDataFile>();
                 foreach (var pair in waterRefs)
                 {
                     var off = (int)pair.Value;
@@ -141,34 +146,11 @@ namespace SilverEcho.ForsakenWorld
                     var index = reader.ReadInt32LittleEndian();
                     if (sub < 0 || sub >= document.BsDataNames.Count)
                         continue;
+                    int repaired;
+                    if (waterIndex.TryGetValue(pair.Key, out repaired))
+                        index = repaired;
 
-                    BsDataFile dat;
-                    if (!dats.TryGetValue(sub, out dat))
-                    {
-                        var name = document.BsDataNames[sub];
-                        byte[] bytes;
-                        try { bytes = loadBsData(name); }
-                        catch (Exception e) when (
-                            e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
-                        {
-                            document.Warnings.Add(name + " nicht gefunden, Wasser fehlt (" + e.Message + ")");
-                            dats[sub] = null;
-                            continue;
-                        }
-
-                        if (bytes == null || bytes.Length < 16)
-                        {
-                            document.Warnings.Add(name + " nicht gefunden, Wasser fehlt");
-                            dats[sub] = null;
-                            continue;
-                        }
-
-                        dat = ReadBsData(bytes, name);
-                        dats[sub] = dat;
-                        if (dat == null)
-                            continue;
-                    }
-
+                    var dat = GetBsData(document, sub, dats, loadBsData, "Wasser");
                     if (dat == null || index < 0 || index >= dat.Offsets.Count)
                         continue;
 
@@ -179,9 +161,157 @@ namespace SilverEcho.ForsakenWorld
             }
 
             if (grassRefs != null && grassRefs.Count > 0)
-                ReadGrass(reader, data, document, grassRefs, loadBsData);
+                ReadGrass(reader, data, document, grassRefs, loadBsData, dats, grassIndex);
 
             return document;
+        }
+
+        private static BsDataFile GetBsData(
+            EcbsdDocument document,
+            int sub,
+            Dictionary<int, BsDataFile> dats,
+            Func<string, byte[]> loadBsData,
+            string what)
+        {
+            BsDataFile dat;
+            if (dats.TryGetValue(sub, out dat))
+                return dat;
+            var name = document.BsDataNames[sub];
+            byte[] bytes;
+            try { bytes = loadBsData(name); }
+            catch (Exception e) when (
+                e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+            {
+                document.Warnings.Add(name + " nicht gefunden, " + what + " fehlt (" + e.Message + ")");
+                dats[sub] = null;
+                return null;
+            }
+
+            dat = bytes == null || bytes.Length < 16 ? null : ReadBsData(bytes, name);
+            dats[sub] = dat;
+            if (dat == null)
+                document.Warnings.Add(name + " nicht gefunden, " + what + " fehlt");
+            return dat;
+        }
+
+        /// <summary>
+        /// Some shipped maps (world: grass 13753 / water 13748 and grass 25174 / water 25161,
+        /// a33: grass+water 1388) carry ECBSDFILEGRASS7 / ECBSDFILEWATER records whose
+        /// iDataIndex values are swapped inside one sub-terrain: the grass record points at
+        /// the A3DWaterArea blob and the water record at the grass ECWDDTFILECHUNK.
+        /// CECScene::LoadGrassArea / LoadWaterArea (CElementClient/EC_Scene.cpp) reject both
+        /// (chunk dwOriginSize != bits length, water version &lt; 0x10001000). When exactly one
+        /// grass and one water record of a sub-terrain are crossed like that and the swapped
+        /// targets fit (water blob / grass chunk of the expected size), swap them back.
+        /// </summary>
+        private void RepairSwappedDataIndices(
+            byte[] data,
+            EcbsdDocument document,
+            IReadOnlyDictionary<uint, uint> waterRefs,
+            IReadOnlyDictionary<uint, uint> grassRefs,
+            Dictionary<int, BsDataFile> dats,
+            Func<string, byte[]> loadBsData,
+            Dictionary<uint, int> waterIndex,
+            Dictionary<uint, int> grassIndex)
+        {
+            if (waterRefs == null || grassRefs == null || waterRefs.Count == 0 || grassRefs.Count == 0)
+                return;
+
+            var waters = new Dictionary<int, List<KeyValuePair<uint, int>>>();
+            foreach (var pair in waterRefs)
+            {
+                var off = (int)pair.Value;
+                if (off < 0 || off + 8 > data.Length)
+                    continue;
+                var sub = BitConverter.ToInt32(data, off);
+                var index = BitConverter.ToInt32(data, off + 4);
+                if (sub < 0 || sub >= document.BsDataNames.Count)
+                    continue;
+                List<KeyValuePair<uint, int>> list;
+                if (!waters.TryGetValue(sub, out list))
+                    waters[sub] = list = new List<KeyValuePair<uint, int>>();
+                list.Add(new KeyValuePair<uint, int>(pair.Key, index));
+            }
+
+            if (waters.Count == 0)
+                return;
+
+            var grasses = new Dictionary<int, List<KeyValuePair<uint, int>>>();
+            var grassBytes = new Dictionary<uint, int>();
+            foreach (var pair in grassRefs)
+            {
+                var off = (int)pair.Value;
+                if (off < 0 || off + 36 > data.Length)
+                    continue;
+                var sub = BitConverter.ToInt32(data, off + 28);
+                if (!waters.ContainsKey(sub))
+                    continue;
+                var expected = GrassBitLength(BitConverter.ToInt32(data, off + 20), BitConverter.ToInt32(data, off + 24));
+                if (expected < 0)
+                    continue;
+                List<KeyValuePair<uint, int>> list;
+                if (!grasses.TryGetValue(sub, out list))
+                    grasses[sub] = list = new List<KeyValuePair<uint, int>>();
+                list.Add(new KeyValuePair<uint, int>(pair.Key, BitConverter.ToInt32(data, off + 32)));
+                grassBytes[pair.Key] = expected;
+            }
+
+            foreach (var entry in grasses)
+            {
+                var dat = GetBsData(document, entry.Key, dats, loadBsData, "Gras/Wasser");
+                if (dat == null || !dat.Chunked)
+                    continue;
+
+                var badGrass = new List<KeyValuePair<uint, int>>();
+                foreach (var g in entry.Value)
+                {
+                    if (IsWaterBlob(dat, g.Value))
+                        badGrass.Add(g);
+                }
+
+                var badWater = new List<KeyValuePair<uint, int>>();
+                foreach (var w in waters[entry.Key])
+                {
+                    if (!IsWaterBlob(dat, w.Value) && w.Value >= 0 && w.Value < dat.Offsets.Count)
+                        badWater.Add(w);
+                }
+
+                if (badGrass.Count != 1 || badWater.Count != 1)
+                    continue;
+                var grass = badGrass[0];
+                var water = badWater[0];
+                if (!IsGrassChunk(dat, water.Value, grassBytes[grass.Key]))
+                    continue;
+
+                grassIndex[grass.Key] = water.Value;
+                waterIndex[water.Key] = grass.Value;
+                document.Warnings.Add(
+                    "Gras " + grass.Key + " / Wasser " + water.Key + ": Datenindex " + grass.Value + " und " +
+                    water.Value + " in " + dat.Name + " vertauscht, repariert");
+            }
+        }
+
+        private static bool IsWaterBlob(BsDataFile dat, int index)
+        {
+            if (index < 0 || index >= dat.Offsets.Count)
+                return false;
+            var off = dat.Offsets[index];
+            if (off < 0 || off + 4 > dat.Bytes.Length)
+                return false;
+            var version = BitConverter.ToUInt32(dat.Bytes, off);
+            return version >= 0x10001000u && version <= 0x1000FFFFu;
+        }
+
+        private static bool IsGrassChunk(BsDataFile dat, int index, int expected)
+        {
+            if (index < 0 || index >= dat.Offsets.Count)
+                return false;
+            var off = dat.Offsets[index];
+            if (off < 0 || off + 8 > dat.Bytes.Length)
+                return false;
+            var comp = BitConverter.ToInt32(dat.Bytes, off);
+            var origin = BitConverter.ToInt32(dat.Bytes, off + 4);
+            return origin == expected && comp > 0 && off + 8L + comp <= dat.Bytes.Length;
         }
 
         private void ReadGrass(
@@ -189,9 +319,10 @@ namespace SilverEcho.ForsakenWorld
             byte[] data,
             EcbsdDocument document,
             IReadOnlyDictionary<uint, uint> grassRefs,
-            Func<string, byte[]> loadBsData)
+            Func<string, byte[]> loadBsData,
+            Dictionary<int, BsDataFile> dats,
+            Dictionary<uint, int> repairedIndex)
         {
-            var dats = new Dictionary<int, BsDataFile>();
             foreach (var pair in grassRefs)
             {
                 var off = (int)pair.Value;
@@ -216,6 +347,9 @@ namespace SilverEcho.ForsakenWorld
                 {
                     area.SubTerrain = reader.ReadInt32LittleEndian();
                     area.DataIndex = reader.ReadInt32LittleEndian();
+                    int repaired;
+                    if (repairedIndex.TryGetValue(pair.Key, out repaired))
+                        area.DataIndex = repaired;
                 }
 
                 var expected = GrassBitLength(area.Columns, area.Rows);
@@ -259,37 +393,78 @@ namespace SilverEcho.ForsakenWorld
                 return null;
             }
 
-            BsDataFile dat;
-            if (!dats.TryGetValue(area.SubTerrain, out dat))
-            {
-                var name = document.BsDataNames[area.SubTerrain];
-                byte[] bytes;
-                try { bytes = loadBsData(name); }
-                catch (Exception e) when (
-                    e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
-                {
-                    document.Warnings.Add(name + " nicht gefunden, Gras fehlt (" + e.Message + ")");
-                    dats[area.SubTerrain] = null;
-                    return null;
-                }
+            var dat = GetBsData(document, area.SubTerrain, dats, loadBsData, "Gras");
+            if (dat == null)
+                return null;
 
-                dat = bytes == null ? null : ReadBsData(bytes, name);
-                dats[area.SubTerrain] = dat;
-                if (dat == null)
-                {
-                    document.Warnings.Add(name + " nicht gefunden, Gras fehlt");
-                    return null;
-                }
-            }
-
-            if (dat == null || area.DataIndex < 0 || area.DataIndex >= dat.Offsets.Count)
+            if (area.DataIndex < 0 || area.DataIndex >= dat.Offsets.Count)
             {
                 document.Warnings.Add("Gras " + area.ExportId + ": Datenindex fehlt");
                 return null;
             }
 
             var offset = dat.Offsets[area.DataIndex];
+            if (dat.HasHeader)
+                return ReadGrassChunk(dat, offset, expected, area.ExportId, document.Warnings);
             return ReadGrassPayload(dat.Bytes, offset, expected, dat.Name, area.ExportId, document.Warnings);
+        }
+
+        /// <summary>
+        /// CECScene::LoadGrassArea for an AFile BSData with header: version &lt; 2 holds the raw
+        /// bits; version &gt;= 2 an ECWDDTFILECHUNK {dwCompSize, dwOriginSize} whose origin size
+        /// must equal (col * row) &gt;&gt; 3, then zlib data (bCompress) or the raw bits.
+        /// </summary>
+        private static byte[] ReadGrassChunk(BsDataFile dat, int offset, int expected, uint exportId, List<string> warnings)
+        {
+            var bytes = dat.Bytes;
+            if (!dat.Chunked)
+            {
+                if (offset < 0 || offset + (long)expected > bytes.Length)
+                {
+                    warnings.Add("Gras " + exportId + ": Bits abgeschnitten");
+                    return null;
+                }
+
+                var plain = new byte[expected];
+                Buffer.BlockCopy(bytes, offset, plain, 0, expected);
+                return plain;
+            }
+
+            if (offset < 0 || offset + 8 > bytes.Length)
+            {
+                warnings.Add("Gras " + exportId + ": Bits abgeschnitten");
+                return null;
+            }
+
+            var comp = BitConverter.ToInt32(bytes, offset);
+            var origin = BitConverter.ToInt32(bytes, offset + 4);
+            if (origin != expected)
+            {
+                var hint = IsWaterBlob(dat, dat.Offsets.IndexOf(offset)) ? " (Datenindex zeigt auf Wasser)" : string.Empty;
+                warnings.Add("Gras " + exportId + ": Datenblock hat " + origin + " statt " + expected + " Bytes" + hint);
+                return null;
+            }
+
+            var size = dat.Compressed ? comp : expected;
+            if (size <= 0 || offset + 8L + size > bytes.Length)
+            {
+                warnings.Add("Gras " + exportId + ": Bits abgeschnitten");
+                return null;
+            }
+
+            var payload = new byte[size];
+            Buffer.BlockCopy(bytes, offset + 8, payload, 0, size);
+            if (!dat.Compressed || comp == expected)
+                return payload;
+            try
+            {
+                return TerrainParser.Inflate(payload, expected, dat.Name + " grass");
+            }
+            catch (InvalidDataException e)
+            {
+                warnings.Add("Gras " + exportId + ": " + e.Message);
+                return null;
+            }
         }
 
         internal static int GrassBitLength(int columns, int rows)
@@ -379,7 +554,19 @@ namespace SilverEcho.ForsakenWorld
                 offsets.Add(unchecked((int)BitConverter.ToUInt32(bytes, pos)));
             }
 
-            return new BsDataFile { Bytes = bytes, Offsets = offsets, Name = name };
+            // AFile head "MOXB", then ECWDDTFILEHEADER {dwVersion, bCompress}
+            // (CECScene::PrepareSubTerrainData). Without the head keep the lenient path.
+            var hasHeader = bytes[0] == (byte)'M' && bytes[1] == (byte)'O' && bytes[2] == (byte)'X' && bytes[3] == (byte)'B';
+            var version = hasHeader ? BitConverter.ToUInt32(bytes, 4) : 0u;
+            return new BsDataFile
+            {
+                Bytes = bytes,
+                Offsets = offsets,
+                Name = name,
+                HasHeader = hasHeader,
+                Chunked = hasHeader && version >= 2,
+                Compressed = hasHeader && version >= 2 && bytes[8] != 0
+            };
         }
 
         private static WorldWaterArea ReadWaterArea(
@@ -462,6 +649,9 @@ namespace SilverEcho.ForsakenWorld
             public byte[] Bytes;
             public List<int> Offsets;
             public string Name;
+            public bool HasHeader;
+            public bool Chunked;
+            public bool Compressed;
         }
     }
 }

@@ -184,6 +184,139 @@ namespace SilverEcho.ForsakenWorld.Tests
             return file;
         }
 
+        [Test]
+        public void RepairsGrassAndWaterDataIndicesSwappedInOneSubTerrain()
+        {
+            // world.ecbsd ships grass 13753 -> water blob and water 13748 -> grass chunk.
+            var bits = new byte[8];
+            bits[0] = 0x80;
+            var ecbsd = BuildGrassWaterBsd(waterIndex: 0, grassIndex: 1, out var waterOff, out var grassOff);
+            var dat = BuildChunkedBsData(bits, grassFirst: true, compress: false);
+
+            var document = new EcbsdParser().Parse(
+                ecbsd, "map.ecbsd",
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint> { { 7u, (uint)waterOff } },
+                name => dat,
+                new Dictionary<uint, uint> { { 9u, (uint)grassOff } });
+
+            Assert.AreEqual(1, document.GrassAreas.Count);
+            Assert.AreEqual(0x80, document.GrassAreas[0].Bits[0]);
+            Assert.AreEqual(0, document.GrassAreas[0].DataIndex);
+            Assert.AreEqual(1, document.WaterAreas.Count);
+            Assert.AreEqual(99u, document.WaterAreas[0].Id);
+            Assert.IsTrue(document.Warnings.Exists(w => w.Contains("vertauscht")));
+            Assert.IsFalse(document.Warnings.Exists(w => w.Contains("abgeschnitten") || w.Contains("Version 0x")));
+        }
+
+        [Test]
+        public void ReadsMatchingIndicesFromChunkedBsDataWithoutRepair()
+        {
+            var bits = new byte[8];
+            bits[0] = 0x81;
+            var ecbsd = BuildGrassWaterBsd(waterIndex: 1, grassIndex: 0, out var waterOff, out var grassOff);
+            var dat = BuildChunkedBsData(bits, grassFirst: true, compress: false);
+
+            var document = new EcbsdParser().Parse(
+                ecbsd, "map.ecbsd",
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint> { { 7u, (uint)waterOff } },
+                name => dat,
+                new Dictionary<uint, uint> { { 9u, (uint)grassOff } });
+
+            Assert.AreEqual(1, document.GrassAreas.Count);
+            Assert.AreEqual(0x81, document.GrassAreas[0].Bits[0]);
+            Assert.AreEqual(1, document.WaterAreas.Count);
+            Assert.AreEqual(0, document.Warnings.Count, string.Join("; ", document.Warnings));
+        }
+
+        [Test]
+        public void GrassChunkWithWrongOriginSizeIsRejectedLikeClient()
+        {
+            // No water record to swap with: CECScene::LoadGrassArea rejects the chunk.
+            var bits = new byte[8];
+            var ecbsd = BuildGrassWaterBsd(waterIndex: -1, grassIndex: 1, out _, out var grassOff);
+            var dat = BuildChunkedBsData(bits, grassFirst: true, compress: false);
+
+            var document = new EcbsdParser().Parse(
+                ecbsd, "map.ecbsd",
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                new Dictionary<uint, uint>(),
+                name => dat,
+                new Dictionary<uint, uint> { { 9u, (uint)grassOff } });
+
+            Assert.AreEqual(0, document.GrassAreas.Count);
+            Assert.IsTrue(document.Warnings.Exists(w => w.Contains("zeigt auf Wasser")));
+        }
+
+        private static byte[] BuildGrassWaterBsd(int waterIndex, int grassIndex, out int waterOff, out int grassOff)
+        {
+            var ms = new MemoryStream();
+            var w = new BinaryWriter(ms);
+            w.Write(Encoding.ASCII.GetBytes("MOXB"));
+            w.Write(EcbsdParser.BsdfMagic);
+            w.Write(12); // BSD version >= 7
+            w.Write(1);
+            while (ms.Length < EcbsdParser.BsdHeaderEnd)
+                w.Write((byte)0);
+            WriteAString(w, "BSData\\1.dat");
+            waterOff = (int)ms.Length;
+            w.Write(0); // ECBSDFILEWATER.iSubTerrain
+            w.Write(waterIndex < 0 ? 0 : waterIndex);
+            grassOff = (int)ms.Length;
+            w.Write(0u); // ECBSDFILEGRASS7
+            WriteVec3(w, 10f, 4f, -6f);
+            w.Write(2f);
+            w.Write(8);
+            w.Write(8);
+            w.Write(0);
+            w.Write(grassIndex);
+            w.Flush();
+            return ms.ToArray();
+        }
+
+        // AFile "MOXB" + ECWDDTFILEHEADER {version 2, bCompress} + [grass chunk][water area] + offsets + count.
+        private static byte[] BuildChunkedBsData(byte[] bits, bool grassFirst, bool compress)
+        {
+            var ms = new MemoryStream();
+            var w = new BinaryWriter(ms);
+            w.Write(Encoding.ASCII.GetBytes("MOXB"));
+            w.Write(2u);
+            w.Write(compress ? 1u : 0u);
+            var offsets = new List<int>();
+            for (var pass = 0; pass < 2; pass++)
+            {
+                offsets.Add((int)ms.Length);
+                if ((pass == 0) == grassFirst)
+                {
+                    w.Write(bits.Length); // dwCompSize
+                    w.Write(bits.Length); // dwOriginSize
+                    w.Write(bits);
+                }
+                else
+                {
+                    var area = new byte[44 + 1 + 4];
+                    WriteU32(area, 0, EcbsdParser.WaterMinorVersion);
+                    WriteU32(area, 4, 99u);
+                    WriteF32(area, 12, 5f);
+                    WriteI32(area, 20, 2);
+                    WriteI32(area, 24, 2);
+                    WriteF32(area, 28, 1f);
+                    area[45] = 1; area[48] = 1;
+                    w.Write(area);
+                }
+            }
+
+            foreach (var o in offsets)
+                w.Write(o);
+            w.Write(offsets.Count);
+            w.Flush();
+            return ms.ToArray();
+        }
+
         private static void WriteAString(BinaryWriter w, string value)
         {
             var bytes = Encoding.ASCII.GetBytes(value);
