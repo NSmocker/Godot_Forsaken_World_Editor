@@ -18,12 +18,19 @@ namespace SilverEcho.ForsakenWorld
     }
 
     /// <summary>
-    /// Reads the single mesh of a grass .mox (A3DFrame / A3DMesh binary).
-    /// CELGrassType rejects frames that are not exactly one mesh.
+    /// Reads the single mesh of a grass .mox (A3DFrame / A3DMesh), as
+    /// CELGrassType::Init (CCommon/EL_GrassType.cpp) loads it through AFileImage:
+    /// the 4-byte AFile FOURCC selects binary ("MOXB") or text ("MOXT"); a file
+    /// without FOURCC is text in AFile. Both layouts follow A3DFrame::Load and
+    /// A3DMesh::Load (Angelica3D/Source/A3DFrame.cpp, A3DMesh.cpp). The frame must
+    /// hold exactly one mesh and no child frames, else the grass type is not loaded.
     /// </summary>
     public sealed class MoxGrassParser
     {
         public const int VertexStride = 32;
+        public const uint FourCcBinary = 0x42584f4d; // "MOXB", AFILE_TYPE_BINARY
+        public const uint FourCcText = 0x54584f4d;   // "MOXT", AFILE_TYPE_TEXT
+        public const int MeshVersionLightMap = 100;   // MESHVERSION_SUPPORT_LIGHTMAP
 
         private readonly GfxTextDecoder decoder;
 
@@ -36,18 +43,34 @@ namespace SilverEcho.ForsakenWorld
         {
             if (bytes == null)
                 throw new ArgumentNullException(nameof(bytes));
+            var fourCc = bytes.Length >= 4 ? BitConverter.ToUInt32(bytes, 0) : 0u;
+            if (fourCc == FourCcText)
+                return MoxTextGrassReader.Parse(bytes, 4, sourceName, decoder);
+            if (fourCc == FourCcBinary)
+                return ParseBinary(bytes, 4, sourceName);
+            // No FOURCC: AFile falls back to text. Older tests / tools also write
+            // binary without the head, so pick text only when it looks like text.
+            if (MoxTextGrassReader.LooksLikeText(bytes, 0))
+                return MoxTextGrassReader.Parse(bytes, 0, sourceName, decoder);
+            return ParseBinary(bytes, 0, sourceName);
+        }
+
+        private GrassTemplate ParseBinary(byte[] bytes, int start, string sourceName)
+        {
             var reader = new BinaryDataReader(bytes, sourceName);
+            reader.Seek(start);
             var header = ReadCString(reader, sourceName);
             var version = 1;
-            if (header.StartsWith("VERSION:", StringComparison.Ordinal))
+            if (header.StartsWith("VERSION: ", StringComparison.Ordinal))
             {
                 int parsed;
-                if (int.TryParse(header.Substring("VERSION:".Length).Trim(), out parsed))
+                if (int.TryParse(header.Substring("VERSION: ".Length).Trim(), out parsed))
                     version = parsed;
                 header = ReadCString(reader, sourceName);
             }
 
-            if (header.IndexOf("FRAME:", StringComparison.Ordinal) < 0 && header.Length > 0)
+            if (!header.StartsWith("FRAME: ", StringComparison.Ordinal) &&
+                !(header.StartsWith("FRAME:", StringComparison.Ordinal) && header.Length == 6))
                 throw new InvalidDataException(sourceName + ": expected FRAME header.");
 
             var frameCount = reader.ReadInt32LittleEndian();
@@ -60,8 +83,13 @@ namespace SilverEcho.ForsakenWorld
             reader.Skip(checked(boxCount * (version == 1 ? 168 : 136)));
             var meshCount = reader.ReadInt32LittleEndian();
             if (meshCount != 1)
-                throw new InvalidDataException(sourceName + ": grass frame must contain one mesh.");
-            return ReadMesh(reader, sourceName);
+                throw new InvalidDataException(sourceName + ": grass frame must contain one mesh (has " + meshCount + ").");
+            var template = ReadMesh(reader, sourceName);
+
+            // Child frames: A3DFrame::Load treats a short read as zero children.
+            if (reader.Remaining >= 4 && reader.ReadInt32LittleEndian() != 0)
+                throw new InvalidDataException(sourceName + ": grass frame must not have child frames.");
+            return template;
         }
 
         public GrassTemplate ParseFile(string path)
@@ -73,15 +101,15 @@ namespace SilverEcho.ForsakenWorld
         {
             var header = ReadCString(reader, sourceName);
             var version = 1;
-            if (header.StartsWith("VERSION:", StringComparison.Ordinal))
+            if (header.StartsWith("VERSION: ", StringComparison.Ordinal))
             {
                 int parsed;
-                if (int.TryParse(header.Substring("VERSION:".Length).Trim(), out parsed))
+                if (int.TryParse(header.Substring("VERSION: ".Length).Trim(), out parsed))
                     version = parsed;
                 header = ReadCString(reader, sourceName);
             }
 
-            if (header.IndexOf("MESH:", StringComparison.Ordinal) < 0)
+            if (!header.StartsWith("MESH:", StringComparison.Ordinal))
                 throw new InvalidDataException(sourceName + ": expected MESH header.");
 
             var vertCount = reader.ReadInt32LittleEndian();
@@ -146,6 +174,23 @@ namespace SilverEcho.ForsakenWorld
             const string prefix = "TEXTURE:";
             if (texture.StartsWith(prefix, StringComparison.Ordinal))
                 texture = texture.Substring(prefix.Length).Trim();
+
+            // A3DMaterial::Load (binary): "MATERIAL: name", 4 colours, power, 2-sided.
+            if (reader.Remaining > 0)
+            {
+                ReadCString(reader, sourceName);
+                reader.Skip(Math.Min(reader.Remaining, 4 * 16 + 4 + 1));
+            }
+
+            if (version == MeshVersionLightMap)
+                reader.Skip(Math.Min(reader.Remaining, frameCount * vertCount * 8));
+
+            return BuildTemplate(texture, positions, uvs, indices, minY, maxY);
+        }
+
+        internal static GrassTemplate BuildTemplate(
+            string texture, float[] positions, float[] uvs, int[] indices, float minY, float maxY)
+        {
             return new GrassTemplate
             {
                 TextureName = texture.Replace('\\', '/'),
