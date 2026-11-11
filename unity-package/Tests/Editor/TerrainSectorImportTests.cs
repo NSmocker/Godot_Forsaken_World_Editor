@@ -67,16 +67,20 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(2, result.TerrainAreas);
             Assert.AreEqual(2, result.SectorPrefabPaths.Count);
             var sectorOne = AssetDatabase.LoadAssetAtPath<GameObject>(result.SectorPrefabPaths[0]);
-            Assert.IsNotNull(sectorOne.transform.Find("Terrain/sub1").GetComponent<Terrain>());
+            Assert.IsNull(sectorOne.transform.Find("Terrain/sub1").GetComponent<Terrain>());
+            Assert.IsNotNull(sectorOne.transform.Find("Terrain/sub1").GetComponentInChildren<MeshFilter>());
             Assert.IsNull(sectorOne.transform.Find("Terrain/sub3"));
             CollectionAssert.AreEqual(new[] { "sub1", "sub3" }, TerrainChildNames(result));
-            AssertTerrainCorner(result, "sub1", new Vector3(0f, 1.5f, 2f));
-            AssertTerrainCorner(result, "sub3", new Vector3(0f, 1.5f, 0f));
+            AssertTerrainCorner(result, "sub1", new Vector3(0f, 1.5f, 2f), 0f);
+            AssertTerrainCorner(result, "sub3", new Vector3(0f, 1.5f, 0f), 2f);
             Assert.IsFalse(result.Warnings.Any(w => w.Contains("sub0") || w.Contains("sub2")),
                 string.Join("\n", result.Warnings));
-            string folder = TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath);
-            Assert.IsNull(AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/Area_0000_Mesh.asset"));
-            Assert.IsNull(AssetDatabase.LoadAssetAtPath<Material>(folder + "/Area_0002.mat"));
+            string sub1 = TerrainAssetImporter.GetSectorFolder(mapFile.RelativePath, "sub1");
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Mesh>(sub1 + "/Area_0000_Mesh.asset"));
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2D>(sub1 + "/Area_0000_Splat0.asset"));
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2D>(sub1 + "/Area_0000_Height.asset"));
+            Assert.IsFalse(AssetDatabase.IsValidFolder(TerrainAssetImporter.GetSectorFolder(mapFile.RelativePath, "sub0")));
+            Assert.IsFalse(AssetDatabase.IsValidFolder(TerrainAssetImporter.GetSectorFolder(mapFile.RelativePath, "sub2")));
         }
 
         [TestCase(0)] // No external texture at all.
@@ -120,10 +124,10 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.AreEqual(1, result.Areas);
                 Assert.IsFalse(result.Warnings.Any(w => w.Contains("magenta fallback")), string.Join("\n", result.Warnings));
                 var terrainObject = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
-                var layer = terrainObject.GetComponentInChildren<Terrain>().terrainData.terrainLayers[0];
-                Assert.IsNotNull(layer.diffuseTexture);
+                var linked = terrainObject.GetComponentInChildren<MeshRenderer>().sharedMaterial.GetTexture("_Layer0");
+                Assert.IsNotNull(linked);
                 if (sourceMode != 3)
-                    Assert.AreEqual(AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath), layer.diffuseTexture);
+                    Assert.AreEqual(AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath), linked);
                 if (sourceMode != 3) CollectionAssert.AreEqual(bytes, File.ReadAllBytes(absolute));
             }
             finally { AssetDatabase.DeleteAsset(Path.GetDirectoryName(assetPath).Replace('\\', '/')); }
@@ -155,7 +159,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             string sectorPath = first.SectorPrefabPaths.Single();
             string sectorGuid = AssetDatabase.AssetPathToGUID(sectorPath);
             string terrainGuid = AssetDatabase.AssetPathToGUID(first.TerrainPrefabPath);
-            string meshPath = TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/sub1_Terrain.asset";
+            string meshPath = TerrainAssetImporter.GetSectorFolder(mapFile.RelativePath, "sub1") + "/Area_0000_Mesh.asset";
             string meshGuid = AssetDatabase.AssetPathToGUID(meshPath);
             var full = MapAssetImporter.Import(mapFile, index, decoder, showProgress: false);
             Assert.AreEqual(4, full.SectorPrefabPaths.Count);
@@ -231,7 +235,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             File.WriteAllBytes(Path.Combine(sourceRoot, "sub3.t2bk"), new byte[] { 0 });
             var error = Assert.Throws<InvalidDataException>(() => ImportMap(3));
             StringAssert.Contains("Selected terrain sectors", error.Message);
-            string folder = TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath);
+            string folder = TerrainAssetImporter.GetSectorFolder(mapFile.RelativePath, "sub3");
             Assert.IsNull(AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/Area_0000_Mesh.asset"));
         }
 
@@ -324,14 +328,30 @@ namespace SilverEcho.ForsakenWorld.Tests
             }
             finally
             {
-                if (dialog != null) dialog.Close();
-                if (browser != null) browser.Close();
+                // Asset refresh during import can drop an unshown window's container.
+                // Close() then throws; the import itself already finished.
+                SafeClose(dialog);
+                SafeClose(browser);
                 if (testScene.IsValid())
                 {
                     SceneManager.SetActiveScene(previousScene);
                     EditorSceneManager.CloseScene(testScene, true);
                 }
                 Selection.activeObject = previousSelection;
+            }
+        }
+
+        private static void SafeClose(EditorWindow window)
+        {
+            if (window == null)
+                return;
+            try
+            {
+                window.Close();
+            }
+            catch (NullReferenceException)
+            {
+                UnityEngine.Object.DestroyImmediate(window);
             }
         }
 
@@ -355,27 +375,31 @@ namespace SilverEcho.ForsakenWorld.Tests
                 .ToArray();
         }
 
-        private static void AssertTerrainCorner(MapAssetImporter.Result result, string subName, Vector3 corner)
+        private static void AssertTerrainCorner(MapAssetImporter.Result result, string subName, Vector3 corner, float minHeight)
         {
-            Terrain terrain = null;
+            MeshFilter filter = null;
             foreach (var sectorPath in result.SectorPrefabPaths)
             {
                 var sector = AssetDatabase.LoadAssetAtPath<GameObject>(sectorPath);
                 var child = sector.transform.Find("Terrain/" + subName);
                 if (child == null)
                     continue;
-                terrain = child.GetComponent<Terrain>();
+                filter = child.GetComponentInChildren<MeshFilter>();
                 break;
             }
-            Assert.IsNotNull(terrain, subName);
-            var data = terrain.terrainData;
-            var heights = data.GetHeights(0, 0, data.heightmapResolution, data.heightmapResolution);
-            float y = terrain.transform.position.y + heights[data.heightmapResolution - 1, 0] * data.size.y;
-            Assert.AreEqual(corner.y, y, 0.02f);
-            Assert.AreEqual(corner.x, terrain.transform.position.x, 0.001f);
-            Assert.AreEqual(corner.z, terrain.transform.position.z + data.size.z, 0.001f);
-            Assert.IsNotNull(data.terrainLayers[0].diffuseTexture);
-            Assert.IsTrue(data.terrainLayers[0].diffuseTexture is Texture2D);
+            Assert.IsNotNull(filter, subName);
+            Assert.IsNull(filter.GetComponent<Terrain>());
+            var world = filter.transform.TransformPoint(filter.sharedMesh.vertices[0]);
+            Assert.AreEqual(corner.x, world.x, 0.001f);
+            Assert.AreEqual(corner.y, world.y, 0.02f);
+            Assert.AreEqual(corner.z, world.z, 0.001f);
+            var material = filter.GetComponent<MeshRenderer>().sharedMaterial;
+            Assert.AreEqual(TerrainAssetImporter.ShaderName, material.shader.name);
+            Assert.AreEqual(minHeight, material.GetFloat("_MinHeight"), 0.001f);
+            Assert.AreEqual(1f, material.GetFloat("_UseLightmap"), 0.001f);
+            Assert.IsNotNull(material.GetTexture("_Splat0"));
+            Assert.IsNotNull(material.GetTexture("_HeightMap"));
+            Assert.IsNotNull(material.GetTexture("_Lightmap"));
         }
     }
 }

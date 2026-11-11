@@ -1,14 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
-using UnityTerrainLayer = UnityEngine.TerrainLayer;
 
 namespace SilverEcho.ForsakenWorld.Editor
 {
@@ -16,8 +12,6 @@ namespace SilverEcho.ForsakenWorld.Editor
     {
         public const string ShaderName = "Forsaken World/Angelica Terrain";
         public const string HdrpShaderName = AngelicaRenderPipeline.HdrpTerrain;
-        public const string UrpUnityTerrainShaderName = "Universal Render Pipeline/Terrain/Lit";
-        public const string HdrpUnityTerrainShaderName = "HDRP/TerrainLit";
         public const int MaxLayers = 16;
         public sealed class Result
         {
@@ -27,17 +21,16 @@ namespace SilverEcho.ForsakenWorld.Editor
             public readonly List<string> Warnings = new List<string>();
         }
 
-        // Deterministic per-source folder, including a hash to avoid sanitization collisions.
-        public static string GetOutputFolder(string relativePath)
-        {
-            string name = Path.GetFileNameWithoutExtension(relativePath);
-            foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
-            using (var sha = SHA256.Create())
-            {
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(relativePath.Replace('\\', '/').ToLowerInvariant()));
-                return "Assets/ForsakenWorld/Imported/Terrain/" + name + "_" + BitConverter.ToString(hash, 0, 6).Replace("-", "").ToLowerInvariant();
-            }
-        }
+        /// <summary>
+        /// Generated terrain data lives beside grass/effects/sectors:
+        /// Assets/ForsakenWorld/Imported/Maps/&lt;map&gt;/terrains/&lt;sector&gt;.
+        /// Color DDS files stay in the textures folder and are linked, not copied.
+        /// </summary>
+        public static string GetOutputFolder(string relativePath) =>
+            MapAssetImporter.GetOutputFolder(relativePath) + "/terrains";
+
+        public static string GetSectorFolder(string relativePath, string sectorName) =>
+            GetOutputFolder(relativePath) + "/" + Sanitize(sectorName);
 
         /// <summary>
         /// Imports a terrain prefab without modifying the current scene. Null sector indices
@@ -77,9 +70,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 string relativeDir = (Path.GetDirectoryName(file.RelativePath) ?? "").Replace('\\', '/');
                 EnsureFolder(folder);
                 Progress(showProgress, "Reading ground textures", 0);
-                if (AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/Layers.asset") != null)
-                    AssetDatabase.DeleteAsset(folder + "/Layers.asset");
                 var textures = ResolveGroundTextures(t, file, index, result.Warnings);
+                var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
+                if (shader == null)
+                {
+                    result.Warnings.Add("Terrain shader '" + ShaderName + "' was not found.");
+                    shader = Shader.Find("Hidden/InternalErrorShader");
+                }
                 root = new GameObject(file.Name + "_Terrain");
                 int sectorCount = selectedSectors?.Count ?? t.Subs.Length;
                 int sectorOrdinal = 0;
@@ -121,17 +118,25 @@ namespace SilverEcho.ForsakenWorld.Editor
                         continue;
                     }
 
-                    if (index.TryResolve(Join(relativeDir, t.Subs[s].Name + ".t2lm"), out _, out _) &&
-                        !result.Warnings.Exists(w => w.Contains("Daytime lightmaps are not applied")))
-                        result.Warnings.Add("Daytime lightmaps are not applied to Unity Terrain. Replace a ground DDS to update the linked texture.");
-                    var sectorObject = BuildUnityTerrain(t, s, blocks, masks, textures, folder, result);
-                    if (sectorObject == null)
+                    TerrainLightmap[] lightmaps = null;
+                    if (index.TryResolve(Join(relativeDir, t.Subs[s].Name + ".t2lm"), out var lightFile, out _))
                     {
-                        result.HiddenAreas += masks.Areas.Length;
-                        continue;
+                        try
+                        {
+                            lightmaps = parser.ReadLightmaps(File.ReadAllBytes(lightFile.FullPath), lightFile.RelativePath);
+                        }
+                        catch (Exception e) when (e is InvalidDataException || e is IOException)
+                        {
+                            result.Warnings.Add(t.Subs[s].Name + ": daytime lightmap was not applied (" + e.Message + ")");
+                        }
                     }
+                    else
+                        result.Warnings.Add(t.Subs[s].Name + ": no daytime lightmap, terrain is unlit.");
+
+                    var sectorObject = BuildSector(t, s, blocks, masks, lightmaps, textures, shader, file.RelativePath, result);
+                    if (sectorObject == null)
+                        continue;
                     sectorObject.transform.SetParent(root.transform, false);
-                    result.Areas += masks.Areas.Length;
                     GameDataImportSession.SaveAssets();
                     GameDataImportSession.FlushSave();
                 }
@@ -185,331 +190,62 @@ namespace SilverEcho.ForsakenWorld.Editor
             return textures;
         }
 
-        private static GameObject BuildUnityTerrain(
+        private static GameObject BuildSector(
             TerrainDocument terrain, int sector, Dictionary<long, TerrainBlock> blocks, TerrainMasks masks,
-            Texture2D[] textures, string folder, Result result)
+            TerrainLightmap[] lightmaps, Texture2D[] textures, Shader shader, string mapRelativePath, Result result)
         {
             int areasPerSide = terrain.AreasPerSubSide;
-            int cell = terrain.MaskGrid;
-            int sourceResolution = areasPerSide * cell + 1;
-            if (sourceResolution < 2)
-                return null;
-            var source = new float[sourceResolution, sourceResolution];
-            var solid = new bool[sourceResolution - 1, sourceResolution - 1];
             int sectorRow = sector / terrain.SubColumns;
             int sectorColumn = sector % terrain.SubColumns;
-            int blockGrid = terrain.BlockGrid;
-            bool anySolid = false;
-            for (int area = 0; area < masks.Areas.Length; area++)
-            {
-                int areaRow = sectorRow * areasPerSide + area / areasPerSide;
-                int areaColumn = sectorColumn * areasPerSide + area % areasPerSide;
-                int blocksPerArea = terrain.MaskBlock;
-                for (int bi = 0; bi < blocksPerArea; bi++)
-                    for (int bj = 0; bj < blocksPerArea; bj++)
-                    {
-                        if (!blocks.TryGetValue(TerrainBlock.Key(areaRow * blocksPerArea + bi, areaColumn * blocksPerArea + bj), out var block))
-                            continue;
-                        for (int vi = 0; vi <= blockGrid; vi++)
-                            for (int vj = 0; vj <= blockGrid; vj++)
-                            {
-                                // Mask areas walk row first. Local row is area / side, column is area % side.
-                                int i = (area / areasPerSide) * cell + bi * blockGrid + vi;
-                                int j = (area % areasPerSide) * cell + bj * blockGrid + vj;
-                                if (i >= sourceResolution || j >= sourceResolution)
-                                    continue;
-                                int vertex = vi * (blockGrid + 1) + vj;
-                                if (block.Heights != null && vertex < block.Heights.Length)
-                                    source[i, j] = block.Heights[vertex];
-                            }
-                        if (block.NoRender)
-                            continue;
-                        anySolid = true;
-                        int row0 = (area / areasPerSide) * cell + bi * blockGrid;
-                        int col0 = (area % areasPerSide) * cell + bj * blockGrid;
-                        for (int vi = 0; vi < blockGrid; vi++)
-                            for (int vj = 0; vj < blockGrid; vj++)
-                                if (row0 + vi < solid.GetLength(0) && col0 + vj < solid.GetLength(1))
-                                    solid[row0 + vi, col0 + vj] = true;
-                    }
-            }
-
-            if (!anySolid)
-                return null;
-
-            float minHeight = float.PositiveInfinity;
-            float maxHeight = float.NegativeInfinity;
-            for (int i = 0; i < sourceResolution; i++)
-                for (int j = 0; j < sourceResolution; j++)
-                {
-                    minHeight = Mathf.Min(minHeight, source[i, j]);
-                    maxHeight = Mathf.Max(maxHeight, source[i, j]);
-                }
-            float heightRange = Mathf.Max(0.01f, maxHeight - minHeight);
-            int heightResolution = UnityHeightResolution(sourceResolution);
-            int alphaResolution = UnityAlphaResolution(Math.Max(cell, 16));
-            float worldSize = areasPerSide * cell * terrain.GridSize;
-            var data = new TerrainData { name = terrain.Subs[sector].Name };
-            data.heightmapResolution = heightResolution;
-            data.size = new Vector3(worldSize, heightRange, worldSize);
-            var normalized = new float[heightResolution, heightResolution];
-            for (int z = 0; z < heightResolution; z++)
-                for (int x = 0; x < heightResolution; x++)
-                {
-                    float sourceColumn = x * (sourceResolution - 1f) / (heightResolution - 1f);
-                    float sourceRow = (sourceResolution - 1f) - z * (sourceResolution - 1f) / (heightResolution - 1f);
-                    normalized[z, x] = Mathf.Clamp01((SampleGrid(source, sourceRow, sourceColumn) - minHeight) / heightRange);
-                }
-            data.SetHeights(0, 0, normalized);
-
-            var layerAssets = BuildTerrainLayers(terrain, sector, masks, textures, folder, result.Warnings);
-            data.terrainLayers = layerAssets;
-            data.alphamapResolution = alphaResolution;
-            if (layerAssets.Length > 0)
-                data.SetAlphamaps(0, 0, BuildAlphamaps(terrain, sector, masks, alphaResolution, layerAssets.Length));
-            var holes = new bool[heightResolution - 1, heightResolution - 1];
-            for (int z = 0; z < holes.GetLength(0); z++)
-                for (int x = 0; x < holes.GetLength(1); x++)
-                {
-                    float sourceColumn = x * (sourceResolution - 1f) / Math.Max(1, holes.GetLength(1));
-                    float sourceRow = (sourceResolution - 1f) - (z + 1f) * (sourceResolution - 1f) / Math.Max(1, holes.GetLength(0));
-                    int row = Mathf.Clamp(Mathf.FloorToInt(sourceRow), 0, solid.GetLength(0) - 1);
-                    int column = Mathf.Clamp(Mathf.FloorToInt(sourceColumn), 0, solid.GetLength(1) - 1);
-                    holes[z, x] = solid[row, column];
-                }
-            data.SetHoles(0, 0, holes);
-
-            string path = folder + "/" + terrain.Subs[sector].Name + "_Terrain.asset";
-            data = SaveTerrain(data, path);
             var sectorObject = new GameObject(terrain.Subs[sector].Name);
-            var unityTerrain = sectorObject.AddComponent<Terrain>();
-            unityTerrain.terrainData = data;
-            unityTerrain.materialTemplate = EnsureUnityTerrainMaterial(folder, result.Warnings);
-            unityTerrain.shadowCastingMode = ShadowCastingMode.Off;
-            unityTerrain.allowAutoConnect = false;
-            float minX = -terrain.Width * 0.5f + sectorColumn * worldSize;
-            float minZ = terrain.Length * 0.5f - (sectorRow + 1) * worldSize;
-            sectorObject.transform.position = new Vector3(minX, minHeight, minZ);
-            result.Vertices += (long)heightResolution * heightResolution;
-            return sectorObject;
-        }
-
-        private static Material EnsureUnityTerrainMaterial(string folder, List<string> warnings)
-        {
-            var shaderName = AngelicaRenderPipeline.IsHdrp ? HdrpUnityTerrainShaderName : UrpUnityTerrainShaderName;
-            var shader = Shader.Find(shaderName);
-            if (shader == null)
-            {
-                warnings.Add("Terrain shader '" + shaderName +
-                    "' was not found. Install the active render pipeline terrain shader; the old Angelica Terrain shader is for meshes and does not drive a Terrain component.");
-                return null;
-            }
-
-            var path = folder + "/TerrainLit.mat";
-            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (existing != null && existing.shader == shader)
-                return existing;
-            var material = new Material(shader) { name = "TerrainLit" };
-            return Save(material, path);
-        }
-
-        private static int UnityHeightResolution(int samples)
-        {
-            if (samples < 2)
-                return 33;
-            int resolution = 32;
-            while (resolution + 1 < samples && resolution < 4096)
-                resolution *= 2;
-            return Mathf.Clamp(resolution + 1, 33, 4097);
-        }
-
-        private static int UnityAlphaResolution(int samples)
-        {
-            int resolution = 16;
-            while (resolution < samples && resolution < 2048)
-                resolution *= 2;
-            return Mathf.Clamp(resolution, 16, 2048);
-        }
-
-        private static float SampleGrid(float[,] source, float row, float column)
-        {
-            int rows = source.GetLength(0);
-            int columns = source.GetLength(1);
-            row = Mathf.Clamp(row, 0f, rows - 1f);
-            column = Mathf.Clamp(column, 0f, columns - 1f);
-            int row0 = Mathf.FloorToInt(row);
-            int column0 = Mathf.FloorToInt(column);
-            int row1 = Mathf.Min(row0 + 1, rows - 1);
-            int column1 = Mathf.Min(column0 + 1, columns - 1);
-            float rowT = row - row0;
-            float columnT = column - column0;
-            float a = Mathf.Lerp(source[row0, column0], source[row0, column1], columnT);
-            float b = Mathf.Lerp(source[row1, column0], source[row1, column1], columnT);
-            return Mathf.Lerp(a, b, rowT);
-        }
-
-        private sealed class LayerKey
-        {
-            public int Texture;
-            public float U;
-            public float V;
-        }
-
-        private static UnityTerrainLayer[] BuildTerrainLayers(
-            TerrainDocument terrain, int sector, TerrainMasks masks, Texture2D[] textures, string folder, List<string> warnings)
-        {
-            var keys = new List<LayerKey>();
-            bool warnedAxis = false;
+            string folder = GetSectorFolder(mapRelativePath, terrain.Subs[sector].Name);
+            int visible = 0;
             for (int area = 0; area < masks.Areas.Length; area++)
             {
-                var entries = masks.Areas[area] ?? Array.Empty<TerrainAreaLayer>();
-                int count = Math.Min(entries.Length, MaxLayers);
-                for (int i = 0; i < count; i++)
+                int row = sectorRow * areasPerSide + area / areasPerSide;
+                int column = sectorColumn * areasPerSide + area % areasPerSide;
+                TerrainMeshData data;
+                try
                 {
-                    var layer = ResolveLayer(masks, entries[i].LayerIndex);
-                    if (layer.Axis != 1 && !warnedAxis)
-                    {
-                        warnings.Add(terrain.Subs[sector].Name +
-                            ": Unity Terrain tiles textures on XZ only. Vertical projection axes are not applied.");
-                        warnedAxis = true;
-                    }
-                    int texture = ClampTextureIndex(layer.TextureIndex, textures.Length);
-                    if (keys.Exists(k => k.Texture == texture && Mathf.Approximately(k.U, layer.UScale) && Mathf.Approximately(k.V, layer.VScale)))
-                        continue;
-                    keys.Add(new LayerKey { Texture = texture, U = layer.UScale, V = layer.VScale });
+                    data = TerrainMeshAssembler.BuildArea(terrain, blocks, row, column);
                 }
-            }
-
-            if (keys.Count == 0)
-                keys.Add(new LayerKey { Texture = 0, U = 1f, V = 1f });
-            var assets = new UnityTerrainLayer[keys.Count];
-            for (int i = 0; i < keys.Count; i++)
-            {
-                var key = keys[i];
-                var asset = new UnityTerrainLayer { name = terrain.Subs[sector].Name + "_Layer_" + i.ToString("D2") };
-                if (key.Texture >= 0 && key.Texture < textures.Length)
-                    asset.diffuseTexture = textures[key.Texture];
-                asset.tileSize = new Vector2(
-                    Mathf.Approximately(key.U, 0f) ? 1f : 1f / key.U,
-                    Mathf.Approximately(key.V, 0f) ? 1f : 1f / key.V);
-                assets[i] = Save(asset, folder + "/" + asset.name + ".terrainlayer");
-            }
-
-            return assets;
-        }
-
-        private static float[,,] BuildAlphamaps(
-            TerrainDocument terrain, int sector, TerrainMasks masks, int resolution, int layerCount)
-        {
-            var maps = new float[resolution, resolution, layerCount];
-            int areasPerSide = Math.Max(1, terrain.AreasPerSubSide);
-            int cell = Math.Max(1, terrain.MaskGrid);
-            var keys = LayerKeys(terrain, masks);
-            for (int z = 0; z < resolution; z++)
-                for (int x = 0; x < resolution; x++)
+                catch (InvalidDataException e)
                 {
-                    float column = x * (areasPerSide * cell) / (float)resolution;
-                    float row = (resolution - 1 - z) * (areasPerSide * cell) / (float)Math.Max(1, resolution - 1);
-                    int areaColumn = Mathf.Clamp(Mathf.FloorToInt(column / cell), 0, areasPerSide - 1);
-                    int areaRow = Mathf.Clamp(Mathf.FloorToInt(row / cell), 0, areasPerSide - 1);
-                    int area = areaRow * areasPerSide + areaColumn;
-                    var weights = LayerWeights(masks, area, column - areaColumn * cell, row - areaRow * cell, cell, keys);
-                    for (int layer = 0; layer < layerCount && layer < weights.Length; layer++)
-                        maps[z, x, layer] = weights[layer];
-                }
-
-            return maps;
-        }
-
-        private static List<LayerKey> LayerKeys(TerrainDocument terrain, TerrainMasks masks)
-        {
-            var keys = new List<LayerKey>();
-            for (int area = 0; area < masks.Areas.Length; area++)
-            {
-                var entries = masks.Areas[area] ?? Array.Empty<TerrainAreaLayer>();
-                int count = Math.Min(entries.Length, MaxLayers);
-                for (int i = 0; i < count; i++)
-                {
-                    var layer = ResolveLayer(masks, entries[i].LayerIndex);
-                    int texture = ClampTextureIndex(layer.TextureIndex, terrain.Textures.Length);
-                    if (keys.Exists(k => k.Texture == texture && Mathf.Approximately(k.U, layer.UScale) && Mathf.Approximately(k.V, layer.VScale)))
-                        continue;
-                    keys.Add(new LayerKey { Texture = texture, U = layer.UScale, V = layer.VScale });
-                }
-            }
-
-            return keys;
-        }
-
-        private static float[] LayerWeights(TerrainMasks masks, int area, float localX, float localZ, int cell, List<LayerKey> keys)
-        {
-            var weights = new float[Math.Max(1, keys.Count)];
-            if (masks.Areas == null || area < 0 || area >= masks.Areas.Length || masks.Areas[area] == null)
-            {
-                weights[0] = 1f;
-                return weights;
-            }
-            var entries = masks.Areas[area];
-            int count = Math.Min(entries.Length, MaxLayers);
-            float remaining = 1f;
-            for (int i = 0; i < count; i++)
-            {
-                var source = ResolveLayer(masks, entries[i].LayerIndex);
-                int slot = 0;
-                for (int k = 0; k < keys.Count; k++)
-                    if (keys[k].Texture == source.TextureIndex &&
-                        Mathf.Approximately(keys[k].U, source.UScale) && Mathf.Approximately(keys[k].V, source.VScale))
-                    {
-                        slot = k;
-                        break;
-                    }
-                float mask = i == 0 ? 1f : SampleMask(entries[i].Mask, source.MaskSize, localX, localZ, cell);
-                if (i == 0)
-                {
-                    weights[slot] = remaining;
+                    result.Warnings.Add(e.Message);
+                    result.HiddenAreas++;
                     continue;
                 }
-                float take = remaining * mask;
-                for (int w = 0; w < weights.Length; w++)
-                    weights[w] *= 1f - mask;
-                weights[slot] += take;
-                remaining *= 1f - mask;
+
+                if (data.Indices == null || data.Indices.Length == 0)
+                {
+                    result.HiddenAreas++;
+                    continue;
+                }
+
+                EnsureFolder(folder);
+                string prefix = folder + "/Area_" + area.ToString("D4");
+                var mesh = Save(BuildMesh(data, "Area_" + area.ToString("D4")), prefix + "_Mesh.asset");
+                var lightmap = lightmaps != null && area < lightmaps.Length ? lightmaps[area] : null;
+                var material = BuildMaterial(terrain, masks, area, sector, textures, shader, prefix, data, lightmap, result.Warnings);
+                var areaObject = new GameObject("Area_" + area.ToString("D4"));
+                areaObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var renderer = areaObject.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = material;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                areaObject.transform.SetParent(sectorObject.transform, false);
+                result.Vertices += mesh.vertexCount;
+                result.Triangles += data.Indices.Length / 3;
+                result.Areas++;
+                visible++;
             }
 
-            return weights;
-        }
-
-        private static float SampleMask(byte[] mask, int size, float localX, float localZ, int cell)
-        {
-            if (mask == null || size <= 0 || mask.Length < size * size)
-                return 0f;
-            float u = Mathf.Clamp01(localX / Math.Max(1, cell));
-            float v = Mathf.Clamp01(localZ / Math.Max(1, cell));
-            int x = Mathf.Clamp(Mathf.FloorToInt(u * (size - 1)), 0, size - 1);
-            int y = Mathf.Clamp(Mathf.FloorToInt(v * (size - 1)), 0, size - 1);
-            return mask[y * size + x] / 255f;
-        }
-
-        private static TerrainData SaveTerrain(TerrainData data, string path)
-        {
-            var existing = GameDataAssetBatch.Load(path) as TerrainData;
-            if (existing == null)
+            if (visible == 0)
             {
-                GameDataAssetBatch.Create(data, path);
-                return data;
+                Object.DestroyImmediate(sectorObject);
+                return null;
             }
 
-            existing.heightmapResolution = data.heightmapResolution;
-            existing.size = data.size;
-            existing.SetHeights(0, 0, data.GetHeights(0, 0, data.heightmapResolution, data.heightmapResolution));
-            existing.terrainLayers = data.terrainLayers;
-            existing.alphamapResolution = data.alphamapResolution;
-            existing.SetAlphamaps(0, 0, data.GetAlphamaps(0, 0, data.alphamapWidth, data.alphamapHeight));
-            int holes = data.heightmapResolution - 1;
-            existing.SetHoles(0, 0, data.GetHoles(0, 0, holes, holes));
-            EditorUtility.SetDirty(existing);
-            Object.DestroyImmediate(data);
-            return existing;
+            return sectorObject;
         }
 
         public static Mesh BuildMesh(TerrainMeshData data, string name)
@@ -528,9 +264,14 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         private static Material BuildMaterial(TerrainDocument t, TerrainMasks masks, int area, int sub,
-            Texture2DArray layers, Shader shader, string prefix, List<string> warnings)
+            Texture2D[] textures, Shader shader, string prefix, TerrainMeshData mesh, TerrainLightmap lightmap,
+            List<string> warnings)
         {
-            var entries = masks.Areas[area];
+            var entries = masks.Areas != null && area >= 0 && area < masks.Areas.Length && masks.Areas[area] != null
+                ? masks.Areas[area]
+                : Array.Empty<TerrainAreaLayer>();
+            if (entries.Length == 0)
+                entries = new[] { new TerrainAreaLayer { LayerIndex = 0 } };
             // Godot truncates to MaxLayers with a warning instead of failing the area.
             if (entries.Length > MaxLayers)
             {
@@ -539,52 +280,163 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Array.Copy(entries, truncated, MaxLayers);
                 entries = truncated;
             }
-            int size = 1;
-            for (int i = 1; i < entries.Length; i++) size = Math.Max(size, ResolveLayer(masks, entries[i].LayerIndex).MaskSize);
-            var array = new Texture2DArray(size, size, Math.Max(1, entries.Length - 1), TextureFormat.RGBA32, true, true)
-                { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear };
-            var parameters = new Texture2D(MaxLayers, 1, TextureFormat.RGBAFloat, false, true)
-                { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point };
+
+            if (shader == null)
+                shader = Shader.Find("Hidden/InternalErrorShader");
+            if (shader == null)
+                throw new InvalidOperationException("No shader for material.");
+
+            Texture2D parameters = null;
+            Texture2D height = null;
+            Texture2D light = null;
+            var splats = new Texture2D[4];
+            Material mat = null;
             try
             {
+                parameters = new Texture2D(MaxLayers, 1, TextureFormat.RGBAFloat, false, true)
+                {
+                    name = "Parameters",
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Point
+                };
+                int textureSlots = Math.Min(t.Textures.Length, MaxLayers);
                 for (int i = 0; i < entries.Length; i++)
                 {
                     var layer = ResolveLayer(masks, entries[i].LayerIndex);
                     parameters.SetPixel(i, 0, new Color(
-                        ClampTextureIndex(layer.TextureIndex, t.Textures.Length), layer.UScale, layer.VScale, layer.Axis));
-                    if (i == 0) continue;
-                    var pixels = new Color32[size * size];
-                    var mask = entries[i].Mask;
-                    // Godot: mask data of the wrong length becomes an empty (black) mask image.
-                    bool validMask = layer.MaskSize > 0 && mask != null && mask.Length == layer.MaskSize * layer.MaskSize;
+                        ClampTextureIndex(layer.TextureIndex, textureSlots), layer.UScale, layer.VScale, layer.Axis));
+                }
+                parameters.Apply(false, false);
+
+                height = BuildHeightMap(mesh, t.MaskGrid);
+                PackSplats(masks, entries, splats);
+                if (lightmap != null)
+                {
+                    try
+                    {
+                        light = TerrainTextureBuilder.Lightmap(lightmap, prefix + " lightmap");
+                        light.wrapMode = TextureWrapMode.Clamp;
+                        light.filterMode = FilterMode.Bilinear;
+                    }
+                    catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
+                    {
+                        warnings.Add(prefix + ": daytime lightmap was not applied (" + e.Message + ")");
+                        if (light != null) Object.DestroyImmediate(light);
+                        light = null;
+                    }
+                }
+
+                mat = new Material(shader) { name = Path.GetFileName(prefix) };
+                int linked = Math.Min(textures == null ? 0 : textures.Length, MaxLayers);
+                for (int i = 0; i < linked; i++)
+                    if (textures[i] != null)
+                        mat.SetTexture("_Layer" + i, textures[i]);
+                if (textures != null && textures.Length > MaxLayers)
+                    warnings.Add(prefix + ": shader links the first " + MaxLayers + " ground textures.");
+                for (int i = 0; i < splats.Length; i++)
+                {
+                    if (splats[i] == null) continue;
+                    mat.SetTexture("_Splat" + i, Save(splats[i], prefix + "_Splat" + i + ".asset"));
+                    splats[i] = null;
+                }
+                mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
+                mat.SetTexture("_HeightMap", Save(height, prefix + "_Height.asset")); height = null;
+                if (light != null)
+                {
+                    mat.SetTexture("_Lightmap", Save(light, prefix + "_Lightmap.asset"));
+                    light = null;
+                    mat.SetFloat("_UseLightmap", 1f);
+                }
+                else
+                    mat.SetFloat("_UseLightmap", 0f);
+                mat.SetFloat("_LayerCount", entries.Length);
+                mat.SetFloat("_MinHeight", t.Subs[sub].MinHeight);
+                mat.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
+                var saved = Save(mat, prefix + ".mat");
+                mat = null;
+                return saved;
+            }
+            finally
+            {
+                if (mat != null) Object.DestroyImmediate(mat);
+                if (parameters != null) Object.DestroyImmediate(parameters);
+                if (height != null) Object.DestroyImmediate(height);
+                if (light != null) Object.DestroyImmediate(light);
+                for (int i = 0; i < splats.Length; i++)
+                    if (splats[i] != null) Object.DestroyImmediate(splats[i]);
+            }
+        }
+
+        // Row 0 of the mesh is +Z. Pixel (column, row) stores that vertex height in R.
+        private static Texture2D BuildHeightMap(TerrainMeshData mesh, int maskGrid)
+        {
+            int side = Math.Max(1, maskGrid) + 1;
+            var texture = new Texture2D(side, side, TextureFormat.RGBAFloat, false, true)
+            {
+                name = "Height",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point
+            };
+            int count = mesh.Positions.Length / 3;
+            for (int i = 0; i < side; i++)
+                for (int j = 0; j < side; j++)
+                {
+                    int vertex = i * side + j;
+                    float y = vertex < count ? mesh.Positions[vertex * 3 + 1] : 0f;
+                    texture.SetPixel(j, i, new Color(y, 0f, 0f, 1f));
+                }
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        // t2_4layer_batch_14.txt packs four overlay masks as alpha, red, green, blue.
+        // Layer 0 stays opaque, matching angelica_terrain.gdshader.
+        private static void PackSplats(TerrainMasks masks, TerrainAreaLayer[] entries, Texture2D[] splats)
+        {
+            int overlayCount = Math.Max(0, entries.Length - 1);
+            int splatCount = Math.Min(splats.Length, (overlayCount + 3) / 4);
+            for (int splat = 0; splat < splatCount; splat++)
+            {
+                int size = 1;
+                for (int channel = 0; channel < 4; channel++)
+                {
+                    int layer = splat * 4 + channel + 1;
+                    if (layer >= entries.Length) break;
+                    size = Math.Max(size, ResolveLayer(masks, entries[layer].LayerIndex).MaskSize);
+                }
+                if (size < 1) size = 1;
+                var texture = new Texture2D(size, size, TextureFormat.RGBA32, true, true)
+                {
+                    name = "Splat" + splat,
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear
+                };
+                var pixels = new Color32[size * size];
+                for (int channel = 0; channel < 4; channel++)
+                {
+                    int layer = splat * 4 + channel + 1;
+                    if (layer >= entries.Length) continue;
+                    var source = ResolveLayer(masks, entries[layer].LayerIndex);
+                    var mask = entries[layer].Mask;
+                    bool valid = source.MaskSize > 0 && mask != null && mask.Length == source.MaskSize * source.MaskSize;
                     for (int y = 0; y < size; y++)
                         for (int x = 0; x < size; x++)
                         {
-                            byte value = validMask
-                                ? mask[(y * layer.MaskSize / size) * layer.MaskSize + x * layer.MaskSize / size]
+                            byte value = valid
+                                ? mask[(y * source.MaskSize / size) * source.MaskSize + x * source.MaskSize / size]
                                 : (byte)0;
-                            pixels[y * size + x] = new Color32(value, value, value, 255);
+                            var pixel = pixels[y * size + x];
+                            if (channel == 0) pixel.a = value;
+                            else if (channel == 1) pixel.r = value;
+                            else if (channel == 2) pixel.g = value;
+                            else pixel.b = value;
+                            pixels[y * size + x] = pixel;
                         }
-                    array.SetPixels32(pixels, i - 1);
                 }
-                if (entries.Length <= 1) array.SetPixels32(new[] { new Color32(0, 0, 0, 255) }, 0);
-                array.Apply(true, false); parameters.Apply();
-                // Texture assets serialize all layer parameters, unlike Material.SetVectorArray.
-                if (shader == null)
-                    shader = Shader.Find("Hidden/InternalErrorShader");
-
-                if (shader == null)
-                    throw new System.InvalidOperationException("No shader for material.");
-
-                var mat = new Material(shader) { name = Path.GetFileName(prefix) };
-                mat.SetTexture("_Layers", layers);
-                mat.SetTexture("_Masks", Save(array, prefix + "_Masks.asset")); array = null;
-                mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
-                mat.SetFloat("_LayerCount", entries.Length); mat.SetFloat("_MinHeight", t.Subs[sub].MinHeight);
-                mat.SetFloat("_UseLightmap", 0); mat.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
-                return mat;
+                texture.SetPixels32(pixels);
+                texture.Apply(true, false);
+                splats[splat] = texture;
             }
-            finally { if (array != null) Object.DestroyImmediate(array); if (parameters != null) Object.DestroyImmediate(parameters); }
         }
 
         /// <summary>
@@ -602,46 +454,6 @@ namespace SilverEcho.ForsakenWorld.Editor
         /// <summary>Godot: clampi(texture, 0, maxi(0, num_texture - 1)).</summary>
         public static int ClampTextureIndex(int textureIndex, int textureCount) =>
             Math.Max(0, Math.Min(textureIndex, Math.Max(0, textureCount - 1)));
-
-        private static Texture2DArray BuildLayers(TerrainDocument t, GameDataFile map, GameDataIndex index, List<string> warnings)
-        {
-            var images = new List<Texture2D>();
-            Texture2DArray array = null;
-            try
-            {
-                PrefetchGroundTextures(t, map, index);
-                int size = 4;
-                foreach (string texture in t.Textures)
-                {
-                    Texture2D image = null;
-                    try
-                    {
-                        var projectTexture = TerrainTextureBuilder.FindProjectTexture(texture);
-                        if (projectTexture != null)
-                            image = TerrainTextureBuilder.LoadProjectTexture(projectTexture);
-                        else
-                        {
-                            var file = ResolveTexture(index, map.RelativePath, texture);
-                            if (file == null) throw new FileNotFoundException("Ground texture not found: " + texture);
-                            image = TerrainTextureBuilder.LoadSource(file);
-                        }
-                    }
-                    catch (Exception e) when (e is IOException || e is NotSupportedException)
-                    { warnings.Add(e.Message + " (magenta fallback)"); }
-                    if (image == null)
-                    {
-                        image = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
-                        image.SetPixels(new[] { Color.magenta, Color.black, Color.black, Color.magenta }); image.Apply();
-                    }
-                    images.Add(image); size = Math.Max(size, Math.Max(image.width, image.height));
-                }
-                array = AngelicaTextureArrayBuilder.Build(
-                    images, name: "Terrain Layers", maxEdge: 1024, linear: true, warnings: warnings);
-                return array;
-            }
-            catch { if (array != null) Object.DestroyImmediate(array); throw; }
-            finally { foreach (var image in images) Object.DestroyImmediate(image); }
-        }
 
         internal static GameDataFile ResolveTexture(GameDataIndex index, string map, string texture)
         {
@@ -673,6 +485,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             return file;
         }
         private static string Join(string directory, string file) => string.IsNullOrEmpty(directory) ? file : directory + "/" + file;
+        private static string Sanitize(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "sector";
+            foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+            return name;
+        }
         private static void Progress(bool show, string text, float value)
         {
             if (show && EditorUtility.DisplayCancelableProgressBar("Import Angelica Terrain", text, value))
