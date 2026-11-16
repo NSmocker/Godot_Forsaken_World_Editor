@@ -39,7 +39,7 @@
 | ID | Готово | Відносний шлях GFX | Стан | C++ | Unity | Висновок | Кадри / звіт / примітки |
 |---|---|---|---|---|---|---|---|
 | GFX-00001 | [x] | `gfx/场景/符文阵效果2改.gfx` | Перевірено | Відображається | Відображається | Є розбіжності | [Звіт](.validation/checklist-first10/GFX-00001/REPORT.md): загальні фікси внесені; RNG/particle parity відкриті |
-| GFX-00002 | [x] | `gfx/效果/无定宙水.gfx` | Перевірено | Відображається (160 кадрів) | Відображається (160 кадрів) | Є розбіжності | [Звіт](.validation/checklist-first10/GFX-00002/REPORT.md): виправлено emission/AlphaCmp; частинки, сфера та lighting відкриті |
+| GFX-00002 | [x] | `gfx/效果/无定宙水.gfx` | Перевірено | Відображається (160 кадрів) | Відображається (runtime mesh, 800/1800/2400/3200) | Є розбіжності | Runtime particles замість Shuriken. Дракон ~800 мс близький. На 2400 мс сфера, краплі та кільця ще розходяться. Кадри: `.validation/checklist-first10/GFX-00002/runtime-particles/` |
 | GFX-00003 | [x] | `gfx/效果/无定宙火.gfx` | Перевірено | frame-01..10 (AABB-камера, camera.json) | official/unity-*.png | Збігається в перевірених умовах (IoU 0.685, MAE 0.00005) | [REPORT.md](.validation/checklist-first10/GFX-00003/REPORT.md) |
 | GFX-00004 | [x] | `gfx/效果/无定宙雷.gfx` | Перевірено | frame-01..10 (camera.json) | official/unity-*.png | Недостатньо даних (ефект майже не проєктується) | [REPORT.md](.validation/checklist-first10/GFX-00004/REPORT.md) |
 | GFX-00005 | [x] | `gfx/效果/无定宙风.gfx` | Перевірено | frame-01..10 (camera.json) | official/unity-*.png | Збігається в перевірених умовах (IoU 0.737) | [REPORT.md](.validation/checklist-first10/GFX-00005/REPORT.md) |
@@ -58,7 +58,7 @@
 | GFX-00018 | [x] | `npc/人族护卫_红宝石.gfx` | Перевірено | frame-01..10 (camera.json) | official/unity-*.png | Збігається в перевірених умовах (IoU 0.984) | [REPORT.md](.validation/checklist-first10/GFX-00018/REPORT.md) |
 | GFX-00019 | [x] | `npc/仙女.gfx` | Перевірено | frame-01..10 (camera.json) | official/unity-*.png | Є розбіжності (IoU 0.540) | [REPORT.md](.validation/checklist-first10/GFX-00019/REPORT.md) |
 | GFX-00020 | [x] | `npc/仙女交谈循环.gfx` | Перевірено | frame-01..10 (camera.json) | official/unity-*.png | Є розбіжності (IoU 0.383) | [REPORT.md](.validation/checklist-first10/GFX-00020/REPORT.md) |
-| GFX-00021 | [ ] | `npc/仙女伸手交谈.gfx` | Не перевірено | Не перевірено | Не перевірено | — | — |
+| GFX-00021 | [x] | `npc/仙女伸手交谈.gfx` | Перевірено | Відображається | Відображається | Є розбіжності | URP Editor, камера з camera.json. Колір стрічок виправлено (WriteZ більше не лишає alpha blend непрозорим). Поза на 1750 мс ще вужча за C++. Кадри: `.validation/gfx-cpp-unity-check/GFX-00021-blendfix/` |
 | GFX-00022 | [ ] | `npc/仙女抱胸交谈.gfx` | Не перевірено | Не перевірено | Не перевірено | — | — |
 | GFX-00023 | [ ] | `npc/仙女站立.gfx` | Не перевірено | Не перевірено | Не перевірено | — | — |
 | GFX-00024 | [ ] | `npc/仙女飘带休闲1.gfx` | Не перевірено | Не перевірено | Не перевірено | — | — |

@@ -322,7 +322,11 @@ namespace SilverEcho.ForsakenWorld
         private static void ApplyBlendState(Material mat, GfxModelParams p)
         {
             if (mat == null || p == null) return;
-            var needsAlpha = p.IsAdditiveBlend || !p.WriteZ;
+            // A3DGFXModel::PrepareRenderSkinModel always forwards SrcBlend/DestBlend.
+            // WriteZ is independent (EnableAlphaComp / Z write), so an alpha-blended
+            // ribbon with WriteZ:1 must not stay on the opaque One/Zero preset.
+            var opaqueReplace = p.SrcBlend == 2 && p.DestBlend == 1;
+            var needsAlpha = !opaqueReplace;
             if (needsAlpha)
             {
                 if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
@@ -353,6 +357,12 @@ namespace SilverEcho.ForsakenWorld
                         "_DstBlendAlpha",
                         (float)GfxBlendFactors.ToUnity(
                             p.DestBlend, UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
+                // Angelica skin lighting is vertex light, not a skybox reflection.
+                // Transparent URP Lit otherwise tints the mesh with the editor environment.
+                if (mat.HasProperty("_EnvironmentReflections"))
+                    mat.SetFloat("_EnvironmentReflections", 0f);
+                mat.DisableKeyword("_ENVIRONMENTREFLECTIONS_ON");
+                mat.EnableKeyword("_ENVIRONMENTREFLECTIONS_OFF");
             }
             // A3DGFXModel::Play/UpdateModel passes AlphaCmp independently of
             // blending to EnableAlphaComp. Do not inherit a skin import keyword.

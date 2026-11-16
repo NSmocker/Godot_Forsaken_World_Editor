@@ -350,6 +350,23 @@ namespace SilverEcho.ForsakenWorld.Tests
             mat = child2.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.SrcAlpha, mat.GetFloat("_SrcBlend"), 0.001f);
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, mat.GetFloat("_DstBlend"), 0.001f);
+
+            // 仙女伸手交谈.gfx ribbon: DestBlend 6 and WriteZ 1. Z write must not
+            // keep the opaque One/Zero factors.
+            var child3 = new GameObject("skinned3");
+            child3.AddComponent<SkinnedMeshRenderer>().sharedMesh = makeMesh();
+            var pWriteZ = new GfxModelParams
+            {
+                ModelPath = "x.smd",
+                SrcBlend = 5,
+                DestBlend = 6,
+                WriteZ = true
+            };
+            driver.Configure(pWriteZ, child3, false, new List<string>());
+            mat = child3.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
+            Assert.AreEqual(1f, mat.GetFloat("_Surface"), 0.001f);
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, mat.GetFloat("_DstBlend"), 0.001f);
+            Assert.AreEqual(1f, mat.GetFloat("_ZWrite"), 0.001f);
         }
 
         [Test]
