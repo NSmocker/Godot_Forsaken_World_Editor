@@ -102,11 +102,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // Attach STCK animations when action tracks resolve (same as map ECModel path).
                 AttachAnimations(assembled, resolution, decoder, warnings);
 
+                var albedoLookup = CreateAlbedoLookup(assembled, index, "160", warnings);
+
                 GameObject root;
                 if (assembled.Animations.Count > 0)
                 {
                     root = AssembledModelUnityBuilder.BuildHierarchyWithAnimations(
-                        assembled, assembled.Animations, "Model_GFX", null, 0);
+                        assembled, assembled.Animations, "Model_GFX", albedoLookup, 0);
                     // Stop autoplay — GfxModelDriver seeks manually.
                     var anim = root != null ? root.GetComponent<Animation>() : null;
                     if (anim != null)
@@ -114,7 +116,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
                 else
                 {
-                    root = AssembledModelUnityBuilder.BuildHierarchy(assembled, "Model_GFX");
+                    root = AssembledModelUnityBuilder.BuildHierarchy(assembled, "Model_GFX", albedoLookup);
                 }
 
                 if (warnings != null)
@@ -283,18 +285,20 @@ namespace SilverEcho.ForsakenWorld.Editor
 
                 AttachAnimations(assembled, resolution, decoder, warnings);
 
+                var albedoLookup = CreateAlbedoLookup(assembled, index, "230", warnings);
+
                 GameObject root;
                 if (assembled.Animations.Count > 0)
                 {
                     root = AssembledModelUnityBuilder.BuildHierarchyWithAnimations(
-                        assembled, assembled.Animations, "ECModel_GFX", null, 0);
+                        assembled, assembled.Animations, "ECModel_GFX", albedoLookup, 0);
                     var anim = root != null ? root.GetComponent<Animation>() : null;
                     if (anim != null)
                         anim.Stop();
                 }
                 else
                 {
-                    root = AssembledModelUnityBuilder.BuildHierarchy(assembled, "ECModel_GFX");
+                    root = AssembledModelUnityBuilder.BuildHierarchy(assembled, "ECModel_GFX", albedoLookup);
                 }
 
                 if (root != null && ecmDocument != null)
@@ -314,6 +318,83 @@ namespace SilverEcho.ForsakenWorld.Editor
                         "GFX ID 230 assemble failed for " + ecmPath + ": " + ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Imports each SKI texture dependency once and returns the runtime-image
+        /// analogue of the exporter's texture dictionary
+        /// (AssembledModelAssetExporter.cs:223-235), so scene-built GFX models get real
+        /// albedo maps like the imported prefabs. Game data assets cannot be assigned
+        /// directly; they go through AssembledTextureImporter (same as
+        /// GfxSceneBuilder.ResolveElementTexture, GfxSceneBuilder.cs:607-648).
+        /// </summary>
+        private static Func<AssembledSurfaceMaterial, Texture> CreateAlbedoLookup(
+            AssembledModel assembled,
+            GameDataIndex index,
+            string systemId,
+            IList<string> warnings)
+        {
+            if (assembled == null || index == null)
+                return null;
+
+            var imported = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+            foreach (var skin in assembled.Skins)
+            {
+                if (skin == null)
+                    continue;
+                foreach (var slot in skin.SurfaceMaterials)
+                {
+                    if (slot == null || !slot.TextureResolved ||
+                        string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                        continue;
+                    var key = slot.TextureSourcePath.Replace('\\', '/');
+                    if (imported.ContainsKey(key))
+                        continue;
+
+                    GameDataFile file;
+                    string error;
+                    if (!index.TryResolve(slot.TextureSourcePath, out file, out error) &&
+                        !index.TryResolve(slot.TextureSourcePath, out file, out error, true))
+                    {
+                        if (warnings != null)
+                            warnings.Add(
+                                "GFX ID " + systemId + " model texture not found: " +
+                                slot.TextureSourcePath);
+                        continue;
+                    }
+
+                    try
+                    {
+                        var result = AssembledTextureImporter.ImportOrUpdate(
+                            file.FullPath, slot.TextureSourcePath, slot.TextureDds);
+                        if (result != null && result.Texture != null)
+                            imported[key] = result.Texture;
+                        else if (warnings != null && result != null &&
+                                 !string.IsNullOrEmpty(result.Error))
+                            warnings.Add(
+                                "GFX ID " + systemId + " model texture import: " +
+                                result.Error);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (warnings != null)
+                            warnings.Add(
+                                "GFX ID " + systemId + " model texture import failed: " +
+                                ex.Message);
+                    }
+                }
+            }
+
+            return slot =>
+            {
+                if (slot == null || string.IsNullOrWhiteSpace(slot.TextureSourcePath))
+                    return null;
+                Texture2D texture;
+                return imported.TryGetValue(
+                    slot.TextureSourcePath.Replace('\\', '/'), out texture)
+                    ? texture
+                    : null;
+            };
         }
 
         private static void AttachAnimations(

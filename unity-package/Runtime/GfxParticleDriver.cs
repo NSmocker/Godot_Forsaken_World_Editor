@@ -398,7 +398,12 @@ namespace SilverEcho.ForsakenWorld
             if (Params.Particle3D && Params.Facing)
                 particleRenderer.renderMode = ParticleSystemRenderMode.Stretch;
             else if (Params.Particle3D)
+            {
                 particleRenderer.renderMode = ParticleSystemRenderMode.Mesh;
+                // Fill_Vert_3D: орієнтований quad, а не стандартний mesh Shuriken.
+                particleRenderer.mesh = NativeParticleQuad;
+                particleRenderer.alignment = ParticleSystemRenderSpace.Local;
+            }
             else
                 particleRenderer.renderMode = ParticleSystemRenderMode.Billboard;
 
@@ -459,11 +464,17 @@ namespace SilverEcho.ForsakenWorld
                     p.position = new Vector3(s.Pos[0], s.Pos[1], s.Pos[2]);
                     p.startColor = new Color(
                         s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale);
-                    p.startSize3D = new Vector3(w, h, 1f);
+                    // A3DParticleSystemEx::Fill_Verts_2D використовує width/height
+                    // як піврозміри, а Shuriken — як повні розміри quad.
+                    p.startSize3D = new Vector3(w * 2f, h * 2f, 1f);
 
                     p.remainingLifetime = Math.Max(0.0001f, Params.TTL - s.Age);
                     p.startLifetime = Math.Max(0.0001f, Params.TTL);
-                    p.rotation3D = QuaternionToEuler(s.Rot);
+                    if (Params.Particle3D)
+                        p.rotation3D = QuaternionToEuler(s.Rot);
+                    else
+                        // Billboard обертається тільки в площині екрана.
+                        p.rotation = -s.BillboardAngle * Mathf.Rad2Deg;
                     p.angularVelocity = 0f;
                     p.velocity = Vector3.zero;
                     // Encode sheet frame in remainingLifetime ratio for optional custom shaders;
@@ -489,6 +500,22 @@ namespace SilverEcho.ForsakenWorld
                 return Vector3.zero;
             var qq = new Quaternion(q[0], q[1], q[2], q[3]);
             return qq.eulerAngles;
+        }
+
+        private static Mesh nativeParticleQuad;
+        private static Mesh NativeParticleQuad
+        {
+            get
+            {
+                if (nativeParticleQuad != null) return nativeParticleQuad;
+                nativeParticleQuad = new Mesh { name = "Angelica particle quad", hideFlags = HideFlags.HideAndDontSave };
+                nativeParticleQuad.vertices = new[] { new Vector3(-.5f,.5f,0), new Vector3(.5f,.5f,0),
+                    new Vector3(-.5f,-.5f,0), new Vector3(.5f,-.5f,0) };
+                nativeParticleQuad.uv = new[] { new Vector2(0,1),new Vector2(1,1),new Vector2(0,0),new Vector2(1,0) };
+                nativeParticleQuad.triangles = new[] { 0,1,2,2,1,3 };
+                nativeParticleQuad.RecalculateBounds();
+                return nativeParticleQuad;
+            }
         }
 
         private void SetVisualActive(bool active)

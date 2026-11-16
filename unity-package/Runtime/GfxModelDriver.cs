@@ -230,6 +230,14 @@ namespace SilverEcho.ForsakenWorld
             foreach (var renderer in renderers)
             {
                 if (renderer == null) continue;
+                // A3DGFXModel::Render (A3DGFXModel.cpp:188-197) registers the model for
+                // rendering unconditionally — Angelica does not frustum-cull GFX models
+                // from static bounds. Unity's default SkinnedMeshRenderer culling bounds
+                // come from the rest pose and can hide an animated pose entirely (e.g.
+                // dive-down actions), so keep bounds updating from the current pose.
+                var skinned = renderer as SkinnedMeshRenderer;
+                if (skinned != null)
+                    skinned.updateWhenOffscreen = true;
                 var mats = renderer.sharedMaterials;
                 if (mats == null || mats.Length == 0)
                 {
@@ -255,6 +263,12 @@ namespace SilverEcho.ForsakenWorld
                     var mat = new Material(lit);
                     if (src != null)
                     {
+                        // Preserve source keywords (e.g. `_EMISSION` from the SKI emissive
+                        // in AssembledUrpMaterialBuilder.ApplyLitMaterial). Copying only
+                        // _EmissionColor without the keyword turns emissive skins black
+                        // under URP Lit, so they vanish under additive blending — C++
+                        // A3DSkinModel adds the material emissive to the lit color.
+                        mat.shaderKeywords = src.shaderKeywords;
                         if (src.HasProperty("_BaseColor"))
                             mat.SetColor("_BaseColor", src.GetColor("_BaseColor"));
                         if (src.HasProperty("_Color"))
@@ -265,6 +279,19 @@ namespace SilverEcho.ForsakenWorld
                             mat.SetTexture("_BaseMap", src.GetTexture("_BaseMap"));
                         if (src.HasProperty("_MainTex") && src.GetTexture("_MainTex") != null)
                             mat.SetTexture("_MainTex", src.GetTexture("_MainTex"));
+                        // Angelica adds material emissive to vertex lighting before
+                        // stage-0 MODULATE with the skin texture (A3DSkinRender:
+                        // ApplyVSMaterial, SMVSC_AMBIENT; default m_ColorOP).
+                        // URP adds emission separately, so it needs the same texture;
+                        // an unset emission map emits a flat color over the whole mesh.
+                        if (mat.HasProperty("_EmissionMap"))
+                        {
+                            var emissionMap = src.HasProperty("_EmissionMap")
+                                ? src.GetTexture("_EmissionMap") : null;
+                            if (emissionMap == null && mat.HasProperty("_BaseMap"))
+                                emissionMap = mat.GetTexture("_BaseMap");
+                            mat.SetTexture("_EmissionMap", emissionMap);
+                        }
                     }
 
                     ApplyBlendState(mat, p);
@@ -300,17 +327,44 @@ namespace SilverEcho.ForsakenWorld
             {
                 if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
                 mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                if (p.IsAdditiveBlend && mat.HasProperty("_Blend"))
-                    mat.SetFloat("_Blend", 1f); // Additive
-                else if (mat.HasProperty("_Blend"))
-                    mat.SetFloat("_Blend", 0f); // Alpha
+                // C++ forwards the element's raw A3DBLEND factors to the skin model
+                // (A3DGFXModel.cpp:342-343 SetSrcBlend/SetDstBlend; values from
+                // A3DTypes.h:178-194). URP Lit's `_Blend` float is only a preset index
+                // (0=Alpha, 1=Premultiply, 2=Additive) — writing 1 there renders
+                // premultiplied instead of the C++ factors. Set the actual blend
+                // factors like GfxParticleMaterialFactory.cs:41-48 does.
+                if (mat.HasProperty("_SrcBlend"))
+                    mat.SetFloat(
+                        "_SrcBlend",
+                        (float)GfxBlendFactors.ToUnity(
+                            p.SrcBlend, UnityEngine.Rendering.BlendMode.SrcAlpha));
+                if (mat.HasProperty("_DstBlend"))
+                    mat.SetFloat(
+                        "_DstBlend",
+                        (float)GfxBlendFactors.ToUnity(
+                            p.DestBlend, UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
+                if (mat.HasProperty("_SrcBlendAlpha"))
+                    mat.SetFloat(
+                        "_SrcBlendAlpha",
+                        (float)GfxBlendFactors.ToUnity(
+                            p.SrcBlend, UnityEngine.Rendering.BlendMode.SrcAlpha));
+                if (mat.HasProperty("_DstBlendAlpha"))
+                    mat.SetFloat(
+                        "_DstBlendAlpha",
+                        (float)GfxBlendFactors.ToUnity(
+                            p.DestBlend, UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
             }
-            else if (p.AlphaCompare)
+            // A3DGFXModel::Play/UpdateModel passes AlphaCmp independently of
+            // blending to EnableAlphaComp. Do not inherit a skin import keyword.
+            if (mat.HasProperty("_AlphaClip")) mat.SetFloat("_AlphaClip", p.AlphaCompare ? 1f : 0f);
+            if (p.AlphaCompare)
             {
                 if (mat.HasProperty("_AlphaClip")) mat.SetFloat("_AlphaClip", 1f);
                 if (mat.HasProperty("_Cutoff")) mat.SetFloat("_Cutoff", GfxModelParams.AlphaRef);
                 mat.EnableKeyword("_ALPHATEST_ON");
             }
+            else
+                mat.DisableKeyword("_ALPHATEST_ON");
 
             if (mat.HasProperty("_ZWrite"))
                 mat.SetFloat("_ZWrite", p.WriteZ ? 1f : 0f);

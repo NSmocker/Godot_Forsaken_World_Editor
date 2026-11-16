@@ -102,7 +102,10 @@ namespace SilverEcho.ForsakenWorld
                     float u = p.UReverse ? 1 - side : side;
                     float w = p.VReverse ? 1 - portion : portion;
                     u = u * sheet.ScaleU + sheet.OffsetU; w = w * sheet.ScaleV + sheet.OffsetV;
-                    data.Uvs[v * 2] = p.UvExchange ? w : u; data.Uvs[v * 2 + 1] = p.UvExchange ? u : w;
+                    // D3D9 має початок UV згори; Unity Texture2D — знизу.
+                    // Перетворення після native UVExchg, включно з atlas/scroll.
+                    data.Uvs[v * 2] = p.UvExchange ? w : u;
+                    data.Uvs[v * 2 + 1] = 1f - (p.UvExchange ? u : w);
                     data.Colors[v * 4] = e.Color.r; data.Colors[v * 4 + 1] = e.Color.g; data.Colors[v * 4 + 2] = e.Color.b;
                     data.Colors[v * 4 + 3] = e.Color.a * portion * alpha;
                 }

@@ -6,6 +6,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>One active particle slot (gfx_particle_eval.gd eval / particles).</summary>
     public sealed class GfxParticleSlot
     {
+        public float BillboardAngle;
         public bool Alive;
         public float EIdx;
         public float Age;
@@ -632,6 +633,7 @@ namespace SilverEcho.ForsakenWorld
                 Pos = wPos,
                 Move = wMove,
                 Rot = rot,
+                BillboardAngle = pRad,
                 Size = pSize + pNoise,
                 Color = pCol,
                 KeyScale = enScaleEff,

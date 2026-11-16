@@ -72,20 +72,35 @@ public static class GfxCppUnityBatchCapture {
     static JObject CaptureOne(GameDataIndex index, string id, string full, string dir, string outRoot) {
         var oldMains = Resources.FindObjectsOfTypeAll<Camera>()
             .Where(c => c.gameObject.scene.IsValid() && c.CompareTag("MainCamera")).ToArray();
+        var oldAmbientMode = RenderSettings.ambientMode;
+        var oldAmbientLight = RenderSettings.ambientLight;
+        var oldActiveScene = SceneManager.GetActiveScene();
+        var oldLights = Resources.FindObjectsOfTypeAll<Light>()
+            .Where(l => l != null && l.gameObject.scene.IsValid()).ToArray();
+        var oldLightStates = oldLights.Select(l => l.enabled).ToArray();
+        var oldRenderers = Resources.FindObjectsOfTypeAll<Renderer>()
+            .Where(r => r != null && r.gameObject.scene.IsValid()).ToArray();
+        var oldRendererStates = oldRenderers.Select(r => r.enabled).ToArray();
         Camera context = null; RenderTexture rt = null; Scene scene = default;
         try {
             foreach (var c in oldMains) c.tag = "Untagged";
-            // Перевірений патерн UnityCppTenCapture: відкрити референсну сцену-заготовку
-            // (OpenPreviewScene НЕ робить її активною; SetActiveScene для прев'ю-сцени заборонений).
-            scene = EditorSceneManager.OpenPreviewScene("Assets/ForsakenWorld/ReferenceFire/ReferenceFirePreview.unity");
+            foreach (var l in oldLights) l.enabled = false;
+            foreach (var r in oldRenderers) r.enabled = false;
+            // A fresh regular scene supports skinning and scene lighting without
+            // reopening/closing a reference scene that the user may already have open.
+            scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            if (SceneManager.GetActiveScene() != scene && !SceneManager.SetActiveScene(scene))
+                throw new InvalidOperationException("Could not activate the isolated GFX capture scene.");
             foreach (var c in scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<Camera>(true))) {
                 if (c.CompareTag("MainCamera")) c.tag = "Untagged";
                 c.enabled = false;
             }
-            foreach (var l in scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<Light>(true))) l.enabled = false;
-            foreach (var p in scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<GfxPlayer>(true))) p.gameObject.SetActive(false);
+            foreach (var l in scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<Light>(true)))
+                l.enabled = false;
+            foreach (var p in scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<GfxPlayer>(true)))
+                p.gameObject.SetActive(false);
 
-            // Світло як у C++ preview: напрямлене біле (0,-1,-1) + ambient 0.8 (EC/Game покриття).
+            // Сцена активна, тому її ambient можна точно налаштувати для цього capture.
             var lightGo = new GameObject("Audit directional light");
             SceneManager.MoveGameObjectToScene(lightGo, scene);
             var light = lightGo.AddComponent<Light>();
@@ -98,6 +113,7 @@ public static class GfxCppUnityBatchCapture {
             SceneManager.MoveGameObjectToScene(go, scene);
             var cam = go.AddComponent<Camera>();
             cam.enabled = false; cam.scene = scene;
+            cam.overrideSceneCullingMask = EditorSceneManager.GetSceneCullingMask(scene);
             cam.orthographic = false; cam.fieldOfView = 65f; cam.aspect = 1f;
             cam.nearClipPlane = 0.2f; cam.farClipPlane = 2000f;
             cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = Color.black;
@@ -144,7 +160,13 @@ public static class GfxCppUnityBatchCapture {
             SceneManager.MoveGameObjectToScene(built.Root, scene);
             built.Root.transform.position = Vector3.zero;
             built.Root.transform.rotation = Quaternion.identity;
-            built.Root.transform.localScale = Vector3.one;
+            // BuildFromFile applies the file's DefaultScale, just as Angelica's
+            // GetActualScale does. Resetting it invalidates the comparison.
+            var importedScale = built.Root.transform.localScale;
+            foreach (var renderer in built.Root.GetComponentsInChildren<Renderer>(true)) {
+                renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+                renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            }
             foreach (var p in built.Root.GetComponentsInChildren<GfxPlayer>(true)) p.enabled = false;
             foreach (var ps in built.Root.GetComponentsInChildren<ParticleSystem>(true)) ps.Simulate(0, false, true, false);
             var player = built.Player;
@@ -153,6 +175,13 @@ public static class GfxCppUnityBatchCapture {
             var samples = new JArray();
             for (int frame = 0; frame < times.Count; frame++) {
                 player.TimeMs = times[frame]; player.Tick(0);
+                // Manual snapshots run synchronously, so invalidate the per-frame skinning cache after each seek.
+                foreach (var renderer in built.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true)) {
+                    if (renderer.enabled) {
+                        renderer.enabled = false;
+                        renderer.enabled = true;
+                    }
+                }
                 cam.Render();
                 var old = RenderTexture.active; RenderTexture.active = rt;
                 var tex = new Texture2D(512, 512, TextureFormat.RGB24, false);
@@ -165,14 +194,35 @@ public static class GfxCppUnityBatchCapture {
                 foreach (var d in built.Root.GetComponentsInChildren<GfxElementDriver>(true)) {
                     var ps = d.GetComponent<ParticleSystem>();
                     var mf = d.GetComponent<MeshFilter>();
-                    elements.Add(new JObject {
+                    var element = new JObject {
                         ["name"] = d.name,
                         ["keypoints"] = d.GetKeypoints().Count,
                         ["particles"] = ps == null ? -1 : ps.particleCount,
                         ["mesh_vertices"] = mf == null || mf.sharedMesh == null ? -1 : mf.sharedMesh.vertexCount,
                         ["mesh_area"] = mf == null ? -1f : Area(mf.sharedMesh),
                         ["active"] = d.gameObject.activeInHierarchy
-                    });
+                    };
+                    var model = d as GfxModelDriver;
+                    if (model != null) {
+                        element["model_path"] = model.Params.ModelPath;
+                        element["model_action"] = model.Params.ModelActName;
+                        element["model_loops"] = model.Params.ActionLoops;
+                        element["matched_clip"] = model.MatchedClipName;
+                        var animations = new JArray();
+                        foreach (var animation in model.GetComponentsInChildren<Animation>(true)) {
+                            foreach (AnimationState state in animation) {
+                                animations.Add(new JObject {
+                                    ["name"] = state.name,
+                                    ["time"] = state.time,
+                                    ["length"] = state.length,
+                                    ["enabled"] = state.enabled,
+                                    ["speed"] = state.speed
+                                });
+                            }
+                        }
+                        element["animation_states"] = animations;
+                    }
+                    elements.Add(element);
                 }
                 samples.Add(new JObject {
                     ["time_ms"] = times[frame],
@@ -192,6 +242,7 @@ public static class GfxCppUnityBatchCapture {
                 ["camera_position"] = JArray.FromObject(new[] { cam.transform.position.x, cam.transform.position.y, cam.transform.position.z }),
                 ["camera_euler"] = JArray.FromObject(new[] { cam.transform.eulerAngles.x, cam.transform.eulerAngles.y, cam.transform.eulerAngles.z }),
                 ["fov"] = cam.fieldOfView,
+                ["root_scale"] = JArray.FromObject(new[] { importedScale.x, importedScale.y, importedScale.z }),
                 ["times"] = JArray.FromObject(times),
                 ["warnings"] = JArray.FromObject(built.Warnings),
                 ["stubs"] = JArray.FromObject(built.StubbedIds),
@@ -204,8 +255,16 @@ public static class GfxCppUnityBatchCapture {
         } finally {
             if (context != null) UnityEngine.Object.DestroyImmediate(context.gameObject);
             foreach (var c in oldMains) if (c != null) c.tag = "MainCamera";
-            if (scene.IsValid()) EditorSceneManager.ClosePreviewScene(scene);
+            if (oldActiveScene.IsValid() && oldActiveScene.isLoaded)
+                SceneManager.SetActiveScene(oldActiveScene);
+            if (scene.IsValid()) EditorSceneManager.CloseScene(scene, true);
             if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
+            RenderSettings.ambientMode = oldAmbientMode;
+            RenderSettings.ambientLight = oldAmbientLight;
+            for (var i = 0; i < oldLights.Length; i++)
+                if (oldLights[i] != null) oldLights[i].enabled = oldLightStates[i];
+            for (var i = 0; i < oldRenderers.Length; i++)
+                if (oldRenderers[i] != null) oldRenderers[i].enabled = oldRendererStates[i];
         }
     }
 

@@ -7,6 +7,76 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxNativeTrailRegressionTests
     {
         [Test]
+        public void ThreeDimensionalParticleHasOrientedQuadGeometry()
+        {
+            var go = new GameObject("3d particle");
+            try
+            {
+                var d = go.AddComponent<GfxParticleDriver>();
+                d.Configure(new GfxParticleParams { Particle3D = true, Facing = false,
+                    Quota = 1, EmissionRate = 1, TTL = 1 }, Texture2D.whiteTexture, false, null, null, null);
+                var r = go.GetComponent<ParticleSystemRenderer>();
+                Assert.AreEqual(ParticleSystemRenderMode.Mesh, r.renderMode);
+                Assert.IsNotNull(r.mesh);
+                Assert.AreEqual(4, r.mesh.vertexCount);
+                Assert.AreEqual(6, r.mesh.triangles.Length);
+                Assert.That(r.mesh.bounds.size.x, Is.EqualTo(1).Within(.0001));
+                Assert.That(r.mesh.bounds.size.y, Is.EqualTo(1).Within(.0001));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void UnboundTrailKeepsWorldHistoryWhenParentMovesAndClearsOnRewind()
+        {
+            var root = new GameObject("moving emitter");
+            try
+            {
+                var child = new GameObject("trail"); child.transform.SetParent(root.transform, false);
+                var d = child.AddComponent<GfxSpeedTrailDriver>();
+                d.Configure(new GfxSpeedTrailParams { Bind = false, SegLife = 500,
+                    OrgPos1 = GfxMath.Vec3(0, -.1f, 0), OrgPos2 = GfxMath.Vec3(0, .1f, 0) },
+                    Texture2D.whiteTexture, false, null);
+                d.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1 } });d.IsEndless = true;
+                d.OnGfxTick(50, 1);
+                Assert.AreEqual(0, child.GetComponent<MeshFilter>().sharedMesh.vertexCount);
+                root.transform.position = Vector3.right;
+                d.OnGfxTick(100, 1);
+                var v = child.GetComponent<MeshFilter>().sharedMesh.vertices;
+                Assert.That(child.transform.TransformPoint(v[0]).x, Is.EqualTo(0).Within(.0001));
+                Assert.That(child.transform.TransformPoint(v[v.Length-1]).x, Is.EqualTo(1).Within(.0001));
+                d.OnGfxTick(25, 1);
+                Assert.AreEqual(0, child.GetComponent<MeshFilter>().sharedMesh.vertexCount);
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
+        [Test]
+        public void BillboardUsesNativeHalfExtentsWithoutEmitterPitchYaw()
+        {
+            var go = new GameObject("billboard");
+            try
+            {
+                var d = go.AddComponent<GfxParticleDriver>();
+                var p = new GfxParticleParams { SystemId = "120", Quota = 1, EmissionRate = 10,
+                    TTL = 2, EmitterEnabled = true, Particle3D = false, IsBind = false,
+                    ParticleWidth = .2f, ParticleHeight = .3f, ScaleMin = 1, ScaleMax = 1,
+                    Speed = 0, ColorMin = GfxMath.ColorWhite(), ColorMax = GfxMath.ColorWhite() };
+                d.Configure(p, Texture2D.whiteTexture, false, null, null, null);
+                d.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1,
+                    Dir = GfxMath.QuatFromAxisAngle(GfxMath.Vec3(1, 0, 0), 1.2f) } });
+                d.OnGfxTick(200, 1);
+                var ps = go.GetComponent<ParticleSystem>();var a = new ParticleSystem.Particle[4];
+                Assert.AreEqual(1, ps.GetParticles(a));
+                Assert.That(a[0].startSize3D.x, Is.EqualTo(.4f).Within(.0001));
+                Assert.That(a[0].startSize3D.y, Is.EqualTo(.6f).Within(.0001));
+                Assert.That(a[0].rotation3D.x, Is.EqualTo(0).Within(.0001));
+                Assert.That(a[0].rotation3D.y, Is.EqualTo(0).Within(.0001));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
         public void InfiniteTrailSamplesRecentMotionAndKeepsHeadOpaque()
         {
             var p = new GfxSpeedTrailParams { OrgPos1 = GfxMath.Vec3(0, -.1f, 0),

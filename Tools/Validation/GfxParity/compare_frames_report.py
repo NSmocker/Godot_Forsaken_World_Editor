@@ -242,8 +242,19 @@ def main() -> int:
         except Exception as ex:
             print(f"[{position + 1:3d}] FAIL {entry['id']}: {ex}", flush=True)
 
+    # comparison.json: об'єднуємо з попередніми прогонами (часткові запуски не втрачають дані).
+    merged = {}
+    existing = args.out_root / "comparison.json"
+    if existing.exists():
+        try:
+            for item in json.loads(existing.read_text(encoding="utf-8")):
+                merged[item["id"]] = item
+        except Exception:
+            pass
+    for item in all_metrics:
+        merged[item["id"]] = item
     (args.out_root / "comparison.json").write_text(
-        json.dumps(all_metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps([merged[k] for k in sorted(merged)], ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Оглядові листи: по 10 рядків (найкраща видима пара на ефект).
     page, rows_in_page = 0, []

@@ -280,5 +280,146 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(1f, y[1], 0.001f);
             Assert.AreEqual(0f, y[2], 0.001f);
         }
+
+        [Test]
+        public void BlendFactorsMapA3DBlendEnum()
+        {
+            // A3DTypes.h:178-194 (D3D9 BLEND enum) → UnityEngine.Rendering.BlendMode.
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.Zero, GfxBlendFactors.ToUnity(1, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.One, GfxBlendFactors.ToUnity(2, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.SrcColor, GfxBlendFactors.ToUnity(3, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.OneMinusSrcColor, GfxBlendFactors.ToUnity(4, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.SrcAlpha, GfxBlendFactors.ToUnity(5, UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, GfxBlendFactors.ToUnity(6, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.DstAlpha, GfxBlendFactors.ToUnity(7, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.OneMinusDstAlpha, GfxBlendFactors.ToUnity(8, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.DstColor, GfxBlendFactors.ToUnity(9, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.OneMinusDstColor, GfxBlendFactors.ToUnity(10, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            Assert.AreEqual(UnityEngine.Rendering.BlendMode.SrcAlphaSaturate, GfxBlendFactors.ToUnity(11, UnityEngine.Rendering.BlendMode.SrcAlpha));
+            // 无定宙水.gfx ID 160: SrcBlend: 5, DestBlend: 2 → (SrcAlpha, One) additive.
+        }
+
+        [Test]
+        public void BlendStateUsesRawA3DBlendFactors()
+        {
+            // A3DGFXModel.cpp:342-343 forwards the element's raw SrcBlend/DestBlend
+            // (A3DTypes.h:178-194) to the skin model; URP Lit `_Blend` is only a preset
+            // index (0=Alpha, 1=Premultiply, 2=Additive) and must not be used instead.
+            System.Func<Mesh> makeMesh = () =>
+            {
+                var m = new Mesh
+                {
+                    vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one },
+                    triangles = new[] { 0, 1, 2, 2, 1, 3 }
+                };
+                m.RecalculateBounds();
+                return m;
+            };
+            var go = new GameObject("host-blend");
+            var driver = go.AddComponent<GfxModelDriver>();
+            // Each Configure takes ownership and destroys the previous child (ClearModel).
+            var child = new GameObject("skinned");
+            child.AddComponent<SkinnedMeshRenderer>().sharedMesh = makeMesh();
+
+            var p = new GfxModelParams
+            {
+                ModelPath = "x.smd",
+                SrcBlend = 5,   // A3DBLEND_SRCALPHA (无定宙水.gfx ID 160)
+                DestBlend = 2,  // A3DBLEND_ONE — additive
+                WriteZ = false
+            };
+            driver.Configure(p, child, false, new List<string>());
+            var mat = child.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
+            Assert.IsNotNull(mat);
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.SrcAlpha, mat.GetFloat("_SrcBlend"), 0.001f);
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.One, mat.GetFloat("_DstBlend"), 0.001f);
+            Assert.AreEqual(0f, mat.GetFloat("_ZWrite"), 0.001f);
+
+            // DestBlend: 6 = A3DBLEND_INVSRCALPHA — the plain alpha blend of
+            // A3DGFXModel::Play (A3DGFXModel.cpp:324-326).
+            var child2 = new GameObject("skinned2");
+            child2.AddComponent<SkinnedMeshRenderer>().sharedMesh = makeMesh();
+            var pAlpha = new GfxModelParams
+            {
+                ModelPath = "x.smd",
+                SrcBlend = 5,
+                DestBlend = 6,
+                WriteZ = false
+            };
+            driver.Configure(pAlpha, child2, false, new List<string>());
+            mat = child2.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.SrcAlpha, mat.GetFloat("_SrcBlend"), 0.001f);
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, mat.GetFloat("_DstBlend"), 0.001f);
+        }
+
+        [Test]
+        public void SkinnedRendererUpdatesCullingBoundsEveryFrame()
+        {
+            // A3DGFXModel::Render (A3DGFXModel.cpp:188-197) registers the model without
+            // any frustum/bounds culling; Unity must not cull the animated pose by the
+            // static rest-pose bounds (e.g. 无定宙水 dive-down action).
+            var go = new GameObject("host-cull");
+            var driver = go.AddComponent<GfxModelDriver>();
+            var child = new GameObject("skinned");
+            var mesh = new Mesh
+            {
+                vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one },
+                triangles = new[] { 0, 1, 2, 2, 1, 3 }
+            };
+            mesh.RecalculateBounds();
+            child.AddComponent<SkinnedMeshRenderer>().sharedMesh = mesh;
+            Assert.IsFalse(child.GetComponent<SkinnedMeshRenderer>().updateWhenOffscreen);
+
+            var p = new GfxModelParams { ModelPath = "x.smd" };
+            driver.Configure(p, child, false, new List<string>());
+            Assert.IsTrue(child.GetComponent<SkinnedMeshRenderer>().updateWhenOffscreen);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CacheMaterialsPreservesEmissionKeyword(bool alphaCompare)
+        {
+            // AssembledUrpMaterialBuilder.ApplyLitMaterial enables `_EMISSION` for SKI
+            // materials with Emissive > 0 (A3DSkinModel adds material emissive to the
+            // lit color). CacheMaterials rebuilds materials and must carry the keyword
+            // over — without it emissive skins (e.g. 技能玄冰水龙 特效龙) render black
+            // and disappear under additive blending.
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+                Assert.Ignore("URP Lit not available in test environment.");
+            var src = new Material(shader);
+            src.EnableKeyword("_EMISSION");
+            src.EnableKeyword("_ALPHATEST_ON");
+            src.SetColor("_EmissionColor", new Color(0.573f, 0.984f, 1f, 1f));
+            var skinTexture = new Texture2D(2, 2);
+            src.SetTexture("_BaseMap", skinTexture);
+
+            var go = new GameObject("host-emission");
+            var driver = go.AddComponent<GfxModelDriver>();
+            var child = new GameObject("skinned");
+            var mesh = new Mesh
+            {
+                vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one },
+                triangles = new[] { 0, 1, 2, 2, 1, 3 }
+            };
+            mesh.RecalculateBounds();
+            child.AddComponent<SkinnedMeshRenderer>().sharedMesh = mesh;
+            child.GetComponent<SkinnedMeshRenderer>().sharedMaterial = src;
+
+            var p = new GfxModelParams { ModelPath = "x.smd", DestBlend = 2, WriteZ = false, AlphaCompare = alphaCompare };
+            driver.Configure(p, child, false, new List<string>());
+            var mat = child.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
+            Assert.IsTrue(mat.IsKeywordEnabled("_EMISSION"),
+                "material copy must preserve the _EMISSION keyword");
+            var e = mat.GetColor("_EmissionColor");
+            Assert.AreEqual(0.573f, e.r, 0.01f);
+            Assert.AreEqual(0.984f, e.g, 0.01f);
+            Assert.AreSame(skinTexture, mat.GetTexture("_EmissionMap"),
+                "Angelica modulates emissive lighting with the skin texture");
+            Assert.AreEqual(alphaCompare, mat.IsKeywordEnabled("_ALPHATEST_ON"),
+                "GFX AlphaCmp controls clipping independently of additive blending");
+            Assert.AreEqual(alphaCompare ? 1f : 0f, mat.GetFloat("_AlphaClip"));
+            Object.DestroyImmediate(skinTexture);
+        }
     }
 }

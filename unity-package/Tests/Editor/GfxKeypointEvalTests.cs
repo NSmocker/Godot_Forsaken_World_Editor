@@ -6,11 +6,11 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxKeypointEvalTests
     {
         [TestCase(-1f, 1, -1f)]
-        [TestCase(-3001f, 1, -1f)]
-        [TestCase(-3000f, 1, 0f)]
+        [TestCase(-3001f, 1, -3001f)]
+        [TestCase(-3000f, 1, -3000f)]
         [TestCase(-3001f, -1, -3001f)]
-        [TestCase(3001f, 1, 1f)]
-        [TestCase(3000f, 1, 0f)]
+        [TestCase(3001f, 1, 3001f)]
+        [TestCase(3000f, 1, 3000f)]
         public void ElementTimePreservesSignedSeek(float time, int repeats, float expected)
         {
             Assert.AreEqual(expected,

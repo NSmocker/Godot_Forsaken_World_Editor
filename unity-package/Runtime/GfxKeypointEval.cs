@@ -26,10 +26,9 @@ namespace SilverEcho.ForsakenWorld
                 return activeTimeMs;
 
             var tGlobal = activeTimeMs;
-            if (fRepeat >= 0f)
-                // GDScript fmod preserves the dividend's sign. A negative seek
-                // must stay before the local window instead of wrapping to its end.
-                tGlobal = activeTimeMs % Math.Max(0.001f, globalLoopTime);
+            // A3DGFXKeyPointSet::TickAnimation: повторюється власний keypoint set,
+            // а не весь файл за найдовшим сусіднім елементом. Після RepeatCount
+            // завершений ефект не починається знову через globalLoopTime.
 
             var sinceStart = tGlobal - localStart;
             if (sinceStart < 0f)
