@@ -25,10 +25,10 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private int gridW;
         [SerializeField] private int gridH;
 
-        private GfxGridParams cachedParams;
+        [SerializeField, HideInInspector] private GfxGridParams cachedParams;
         private MeshFilter meshFilter;
         private MeshRenderer meshRenderer;
-        private Mesh runtimeMesh;
+        [NonSerialized] private Mesh runtimeMesh;
         private Material runtimeMaterial;
 
         public GfxGridParams Params => cachedParams;
@@ -84,6 +84,7 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            EnsureComponents();
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;

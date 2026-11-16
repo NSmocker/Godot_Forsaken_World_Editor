@@ -23,6 +23,7 @@ namespace SilverEcho.ForsakenWorld
         private Mesh runtimeMesh;
         private GfxSpeedTrailParams cachedParams;
         private bool header2dRender;
+        private readonly GfxTrailHistory history = new GfxTrailHistory();
 
         public GfxSpeedTrailParams Params =>
             cachedParams ?? (cachedParams = paramsSerial.ToParams());
@@ -80,7 +81,7 @@ namespace SilverEcho.ForsakenWorld
                 TimeMs = gfxTimeMs;
 
             var active = TimeManual ? TimeMs : gfxTimeMs;
-            var elementTime = GfxKeypointEval.ElementTime(
+            var elementTime = IsEndless ? active : GfxKeypointEval.ElementTime(
                 active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
                 RepeatCount, RepeatDelay);
 
@@ -97,13 +98,17 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
-            var data = GfxSpeedTrailRibbon.Build(
-                Params, GetKeypoints(), LocalStartTime, LocalTotalTime,
-                elementTime, alpha);
+            var keypoints = GetKeypoints();
+            var state = GfxKeypointEval.Evaluate(keypoints, span);
+            int keyIndex = 0; float remaining = span;
+            while (keyIndex + 1 < keypoints.Count && keypoints[keyIndex].TimeSpan >= 0 && remaining >= keypoints[keyIndex].TimeSpan)
+            { remaining -= keypoints[keyIndex].TimeSpan; keyIndex++; }
+            var parent = transform.parent != null ? transform.parent.localToWorldMatrix : Matrix4x4.identity;
+            var data = history.Tick(Params, state, span, alpha, parent, keyIndex);
             ApplyMesh(data);
 
             if (runtimeMaterial != null && runtimeMaterial.HasProperty("_GfxAlpha"))
-                runtimeMaterial.SetFloat("_GfxAlpha", alpha);
+                runtimeMaterial.SetFloat("_GfxAlpha", 1f);
 
             // Priority Z-fighting nudge like create_id_110 face_dir * index * 0.001
             var kps = GetKeypoints();
@@ -115,8 +120,7 @@ namespace SilverEcho.ForsakenWorld
                 face = GfxMath.Vec3(0f, 0f, 1f);
             else
                 face = GfxMath.Normalize3(face);
-            var zOff = GfxMath.Scale3(face, Params.ElementIndex * 0.001f);
-            transform.localPosition = new Vector3(zOff[0], zOff[1], zOff[2]);
+            transform.localPosition = Vector3.zero;
         }
 
         protected override void ApplyState(GfxKeypointState state)
@@ -201,6 +205,7 @@ namespace SilverEcho.ForsakenWorld
         public float SpeedVel = 1f;
         public bool Bind = true;
         public bool Spline;
+        public int SplineMode;
         public int TexRow = 1;
         public int TexCol = 1;
         public float TexInterval = 50f;
@@ -234,6 +239,7 @@ namespace SilverEcho.ForsakenWorld
                 SpeedVel = SpeedVel,
                 Bind = Bind,
                 Spline = Spline,
+                SplineMode = SplineMode,
                 TexRow = TexRow,
                 TexCol = TexCol,
                 TexInterval = TexInterval,
@@ -273,6 +279,7 @@ namespace SilverEcho.ForsakenWorld
                 SpeedVel = p.SpeedVel,
                 Bind = p.Bind,
                 Spline = p.Spline,
+                SplineMode = p.SplineMode,
                 TexRow = p.TexRow,
                 TexCol = p.TexCol,
                 TexInterval = p.TexInterval,

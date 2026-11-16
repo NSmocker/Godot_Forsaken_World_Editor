@@ -12,6 +12,7 @@ Shader "Forsaken World/Angelica Gfx Trail"
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 5
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 10
         _ZWrite ("ZWrite", Float) = 0
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest ("ZTest", Float) = 4
     }
     SubShader
     {
@@ -28,6 +29,7 @@ Shader "Forsaken World/Angelica Gfx Trail"
             Tags { "LightMode"="SRPDefaultUnlit" }
             Cull Off
             ZWrite [_ZWrite]
+            ZTest [_ZTest]
             Blend [_SrcBlend] [_DstBlend]
             HLSLPROGRAM
             #pragma target 3.0

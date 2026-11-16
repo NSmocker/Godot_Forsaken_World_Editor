@@ -70,7 +70,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 throw new ArgumentNullException(nameof(document));
 
             var plan = GfxRuntimePlanner.Build(document, nodeName, sourcePath);
-            return Build(plan, index);
+            var result = Build(plan, index);
+            for (var i = 0; i < document.Elements.Count; i++)
+                result.Root.transform.GetChild(i).GetComponent<GfxElementDriver>()
+                    .SetAnimationSource(document.Elements[i]);
+            result.Player.Tick(0f);
+            return result;
         }
 
         public static BuildResult Build(GfxRuntimePlan plan, GameDataIndex index = null)
@@ -103,6 +108,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 : null;
             PrefetchPlanAssets(plan, index, texResolver);
 
+            var elementDrivers = new List<GfxElementDriver>();
             foreach (var el in plan.Elements)
             {
                 var elementGo = new GameObject(Sanitize(el.Name));
@@ -196,11 +202,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                 driver.RepeatDelay = el.RepeatDelay;
                 driver.IsEndless = el.IsEndless;
                 driver.SetKeypoints(el.Keypoints);
+                if (el.SourceElement != null)
+                    driver.SetAnimationSource(el.SourceElement);
                 driver.TimeManual = true;
 
                 SpawnCtrlGroup("Affector", el.Affectors, elementGo);
                 SpawnCtrlGroup("CtrlMethod", el.ControlMethods, elementGo);
+                elementDrivers.Add(driver);
             }
+
+            ResolveBindEle(plan, elementDrivers, result);
 
             player.MarkHierarchyDirty();
             // Seed loop length from plan elements.
@@ -217,6 +228,54 @@ namespace SilverEcho.ForsakenWorld.Editor
             result.Root = root;
             result.Player = player;
             return result;
+        }
+
+        /// <summary>
+        /// BindEle resolution (create_id_100/101.gd:591–677): a 100/101 element
+        /// synchronises with the FIRST header child whose parsed "Name" equals
+        /// BindEle — document order, no self-exclusion, first match wins. Only
+        /// IDs with a Godot element script exist as nodes, and driver.ElementName
+        /// is empty for the rest, so matching ElementName reproduces that rule.
+        /// The bound clock starts at the target's element StartTime; Godot's
+        /// KeyPoint_0 TimeSpan/RepeatCount lookups always miss (gfx_parser stores
+        /// _keypoints), which is why no target loop time is read here.
+        /// </summary>
+        private static void ResolveBindEle(
+            GfxRuntimePlan plan,
+            IList<GfxElementDriver> drivers,
+            BuildResult result)
+        {
+            for (var i = 0; i < plan.Elements.Count; i++)
+            {
+                var el = plan.Elements[i];
+                if (el.SystemId != "100" && el.SystemId != "101" && !(drivers[i] is GfxParticleDriver))
+                    continue;
+
+                var bind = GfxPropertyValues.Get(el.Properties, "BindEle", string.Empty);
+                if (string.IsNullOrEmpty(bind))
+                    continue;
+
+                var found = false;
+                for (var j = 0; j < drivers.Count; j++)
+                {
+                    var target = drivers[j];
+                    if (target == null || target.ElementName != bind)
+                        continue;
+                    drivers[i].SetBindEle(
+                        GfxPropertyValues.Float(
+                            plan.Elements[j].Properties, "StartTime", 0f));
+                    drivers[i].SetBoundTransformTarget(target);
+                    if (drivers[i] is GfxParticleDriver particle)
+                        particle.SetBindEleTarget(target, GfxPropertyValues.Float(plan.Elements[j].Properties, "StartTime", 0f));
+                    found = true;
+                    break;
+                }
+
+                if (!found)
+                    result.Warnings.Add(
+                        "GFX element ID " + el.SystemId + " BindEle '" + bind +
+                        "' not found; element runs unbound.");
+            }
         }
 
         private static GfxElementDriver AttachSprite(
@@ -283,7 +342,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             var particle = elementGo.AddComponent<GfxParticleDriver>();
             var particleParams = GfxParticleParams.FromProperties(
                 el.Properties, el.SystemId, el.Index);
-            particleParams.RandomSeed = GfxMath.GodotNodeSeed(el.Name);
+            particleParams.RandomSeed = GfxMath.GodotNodeSeed(
+                string.IsNullOrEmpty(el.GodotNodeName) ? el.Name : el.GodotNodeName);
 
             // Emitter-owned CtrlMethods (125 curve) that were not consumed into keypoints.
             var emitterExtra = new List<GfxCtrlSpec>();

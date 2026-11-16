@@ -155,6 +155,13 @@ namespace SilverEcho.ForsakenWorld
         public int PoolSize => _p.PoolSize;
 
         /// <summary>
+        /// Optional BindEle emitter source (GFX-00001, ID120-125 BindEle): returns
+        /// the bound element's emitter pose at a shared GFX active time in ms, or
+        /// null when unbound. Wired by GfxParticleDriver; the sim stays Unity-free.
+        /// </summary>
+        public Func<float, GfxParticleEmitterState> BindEleSampler { get; set; }
+
+        /// <summary>
         /// Active particles at header time <paramref name="activeTimeMs"/> with
         /// element timing fields (mirrors gfx_particle_eval.particles).
         /// </summary>
@@ -188,6 +195,7 @@ namespace SilverEcho.ForsakenWorld
                 emitted = Math.Min(emitted, _p.Quota);
             var eLast = emitted - 1f;
             var en = EmitterState(tNow);
+            var boundNow = BindEleSampler != null ? BindEleSampler(activeTimeMs) : null;
             for (var slot = 0; slot < pool; slot++)
             {
                 if (eLast < slot)
@@ -197,14 +205,21 @@ namespace SilverEcho.ForsakenWorld
                 var age = tNow - tEmit;
                 if (age < 0f || age >= ttl)
                     continue;
-                var p = Eval(eIdx, age, tEmit, tNow, en);
+                // BindEle pose at the particle's own birth time (stateless sim:
+                // birth active time = now minus age), so particles born while the
+                // bound element moved start where it was then.
+                var boundBirth = BindEleSampler != null
+                    ? BindEleSampler(activeTimeMs - age * 1000f)
+                    : null;
+                var p = Eval(eIdx, age, tEmit, tNow, en, boundBirth, boundNow);
                 p.Alive = true;
                 p.EIdx = eIdx;
                 p.Age = age;
                 if (_p.Facing)
                 {
                     var agePrev = Math.Max(0f, age - 0.02f);
-                    var o = Eval(eIdx, agePrev, tEmit, tEmit + agePrev, null);
+                    var o = Eval(eIdx, agePrev, tEmit, tEmit + agePrev, null,
+                        boundBirth, boundBirth);
                     var md = GfxMath.Sub3(p.Pos, o.Pos);
                     p.Move = GfxMath.Length3(md) > 0.000001f ? md : p.Move;
                 }
@@ -391,7 +406,8 @@ namespace SilverEcho.ForsakenWorld
         }
 
         public GfxParticleSlot Eval(
-            float eIdx, float age, float tEmit, float tNow, GfxParticleEmitterState en)
+            float eIdx, float age, float tEmit, float tNow, GfxParticleEmitterState en,
+            GfxParticleEmitterState boundBirth = null, GfxParticleEmitterState boundNow = null)
         {
             var ee = EmitterState(tEmit);
             if (en == null)
@@ -402,6 +418,23 @@ namespace SilverEcho.ForsakenWorld
             var eeScale = ee.Scale;
             var eeWorld = scaleNoOff ? ee.Pos : GfxMath.Scale3(ee.Pos, eeScale);
             var enWorld = scaleNoOff ? en.Pos : GfxMath.Scale3(en.Pos, en.Scale);
+            var enRot = en.Rot;
+            var enScaleEff = en.Scale;
+            var enPosEff = en.Pos;
+            if (boundBirth != null)
+            {
+                // A3DGFXElement::GetCurKeyPoint замінює тільки Pos/Dir.
+                // A3DParticleSystemEx::TickAnimation застосовує власний kp scale.
+                eeWorld = scaleNoOff ? boundBirth.Pos : GfxMath.Scale3(boundBirth.Pos, eeScale);
+                eeRot = boundBirth.Rot;
+            }
+            if (boundNow != null)
+            {
+                enPosEff = boundNow.Pos;
+                enWorld = scaleNoOff ? enPosEff : GfxMath.Scale3(enPosEff, enScaleEff);
+                enRot = boundNow.Rot;
+            }
+
             var parDir = GfxMath.MulQuat(eeRot, _p.ParIniDirQuat);
 
             float[] pRel, moveDir, pRot;
@@ -567,15 +600,14 @@ namespace SilverEcho.ForsakenWorld
             float[] wPos;
             float[] wMove;
             float[] rot;
-            var enScale = en.Scale;
             if (isBind)
             {
-                var bindRot = GfxMath.MulQuat(en.Rot, GfxMath.QuatFromAxisAngle(AxisZ, en.Rad));
+                var bindRot = GfxMath.MulQuat(enRot, GfxMath.QuatFromAxisAngle(AxisZ, en.Rad));
                 if (scaleNoOff)
-                    wPos = GfxMath.Add3(GfxMath.RotateVec3(bindRot, GfxMath.Scale3(pLocal, enScale)), en.Pos);
+                    wPos = GfxMath.Add3(GfxMath.RotateVec3(bindRot, GfxMath.Scale3(pLocal, enScaleEff)), enPosEff);
                 else
                     wPos = GfxMath.Scale3(
-                        GfxMath.Add3(GfxMath.RotateVec3(bindRot, pLocal), en.Pos), enScale);
+                        GfxMath.Add3(GfxMath.RotateVec3(bindRot, pLocal), enPosEff), enScaleEff);
                 wMove = GfxMath.RotateVec3(bindRot, moveDir);
                 rot = GfxMath.MulQuat(bindRot, q3);
             }
@@ -602,7 +634,7 @@ namespace SilverEcho.ForsakenWorld
                 Rot = rot,
                 Size = pSize + pNoise,
                 Color = pCol,
-                KeyScale = enScale,
+                KeyScale = enScaleEff,
                 KeyAlpha = en.Alpha,
                 Bind = isBind
             };

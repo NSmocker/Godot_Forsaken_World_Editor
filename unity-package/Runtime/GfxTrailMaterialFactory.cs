@@ -49,7 +49,13 @@ namespace SilverEcho.ForsakenWorld
 
             var zTest = zEnable && !gfx2dRender;
             if (mat.HasProperty("_ZWrite"))
-                mat.SetFloat("_ZWrite", zTest ? 1f : 0f);
+                mat.SetFloat("_ZWrite", 0f);
+            // A3DGFXRenderSlot.cpp:573: прозорі GFX не записують глибину.
+            // ZEnable керує перевіркою, а не записом у depth buffer.
+            if (mat.HasProperty("_ZTest"))
+                mat.SetFloat("_ZTest", zTest
+                    ? (float)CompareFunction.LessEqual
+                    : (float)CompareFunction.Always);
 
             if (texture != null)
             {

@@ -102,8 +102,8 @@ namespace SilverEcho.ForsakenWorld
                     spec.HasVelocity = true;
                     break;
                 case 105:
-                    // Godot ColorDelta stores "R,G,B,A" string — use ParseVec3-like for 4 floats,
-                    // or ARGB int. Prefer comma RGBA floats; fallback ARGB.
+                    // Comma RGBA deltas use byte units, including signed values.
+                    // Normalize without clamping; packed ARGB is already normalized.
                     {
                         var rawDelta = GfxPropertyValues.Get(raw, "ColorDelta", null);
                         if (!string.IsNullOrEmpty(rawDelta) && rawDelta.IndexOf(',') >= 0)
@@ -113,10 +113,10 @@ namespace SilverEcho.ForsakenWorld
                             {
                                 spec.ColorDelta = new[]
                                 {
-                                    GfxPropertyValues.ParseFloat(parts[0]),
-                                    GfxPropertyValues.ParseFloat(parts[1]),
-                                    GfxPropertyValues.ParseFloat(parts[2]),
-                                    GfxPropertyValues.ParseFloat(parts[3])
+                                    GfxPropertyValues.ParseFloat(parts[0]) / 255f,
+                                    GfxPropertyValues.ParseFloat(parts[1]) / 255f,
+                                    GfxPropertyValues.ParseFloat(parts[2]) / 255f,
+                                    GfxPropertyValues.ParseFloat(parts[3]) / 255f
                                 };
                             }
                         }
@@ -139,8 +139,8 @@ namespace SilverEcho.ForsakenWorld
                     spec.BaseColor = GfxPropertyValues.ArgbColor(raw, "BaseColor");
                     spec.Amplitude = GfxPropertyValues.Float(raw, "Amplitude");
                     spec.WaveLen = GfxPropertyValues.Float(raw, "WaveLen", 1f);
-                    spec.Persistence = GfxPropertyValues.Float(raw, "Persistence", 0.25f);
-                    spec.Octaves = GfxPropertyValues.Int(raw, "OctaveNum", 5);
+                    spec.Persistence = GfxPropertyValues.Float(raw, "Persistence", 0.5f);
+                    spec.Octaves = GfxPropertyValues.Int(raw, "OctaveNum", 1);
                     break;
                 case 108:
                 {
@@ -180,9 +180,10 @@ namespace SilverEcho.ForsakenWorld
                         verts.Add(GfxPropertyValues.Vec3(raw, key));
                     }
 
+                    spec.CurveVertices = verts.ToArray();
                     spec.CurvePath = GfxCurvePath.GenPath(verts);
-                    if (spec.CurvePath == null)
-                        return null;
+                    // Even an empty path suppresses sprite Ctrl100/104 at this
+                    // keypoint base; CPU callers still ignore a null CurvePath.
                     spec.CalcDir = GfxPropertyValues.Bool(raw, "CalcDir");
                     break;
                 }

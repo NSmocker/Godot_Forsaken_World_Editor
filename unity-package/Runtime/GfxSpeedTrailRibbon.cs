@@ -45,47 +45,24 @@ namespace SilverEcho.ForsakenWorld
             var colors = new float[vertCount * 4];
             var tris = new int[segs * 6];
 
-            var activeDurMs = Math.Max(0.001f, localTotalMs - localStartMs);
-            var activeDurSec = activeDurMs * 0.001f;
             var currentTSec = Math.Max(0f, (elementTimeMs - localStartMs) * 0.001f);
             var segLifeSec = Math.Max(0.001f, p.SegLife / 1000f);
             var fadeSec = Math.Max(0.001f, p.FadeLength * segLifeSec);
             var headT = currentTSec;
             var tailT = currentTSec - segLifeSec;
+            // Семплюємо живий хвіст, а не всю тривалість GFX. Для TimeSpan=-1
+            // LocalTotal == LocalStart: старий розрахунок згортав рух у 1 мкс.
+            var sampleStart = Math.Max(0f, tailT);
+            var sampleEnd = currentTSec;
 
             var org1 = p.OrgPos1 ?? GfxMath.Vec3Zero();
             var org2 = p.OrgPos2 ?? GfxMath.Vec3Zero();
-            var hasOrg = GfxMath.Length3(org1) > 0.001f || GfxMath.Length3(org2) > 0.001f;
-            // Godot: p1 = OrgPos2.zyx; p2 = OrgPos1.zyx
-            var edgeA = hasOrg
-                ? GfxMath.Vec3(org2[2], org2[1], org2[0])
-                : GfxMath.Vec3(0f, 0.5f, 0f);
-            var edgeB = hasOrg
-                ? GfxMath.Vec3(org1[2], org1[1], org1[0])
-                : GfxMath.Vec3(0f, -0.5f, 0f);
+            // A3DTrail::AddTrailSeg: масштаб змінює відстань між краями,
+            // а не центр OrgPos. Обертання застосовується для кожного семпла.
+            var edgeCenter = GfxMath.Scale3(GfxMath.Add3(org1, org2), 0.5f);
+            var edgeHalf = GfxMath.Scale3(GfxMath.Sub3(org2, org1), 0.5f);
 
-            var qBase = GfxMath.Quat(0.5f, 0.5f, 0.5f, 0.5f);
-            float[] kp0Dir = GfxMath.QuatIdentity();
-            var kp0Scale = 1f;
-            if (keypoints != null && keypoints.Count > 0)
-            {
-                kp0Dir = GfxMath.Clone4(keypoints[0].Dir);
-                kp0Scale = keypoints[0].Scale;
-                if (GfxMath.Length3(new[] { kp0Dir[0], kp0Dir[1], kp0Dir[2] }) < 0.001f)
-                    kp0Dir = GfxMath.Quat(0.707106f, 0f, 0f, 0.707106f);
-            }
-            else
-            {
-                kp0Dir = GfxMath.Quat(0.707106f, 0f, 0f, 0.707106f);
-            }
-
-            // Pre-rotate edges by q_base then KP0 direction (constant along strip).
-            edgeA = GfxMath.RotateVec3(qBase, edgeA);
-            edgeB = GfxMath.RotateVec3(qBase, edgeB);
-            edgeA = GfxMath.RotateVec3(kp0Dir, edgeA);
-            edgeB = GfxMath.RotateVec3(kp0Dir, edgeB);
-
-            var mixScale = p.MixAlphaScale;
+            var mixScale = 1f;
             var alphaMul = GfxMath.Clamp(gfxAlpha, 0f, 1f) * mixScale;
 
             // Sheet/tile applied after mapped UV (create_id_110 fragment).
@@ -94,7 +71,7 @@ namespace SilverEcho.ForsakenWorld
             for (var i = 0; i <= segs; i++)
             {
                 var u = i / (float)segs;
-                var birthSec = u * activeDurSec;
+                var birthSec = sampleStart + u * (sampleEnd - sampleStart);
                 var spanMs = birthSec * 1000f;
                 GfxKeypointState state;
                 if (keypoints != null && keypoints.Count > 0)
@@ -102,40 +79,23 @@ namespace SilverEcho.ForsakenWorld
                 else
                     state = new GfxKeypointState();
 
-                var mask = Smoothstep(tailT, tailT + fadeSec, birthSec) *
-                           Smoothstep(headT, headT - fadeSec, birthSec);
-                var mappedU = GfxMath.Clamp((birthSec - tailT) / segLifeSec, 0f, 1f);
-
-                // Godot dynamic_width = 1 + ctrl_scale_offset; Evaluate scale is absolute.
-                var dynW = Math.Max(0.01f, state.Scale);
+                var portion = GfxMath.Clamp((birthSec - tailT) / segLifeSec, 0f, 1f);
+                var mappedU = portion;
                 var center = state.Pos ?? GfxMath.Vec3Zero();
                 var col = state.Color ?? GfxMath.ColorWhite();
 
                 for (var side = 0; side < 2; side++)
                 {
                     var vi = i * 2 + side;
-                    var edge = side == 0 ? edgeA : edgeB;
-                    // UV.y = side (0 or 1) → mix edges; Godot mix(p1,p2,UV.y)
+                    var half = GfxMath.Scale3(edgeHalf, state.Scale);
                     var local = side == 0
-                        ? GfxMath.Scale3(edgeA, dynW)
-                        : GfxMath.Scale3(edgeB, dynW);
-                    if (hasOrg && side == 0)
-                    {
-                        // already edgeA
-                    }
-                    else if (hasOrg && side == 1)
-                    {
-                        // already edgeB
-                    }
-                    else if (!hasOrg)
-                    {
-                        // Fallback plane: y = (0.5 - UV.y) * dynW, z unused along length
-                        local = GfxMath.Vec3(0f, (0.5f - side) * dynW, 0f);
-                        local = GfxMath.RotateVec3(qBase, local);
-                        local = GfxMath.RotateVec3(kp0Dir, local);
-                    }
-
-                    var vert = GfxMath.Scale3(GfxMath.Add3(center, local), kp0Scale);
+                        ? GfxMath.Sub3(edgeCenter, half)
+                        : GfxMath.Add3(edgeCenter, half);
+                    var rotation = state.Dir ?? GfxMath.QuatIdentity();
+                    if (state.Rad != 0f)
+                        local = GfxMath.RotateVec3(
+                            GfxMath.QuatFromAxisAngle(GfxMath.Vec3(0f, 0f, 1f), state.Rad), local);
+                    var vert = GfxMath.Add3(center, GfxMath.RotateVec3(rotation, local));
                     positions[vi * 3] = vert[0];
                     positions[vi * 3 + 1] = vert[1];
                     positions[vi * 3 + 2] = vert[2];
@@ -160,7 +120,7 @@ namespace SilverEcho.ForsakenWorld
                     uvs[vi * 2] = fu;
                     uvs[vi * 2 + 1] = fv;
 
-                    var a = GfxMath.Clamp(col[3] * mask * alphaMul, 0f, 1f);
+                    var a = GfxMath.Clamp(col[3] * portion * alphaMul, 0f, 1f);
                     colors[vi * 4] = col[0];
                     colors[vi * 4 + 1] = col[1];
                     colors[vi * 4 + 2] = col[2];

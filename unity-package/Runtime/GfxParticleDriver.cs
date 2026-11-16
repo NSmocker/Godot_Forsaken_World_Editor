@@ -22,14 +22,25 @@ namespace SilverEcho.ForsakenWorld
         private ParticleSystem particleSystem;
         private ParticleSystemRenderer particleRenderer;
         private Material runtimeMaterial;
+        private MaterialPropertyBlock propertyBlock;
         private GfxParticleParams cachedParams;
         private GfxParticleSim sim;
+        private GfxSpriteParams uvParams;
         private ParticleSystem.Particle[] particleBuffer;
         private GfxDummyParticlesDriver dummyDriver;
         private bool dummyActive;
         private List<GfxCtrlSpec> affectors = new List<GfxCtrlSpec>();
         private List<GfxCtrlSpec> extraEmitterCtrls = new List<GfxCtrlSpec>();
         private bool header2dRender;
+
+        // BindEle emitter binding (GFX-00001, ID120-125 BindEle). The component
+        // reference survives scene/prefab serialization; the target name and
+        // start time are primitives, so the binding is restorable by name even
+        // after a reload that drops the reference.
+        [SerializeField] private GfxElementDriver bindEleTarget;
+        [SerializeField] private string bindEleTargetName = string.Empty;
+        [SerializeField] private float bindEleTargetStartMs;
+        [SerializeField] private bool bindEleConfigured;
 
         public GfxParticleParams Params =>
             cachedParams ?? (cachedParams = paramsSerial.ToParams());
@@ -71,6 +82,7 @@ namespace SilverEcho.ForsakenWorld
             if (runtimeMaterial.HasProperty("_MixAlphaScale"))
                 runtimeMaterial.SetFloat("_MixAlphaScale", particleParams.MixAlphaScale);
             particleRenderer.sharedMaterial = runtimeMaterial;
+            particleRenderer.SetPropertyBlock(null);
             particleRenderer.shadowCastingMode = ShadowCastingMode.Off;
             particleRenderer.receiveShadows = false;
 
@@ -132,6 +144,46 @@ namespace SilverEcho.ForsakenWorld
             ApplySlots(Array.Empty<GfxParticleSlot>());
         }
 
+        /// <summary>
+        /// BindEle emitter binding for ID120-125 (GFX-00001: 符文阵效果2改.gfx ID123
+        /// particles bound to ID110 trails). The emitter origin follows
+        /// <paramref name="target"/>'s pose, sampled per particle at its birth
+        /// time; particles with IsBind=0 then keep their birth position, while
+        /// the element's own emitter transforms still apply on top. Call after
+        /// all drivers exist (SceneBuilder ResolveBindEle pass).
+        /// <paramref name="targetStartMs"/> is the target element's StartTime in
+        /// ms (Godot b_start): the target pose before that time is identity.
+        /// </summary>
+        public void SetBindEleTarget(GfxElementDriver target, float targetStartMs)
+        {
+            bindEleTarget = target;
+            bindEleTargetName = target != null ? target.ElementName : string.Empty;
+            bindEleTargetStartMs = targetStartMs;
+            bindEleConfigured = target != null;
+            if (sim != null)
+                sim.BindEleSampler = BindEleSampler;
+        }
+
+        /// <summary>Removes the BindEle emitter binding.</summary>
+        public void ClearBindEleTarget()
+        {
+            bindEleTarget = null;
+            bindEleTargetName = string.Empty;
+            bindEleTargetStartMs = 0f;
+            bindEleConfigured = false;
+            if (sim != null)
+                sim.BindEleSampler = null;
+        }
+
+        /// <summary>Live BindEle target, lazily re-resolved by serialized name.</summary>
+        public GfxElementDriver BindEleTarget => ResolveBindEleTarget();
+
+        /// <summary>True once SetBindEleTarget was called with a target.</summary>
+        public bool BindEleTargetActive => bindEleConfigured;
+
+        /// <summary>Target element StartTime in ms (Godot b_start).</summary>
+        public float BindEleTargetStartMs => bindEleTargetStartMs;
+
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
             GfxAlpha = alpha;
@@ -140,7 +192,22 @@ namespace SilverEcho.ForsakenWorld
 
             var active = TimeManual ? TimeMs : gfxTimeMs;
             if (sim == null)
+            {
+                EnsureComponents();
+                var source = RestoreAnimationSource();
+                if (source != null)
+                {
+                    affectors = source.Affectors.ConvertAll(GfxKeypointBuilder.FromDictionary);
+                    extraEmitterCtrls = source.ControlMethods.ConvertAll(GfxKeypointBuilder.FromDictionary)
+                        .FindAll(c => c != null && c.Type == 110);
+                }
+                runtimeMaterial = particleRenderer.sharedMaterial;
                 RebuildSim();
+                ConfigureShuriken();
+                dummyActive = !string.IsNullOrEmpty(Params.DummyEle);
+                if (dummyActive)
+                    EnsureDummyDriver(Params.DummyEle, Math.Max(1, Params.PoolSize), null);
+            }
 
             var slots = sim.Simulate(
                 active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
@@ -175,8 +242,21 @@ namespace SilverEcho.ForsakenWorld
             {
                 ApplySlots(slots);
             }
-            if (runtimeMaterial != null && runtimeMaterial.HasProperty("_GfxAlpha"))
-                runtimeMaterial.SetFloat("_GfxAlpha", alpha);
+            if (runtimeMaterial != null)
+            {
+                if (propertyBlock == null) propertyBlock = new MaterialPropertyBlock();
+                particleRenderer.GetPropertyBlock(propertyBlock);
+                // Per-particle alpha already contains the header alpha.
+                if (runtimeMaterial.HasProperty("_GfxAlpha")) propertyBlock.SetFloat("_GfxAlpha", 1f);
+                if (!Params.IsUseParUV && !Params.InitRandomTexture && runtimeMaterial.HasProperty("_UvRect"))
+                {
+                    var uv = GfxSpriteUvEval.Evaluate(uvParams, elementTime);
+                    if (runtimeMaterial.HasProperty("_UvExchange"))
+                        propertyBlock.SetFloat("_UvExchange", uv.Exchange ? 1f : 0f);
+                    propertyBlock.SetVector("_UvRect", new Vector4(uv.ScaleU, uv.ScaleV, uv.OffsetU, uv.OffsetV));
+                }
+                particleRenderer.SetPropertyBlock(propertyBlock);
+            }
         }
 
 
@@ -209,9 +289,79 @@ namespace SilverEcho.ForsakenWorld
 
         private void RebuildSim()
         {
+            uvParams = new GfxSpriteParams {
+                TexCol = Params.TexCol, TexRow = Params.TexRow, TexInterval = Params.TexInterval,
+                TileMode = Params.TileMode, TexSpeed1 = Params.TexSpeed1, TexSpeed2 = Params.TexSpeed2,
+                UReverse = Params.UReverse, VReverse = Params.VReverse, UvExchange = Params.UvExchange
+            };
             sim = new GfxParticleSim(Params, GetKeypoints(), affectors, extraEmitterCtrls);
+            sim.BindEleSampler = BindEleSampler;
             var pool = Math.Max(1, Params.PoolSize);
             particleBuffer = new ParticleSystem.Particle[pool];
+        }
+
+        private Func<float, GfxParticleEmitterState> BindEleSampler
+        {
+            get
+            {
+                if (!bindEleConfigured)
+                    return null;
+                return SampleBindElePose;
+            }
+        }
+
+        /// <summary>
+        /// BindEle emitter pose at a shared GFX active time (ms): the same
+        /// keypoint evaluation GfxElementDriver.OnGfxTick applies to the target
+        /// node's transform, with the target StartTime recorded at bind time as
+        /// the span base. Before that start (or while the target has no
+        /// keypoints) the pose is identity, matching the untouched target node;
+        /// Rad_2D is not composed because ApplyState does not apply it either.
+        /// </summary>
+        private GfxParticleEmitterState SampleBindElePose(float activeTimeMs)
+        {
+            var target = ResolveBindEleTarget();
+            if (target == null)
+                return null;
+            var kps = target.GetKeypoints();
+            if (kps == null || kps.Count == 0)
+                return new GfxParticleEmitterState();
+            var elementTime = target.IsEndless ? activeTimeMs : GfxKeypointEval.ElementTime(
+                activeTimeMs, target.GlobalLoopTime, bindEleTargetStartMs,
+                target.LocalTotalTime, target.RepeatCount, target.RepeatDelay);
+            var span = elementTime - bindEleTargetStartMs;
+            if (span < 0f)
+                return new GfxParticleEmitterState();
+            var state = GfxKeypointEval.Evaluate(kps, span);
+            return new GfxParticleEmitterState
+            {
+                Pos = GfxMath.Clone3(state.Pos),
+                Rot = GfxMath.Clone4(state.Dir),
+                Scale = state.Scale
+            };
+        }
+
+        private GfxElementDriver ResolveBindEleTarget()
+        {
+            if (bindEleTarget != null)
+                return bindEleTarget;
+            if (!bindEleConfigured || string.IsNullOrEmpty(bindEleTargetName))
+                return null;
+            // Reload fallback: the component reference may be gone while the
+            // serialized name survives. First ElementName match in hierarchy
+            // order reproduces GfxSceneBuilder.ResolveBindEle (document order,
+            // first match wins, no self-exclusion).
+            var drivers = transform.root.GetComponentsInChildren<GfxElementDriver>(true);
+            for (var i = 0; i < drivers.Length; i++)
+            {
+                if (drivers[i] != null && drivers[i].ElementName == bindEleTargetName)
+                {
+                    bindEleTarget = drivers[i];
+                    return drivers[i];
+                }
+            }
+
+            return null;
         }
 
         private void EnsureComponents()
@@ -226,7 +376,9 @@ namespace SilverEcho.ForsakenWorld
 
         private void ConfigureShuriken()
         {
+            particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             var main = particleSystem.main;
+            main.startSize3D = true;
             main.playOnAwake = false;
             main.loop = false;
             main.simulationSpace = ParticleSystemSimulationSpace.Local;
@@ -250,16 +402,16 @@ namespace SilverEcho.ForsakenWorld
             else
                 particleRenderer.renderMode = ParticleSystemRenderMode.Billboard;
 
-            // Global sheet when not per-particle UV (Godot global frame path).
+            // Global sheets use _UvRect; Shuriken only handles individual particle frames.
             var sheet = particleSystem.textureSheetAnimation;
-            if (!Params.IsUseParUV && !Params.InitRandomTexture &&
+            if ((Params.IsUseParUV || Params.InitRandomTexture) &&
                 (Params.TexCol > 1 || Params.TexRow > 1) && !Params.TileMode)
             {
                 sheet.enabled = true;
                 sheet.numTilesX = Math.Max(1, Params.TexCol);
                 sheet.numTilesY = Math.Max(1, Params.TexRow);
                 sheet.animation = ParticleSystemAnimationType.WholeSheet;
-                sheet.frameOverTime = new ParticleSystem.MinMaxCurve(0f);
+                sheet.frameOverTime = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0f, 1f, 1f));
             }
             else
             {
@@ -267,6 +419,9 @@ namespace SilverEcho.ForsakenWorld
             }
 
             particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            // A deserialized, stopped system has no native simulation buffer in edit mode.
+            // Initialize it without advancing; all particle state is supplied by GFX.
+            particleSystem.Simulate(0f, false, true, false);
         }
 
         private void ApplySlots(GfxParticleSlot[] slots)
@@ -305,7 +460,7 @@ namespace SilverEcho.ForsakenWorld
                     p.startColor = new Color(
                         s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale);
                     p.startSize3D = new Vector3(w, h, 1f);
-                    p.startSize = Math.Max(w, h);
+
                     p.remainingLifetime = Math.Max(0.0001f, Params.TTL - s.Age);
                     p.startLifetime = Math.Max(0.0001f, Params.TTL);
                     p.rotation3D = QuaternionToEuler(s.Rot);
@@ -316,7 +471,8 @@ namespace SilverEcho.ForsakenWorld
                     if (Params.IsUseParUV || Params.InitRandomTexture)
                     {
                         var total = Math.Max(1, Params.TexCol * Params.TexRow);
-                        p.remainingLifetime = Math.Max(0.0001f, 1f - (s.Frame / total));
+                        p.startLifetime = 1f;
+                        p.remainingLifetime = Math.Max(0.0001f, 1f - ((s.Frame + 0.01f) / total));
                     }
 
                     particleBuffer[alive++] = p;
@@ -353,6 +509,7 @@ namespace SilverEcho.ForsakenWorld
         public int DestBlend = 6;
         public bool ZEnable = true;
         public bool Warp;
+        public bool IsDummy;
         public string DummyEle = string.Empty;
         public int TexRow = 1;
         public int TexCol = 1;
@@ -406,6 +563,12 @@ namespace SilverEcho.ForsakenWorld
         public bool IsAvgGenSeq = true;
         public int RandomSeed;
         public bool EmitterEnabled = true;
+        public GfxFloatRow[] MultiPlanePoints = Array.Empty<GfxFloatRow>();
+        public GfxFloatRow[] MultiPlaneNormals = Array.Empty<GfxFloatRow>();
+        public GfxFloatRow[] CurvePoints = Array.Empty<GfxFloatRow>();
+        public float[] CurveRatios = Array.Empty<float>();
+        public GfxFloatRow[] CurveDirs = Array.Empty<GfxFloatRow>();
+        public int AvgStepCount = 1;
 
         public static GfxParticleParamsSerial FromParams(GfxParticleParams p)
         {
@@ -418,6 +581,13 @@ namespace SilverEcho.ForsakenWorld
                 DestBlend = p.DestBlend,
                 ZEnable = p.ZEnable,
                 Warp = p.Warp,
+                IsDummy = p.IsDummy,
+                MultiPlanePoints = GfxFloatRow.Pack(p.MultiPlanePoints),
+                MultiPlaneNormals = GfxFloatRow.Pack(p.MultiPlaneNormals),
+                CurvePoints = GfxFloatRow.Pack(p.CurvePoints),
+                CurveRatios = p.CurveRatios != null ? (float[])p.CurveRatios.Clone() : Array.Empty<float>(),
+                CurveDirs = GfxFloatRow.Pack(p.CurveDirs),
+                AvgStepCount = p.AvgStepCount,
                 DummyEle = p.DummyEle,
                 TexRow = p.TexRow,
                 TexCol = p.TexCol,
@@ -485,6 +655,13 @@ namespace SilverEcho.ForsakenWorld
                 DestBlend = DestBlend,
                 ZEnable = ZEnable,
                 Warp = Warp,
+                IsDummy = IsDummy,
+                MultiPlanePoints = GfxFloatRow.Unpack(MultiPlanePoints),
+                MultiPlaneNormals = GfxFloatRow.Unpack(MultiPlaneNormals),
+                CurvePoints = GfxFloatRow.Unpack(CurvePoints),
+                CurveRatios = CurveRatios != null ? (float[])CurveRatios.Clone() : Array.Empty<float>(),
+                CurveDirs = GfxFloatRow.Unpack(CurveDirs),
+                AvgStepCount = AvgStepCount,
                 DummyEle = DummyEle,
                 TexRow = TexRow,
                 TexCol = TexCol,

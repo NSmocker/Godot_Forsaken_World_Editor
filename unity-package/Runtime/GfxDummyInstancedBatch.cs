@@ -14,6 +14,7 @@ namespace SilverEcho.ForsakenWorld
 
         public Mesh Mesh;
         public Material Material;
+        public Renderer SourceRenderer;
         public Matrix4x4 LocalFromTemplate = Matrix4x4.identity;
         public Matrix4x4[] Matrices;
         public Vector4[] Custom; // x = age ms, y = alpha (INSTANCE_CUSTOM)
@@ -44,10 +45,10 @@ namespace SilverEcho.ForsakenWorld
         {
             if (Mesh == null || Material == null || Matrices == null || Matrices.Length == 0)
                 return;
-            // Real Unity requires enableInstancing for RenderMeshInstanced (harness stub did not).
-            if (!Material.enableInstancing)
-                Material.enableInstancing = true;
+            // Do not mutate shared assets or mistake the flag for shader support.
+            if (!GfxDummyInstancing.IsMaterialInstanceable(Material)) return;
             Block.Clear();
+            if (SourceRenderer != null) SourceRenderer.GetPropertyBlock(Block);
             Block.SetVectorArray(CustomDataProperty, Custom);
             var rp = new RenderParams
             {
@@ -63,6 +64,11 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>Collect MeshFilter/MeshRenderer pairs under a DummyEle template (Godot _collect_instanceable).</summary>
     public static class GfxDummyInstancing
     {
+        // No shipped shader implements the complete per-slot age/alpha contract.
+        // Keep this closed until a shader AND its clock/header behavior are validated.
+        // A public opt-in by shader name would let unsupported materials bypass it.
+        public static bool IsMaterialInstanceable(Material material) => false;
+
         public static bool TryCollect(Transform root, List<GfxDummyInstancedBatch> outBatches)
         {
             outBatches.Clear();
@@ -83,7 +89,7 @@ namespace SilverEcho.ForsakenWorld
             {
                 // Nested Time_Manual / Dummy drivers → force node path (Godot).
                 var player = node.GetComponent<GfxPlayer>();
-                if (player != null && player.TimeManual)
+                if (player != null || node.GetComponent<GfxElementDriver>() != null)
                     return false;
                 if (node.GetComponent<GfxDummyParticlesDriver>() != null)
                     return false;
@@ -93,11 +99,13 @@ namespace SilverEcho.ForsakenWorld
             var mr = node.GetComponent<MeshRenderer>();
             if (mf != null && mr != null && mf.sharedMesh != null && mr.sharedMaterial != null)
             {
+                if (!IsMaterialInstanceable(mr.sharedMaterial)) return false;
                 var local = parentLocal; // node local already composed by caller
                 outBatches.Add(new GfxDummyInstancedBatch
                 {
                     Mesh = mf.sharedMesh,
                     Material = mr.sharedMaterial,
+                    SourceRenderer = mr,
                     LocalFromTemplate = local
                 });
             }

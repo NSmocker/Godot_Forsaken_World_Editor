@@ -22,7 +22,7 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private bool visualActive = true;
 
         private GfxContainerParams cachedParams;
-        private Transform subGfx;
+        [NonSerialized] private Transform subGfx;
         private readonly List<GfxElementDriver> subDrivers = new List<GfxElementDriver>();
         private readonly List<Renderer> geometries = new List<Renderer>();
         private float lastAlpha = -1f;
@@ -32,7 +32,14 @@ namespace SilverEcho.ForsakenWorld
 
         public float SubGfxSpeed => subGfxSpeed;
         public float SubGfxScale => subGfxScale;
-        public Transform SubGfx => subGfx;
+        public Transform SubGfx { get { RestoreRuntimeReferences(); return subGfx; } }
+
+        private void RestoreRuntimeReferences()
+        {
+            if (subGfx != null) return;
+            subGfx = transform.Find(SubGfxNodeName);
+            if (subGfx != null) PrepareSubGfx();
+        }
 
         public void Configure(
             GfxContainerParams containerParams,
@@ -88,6 +95,7 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            RestoreRuntimeReferences();
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;
@@ -137,7 +145,8 @@ namespace SilverEcho.ForsakenWorld
             transform.localRotation = new Quaternion(dir[0], dir[1], dir[2], dir[3]);
             transform.localScale = new Vector3(s, s, s);
 
-            ApplyAlpha(state.Color != null && state.Color.Length > 3 ? state.Color[3] : 1f);
+            var keyAlpha = state.Color != null && state.Color.Length > 3 ? state.Color[3] : 1f;
+            ApplyAlpha(keyAlpha);
 
             var subMs = GfxContainerEval.SubGfxMs(
                 activeTime,
@@ -148,11 +157,11 @@ namespace SilverEcho.ForsakenWorld
                 RepeatDelay,
                 IsEndless,
                 p.LoopFlag) * p.PlaySpeed * subGfxSpeed;
-            PushTime(subMs);
+            PushTime(subMs, alpha * keyAlpha);
             SetVisualActive(true);
         }
 
-        private void PushTime(float ms)
+        private void PushTime(float ms, float alpha)
         {
             for (var i = 0; i < subDrivers.Count; i++)
             {
@@ -162,7 +171,7 @@ namespace SilverEcho.ForsakenWorld
                 d.TimeManual = true;
                 d.TimeMs = ms;
                 d.GlobalLoopTime = NoLoopMs;
-                d.OnGfxTick(ms, GfxAlpha);
+                d.OnGfxTick(ms, alpha);
             }
         }
 
@@ -243,7 +252,10 @@ namespace SilverEcho.ForsakenWorld
 
         private void OnDestroy()
         {
-            ClearSub();
+            // Removing the component must not delete the user's nested hierarchy.
+            subGfx = null;
+            subDrivers.Clear();
+            geometries.Clear();
         }
     }
 }

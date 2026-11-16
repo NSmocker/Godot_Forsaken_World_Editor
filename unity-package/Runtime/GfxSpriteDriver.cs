@@ -17,12 +17,19 @@ namespace SilverEcho.ForsakenWorld
 
         [SerializeField] private GfxSpriteParamsSerial paramsSerial = new GfxSpriteParamsSerial();
         [SerializeField] private bool visualActive = true;
+
+        /// <summary>Element-time visibility gate (create_id_101.gd:1381 fragment discard).</summary>
+        public bool VisualActive
+        {
+            get { return visualActive; }
+        }
         [SerializeField] private float lastCurrentTimeMs;
         [SerializeField] private bool warpUnsupportedLogged;
 
         private MeshFilter meshFilter;
         private MeshRenderer meshRenderer;
         private Material runtimeMaterial;
+        private MaterialPropertyBlock propertyBlock;
         private GfxSpriteParams cachedParams;
         private bool header2dRender;
 
@@ -46,6 +53,7 @@ namespace SilverEcho.ForsakenWorld
             BuildMesh(spriteParams);
             runtimeMaterial = GfxSpriteMaterialFactory.Create(spriteParams, texture, gfx2dRender);
             meshRenderer.sharedMaterial = runtimeMaterial;
+            meshRenderer.SetPropertyBlock(null);
             meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
 
@@ -77,7 +85,7 @@ namespace SilverEcho.ForsakenWorld
                 TimeMs = gfxTimeMs;
 
             var active = TimeManual ? TimeMs : gfxTimeMs;
-            var elementTime = GfxKeypointEval.ElementTime(
+            var elementTime = IsEndless ? active : GfxKeypointEval.ElementTime(
                 active,
                 GlobalLoopTime,
                 LocalStartTime,
@@ -106,8 +114,33 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
-            var state = GfxKeypointEval.Evaluate(keypoints, span);
+            var state = GfxKeypointEval.Evaluate(keypoints, span,
+                BoundTransformTarget == null ? BindTimeSec(active) : null,
+                Params.SystemId == "100" || Params.SystemId == "101");
+            if (BoundTransformTarget != null)
+            {
+                var bound = BoundTransformTarget.EvaluateBoundKeypoint(active);
+                state.Pos = bound.Pos;
+                state.Dir = bound.Dir;
+            }
             ApplySpriteState(state, elementTime, alpha);
+        }
+
+        /// <summary>
+        /// BindEle bound clock (create_id_100/101.gd:741–792). Godot reads the
+        /// target's KeyPoint_0 TimeSpan/RepeatCount, but gfx_parser.gd stores
+        /// keypoints in _keypoints and never writes KeyPoint_0, so fb_total is
+        /// always -1: v_transform_time stays the raw active time (no target loop)
+        /// and t_elem_transform = max(0, active_time*0.001 - b_start*0.001).
+        /// The effective behaviour is reproduced here; the target's real keypoint
+        /// duration is deliberately NOT read (that would diverge from Godot).
+        /// </summary>
+        private float? BindTimeSec(float activeMs)
+        {
+            if (!BindEleActive)
+                return null;
+            var tTransformSec = Math.Max(0f, activeMs * 0.001f);
+            return Math.Max(0f, tTransformSec - BindEleStartMs * 0.001f);
         }
 
         protected override void ApplyState(GfxKeypointState state)
@@ -185,20 +218,26 @@ namespace SilverEcho.ForsakenWorld
             var col = state.Color ?? GfxMath.ColorWhite();
             var a = GfxMath.Clamp(col[3] * alpha * p.MixAlphaScale, 0f, 1f);
             var color = new Color(col[0], col[1], col[2], a);
+            if (propertyBlock == null) propertyBlock = new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(propertyBlock);
             if (runtimeMaterial.HasProperty("_BaseColor"))
-                runtimeMaterial.SetColor("_BaseColor", color);
+                propertyBlock.SetColor("_BaseColor", color);
             if (runtimeMaterial.HasProperty("_Color"))
-                runtimeMaterial.SetColor("_Color", color);
+                propertyBlock.SetColor("_Color", color);
             if (runtimeMaterial.HasProperty("_GfxAlpha"))
-                runtimeMaterial.SetFloat("_GfxAlpha", alpha);
+                // Header alpha is already included in the color above.
+                propertyBlock.SetFloat("_GfxAlpha", 1f);
 
             var uv = GfxSpriteUvEval.Evaluate(p, elementTime);
+            if (runtimeMaterial.HasProperty("_UvExchange"))
+                propertyBlock.SetFloat("_UvExchange", uv.Exchange ? 1f : 0f);
             if (runtimeMaterial.HasProperty("_UvRect"))
             {
-                runtimeMaterial.SetVector(
+                propertyBlock.SetVector(
                     "_UvRect",
                     new Vector4(uv.ScaleU, uv.ScaleV, uv.OffsetU, uv.OffsetV));
             }
+            meshRenderer.SetPropertyBlock(propertyBlock);
         }
 
         private void SetVisualActive(bool active)
@@ -391,9 +430,14 @@ namespace SilverEcho.ForsakenWorld
             else
                 mat.DisableKeyword("_ADDITIVE_BLEND");
 
-            var zTest = spriteParams.ZEnable && !gfx2dRender;
+            // A04: header 2DRender disables the depth TEST. Godot create_id_100/101 emit
+            // depth_test_disabled keyed on 2DRender only and never read ZEnable for it.
+            if (mat.HasProperty("_ZTest"))
+                mat.SetFloat("_ZTest", gfx2dRender
+                    ? (float)UnityEngine.Rendering.CompareFunction.Always
+                    : (float)UnityEngine.Rendering.CompareFunction.LessEqual);
             if (mat.HasProperty("_ZWrite"))
-                mat.SetFloat("_ZWrite", zTest ? 1f : 0f);
+                mat.SetFloat("_ZWrite", 0f); // Translucent quads must not occlude subsequent layers.
 
             if (texture != null)
             {

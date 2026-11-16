@@ -6,6 +6,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// GFX ID 210/211 grid decal params (create_id_210.gd / create_id_211.gd).
     /// </summary>
+    [Serializable]
     public sealed class GfxGridParams
     {
         public const int MaxAnimVerts = 100;

@@ -8,6 +8,7 @@ namespace SilverEcho.ForsakenWorld
     /// GFX ID 220 phys emitter params (create_id_220.gd / A3DPhysEmitter).
     /// .gphy fluid/emitter fields applied when present; otherwise PhysX defaults.
     /// </summary>
+    [Serializable]
     public sealed class GfxPhysParams
     {
         public const int MaxPool = 1024;

@@ -28,15 +28,18 @@ namespace SilverEcho.ForsakenWorld
         private float subScale = 1f;
         private bool useGScale = true;
         private float playSpeed = 1f;
-        private readonly List<Slot> slots = new List<Slot>();
+        // Retain ownership of generated nodes across reload so rebuilding cannot
+        // strand the old pool in the hierarchy and append a second copy.
+        [SerializeField, HideInInspector] private List<Slot> slots = new List<Slot>();
         private GameObject template;
-        private bool built;
+        [NonSerialized] private bool built;
         private string buildError;
         private bool forceNodes;
         private bool useInstancing;
         private readonly System.Collections.Generic.List<GfxDummyInstancedBatch> batches =
             new System.Collections.Generic.List<GfxDummyInstancedBatch>();
 
+        [Serializable]
         private sealed class Slot
         {
             public GameObject Node;
@@ -129,6 +132,8 @@ namespace SilverEcho.ForsakenWorld
                     s.Gfx.PlayerPaused = false;
                     var a = Mathf.Clamp01(p.Color[3] * p.KeyAlpha * gfxAlpha);
                     s.Gfx.Alpha = a;
+                    // The emitter owns the slot clock; do not also tick it via Update.
+                    s.Gfx.enabled = false;
                 }
 
                 var size = p.Size;
@@ -163,6 +168,7 @@ namespace SilverEcho.ForsakenWorld
                     s.Node.transform.localRotation = rot;
                     s.Node.transform.localScale = Vector3.one * scale;
                 }
+                if (s.Gfx != null) s.Gfx.Tick(0f);
             }
         }
 
@@ -393,6 +399,9 @@ namespace SilverEcho.ForsakenWorld
                 return false;
             if (string.Equals(element.name, dummyName, StringComparison.OrdinalIgnoreCase))
                 return true;
+            var driver = element.GetComponent<GfxElementDriver>();
+            if (driver != null && string.Equals(driver.ElementName, dummyName, StringComparison.OrdinalIgnoreCase))
+                return true;
             var container = element.GetComponent<GfxContainerDriver>();
             if (container != null && container.Params != null &&
                 string.Equals(container.Params.ElementName, dummyName, StringComparison.OrdinalIgnoreCase))
@@ -418,10 +427,9 @@ namespace SilverEcho.ForsakenWorld
             var particle = element.GetComponent<GfxParticleDriver>();
             if (particle != null && particle.Params != null)
                 return particle.Params.IsDummy;
-            // Sprite/other IsDummy: SceneBuilder may leave the GO inactive for IsDummy sources.
-            // Without a typed IsDummy on every driver, accept inactive siblings named DummyEle
-            // only when no typed driver claimed them above.
-            return false;
+            // Inactivity alone does not imply IsDummy; use the serialized source flag.
+            var driver = element.GetComponent<GfxElementDriver>();
+            return driver != null && driver.IsDummySource;
         }
 
         private static string ResolveSystemId(Transform element)

@@ -94,9 +94,10 @@ namespace SilverEcho.ForsakenWorld
             string.Equals(SystemId, "101", StringComparison.Ordinal);
     }
 
-    /// <summary>UV scale/offset applied as uv * scale + offset (create_id_100 fragment).</summary>
+    /// <summary>Exchange unit UV axes first, then apply scale/offset (create_id_100 fragment).</summary>
     public struct GfxSpriteUvState
     {
+        public bool Exchange;
         public float ScaleU;
         public float ScaleV;
         public float OffsetU;

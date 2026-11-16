@@ -5,7 +5,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// TileMode scroll and TexRow×TexCol sheet animation for ID 100/101
     /// (create_id_100.gd fragment UV block). Pure C#.
-    /// Returns an affine map uv' = uv * scale + offset applied to mesh UVs in 0..1.
+    /// Returns an optional unit-UV axis exchange followed by uv * scale + offset.
     /// </summary>
     public static class GfxSpriteUvEval
     {
@@ -53,15 +53,8 @@ namespace SilverEcho.ForsakenWorld
             }
 
             // Godot: UVExchg, then UReverse, then VReverse on unit UV before tile/sheet.
-            if (p.UvExchange)
-            {
-                var su = scaleU;
-                var ou = offsetU;
-                scaleU = scaleV;
-                offsetU = offsetV;
-                scaleV = su;
-                offsetV = ou;
-            }
+            // Exchanging axes is an off-diagonal transform; scale/offset alone
+            // cannot represent it. The shader swaps unit UV before this map.
 
             if (p.UReverse)
             {
@@ -77,6 +70,7 @@ namespace SilverEcho.ForsakenWorld
 
             return new GfxSpriteUvState
             {
+                Exchange = p.UvExchange,
                 ScaleU = scaleU,
                 ScaleV = scaleV,
                 OffsetU = offsetU,

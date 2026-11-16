@@ -16,7 +16,7 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private bool visualActive = true;
         [SerializeField] private bool parType2Logged;
 
-        private GfxPhysParams cachedParams;
+        [SerializeField, HideInInspector] private GfxPhysParams cachedParams;
         private GfxPhysSim sim;
         private ParticleSystem particleSystem;
         private ParticleSystemRenderer particleRenderer;
@@ -77,6 +77,15 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            if (sim == null && cachedParams != null)
+            {
+                EnsureComponents();
+                sim = new GfxPhysSim(cachedParams);
+                particleBuffer = new ParticleSystem.Particle[cachedParams.PoolSize()];
+                runtimeMaterial = particleRenderer.sharedMaterial;
+                // Recreate the native edit-mode buffer without advancing simulation.
+                particleSystem.Simulate(0f, false, true, false);
+            }
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;

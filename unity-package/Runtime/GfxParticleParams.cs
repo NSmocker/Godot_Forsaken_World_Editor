@@ -109,12 +109,20 @@ namespace SilverEcho.ForsakenWorld
         {
             get
             {
-                var q = Quota;
-                if (q <= 0)
-                    q = (int)Math.Ceiling(Math.Max(0f, EmissionRate) * Math.Max(0f, TTL));
-                if (q < 0)
-                    q = 0;
-                return Math.Min(q, MaxQuota);
+                // Godot create_id_120._calc_pool_size: pool = int(TTL * rate) + 1;
+                // quota != -1 && pool > quota -> pool = quota; clampi(pool, 0, MAX_QUOTA).
+                // Quota=0 is an empty pool (N03); only -1 selects the automatic size.
+                // int() truncates toward zero in GDScript and C# alike, so the +1
+                // rounding matches Godot where Ceiling alone fell one short (N04).
+                // The explicit (float) cast matters: Unity's Mono JIT evaluates
+                // float*float in double precision, so truncating the raw product of
+                // 0.7f*10f yields 6 (6.99999988) instead of the float-rounded 7.
+                var pool = (int)(float)(TTL * EmissionRate) + 1;
+                if (Quota != -1 && pool > Quota)
+                    pool = Quota;
+                if (pool < 0)
+                    pool = 0;
+                return Math.Min(pool, MaxQuota);
             }
         }
 

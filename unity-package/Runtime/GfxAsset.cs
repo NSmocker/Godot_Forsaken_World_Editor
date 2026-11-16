@@ -127,6 +127,34 @@ namespace SilverEcho.ForsakenWorld
         public GfxPixelShaderConstantAsset[] PixelShaderConstants => pixelShaderConstants;
         public string[] GridAnimations => gridAnimations;
 
+        public GfxElement ToElement()
+        {
+            var result = new GfxElement { SystemId = systemId };
+            foreach (var p in properties) result.Properties[p.Key] = p.Value;
+            foreach (var c in affectors)
+                result.Affectors.Add(c.Properties.ToDictionary(p => p.Key, p => p.Value));
+            foreach (var c in controlMethods)
+                result.ControlMethods.Add(c.Properties.ToDictionary(p => p.Key, p => p.Value));
+            foreach (var k in keypoints)
+            {
+                var kp = new GfxKeypoint();
+                foreach (var p in k.Properties) kp.Properties[p.Key] = p.Value;
+                foreach (var c in k.ControlMethods)
+                    kp.ControlMethods.Add(c.Properties.ToDictionary(p => p.Key, p => p.Value));
+                result.Keypoints.Add(kp);
+            }
+            result.GridAnimations.AddRange(gridAnimations);
+            foreach (var c in pixelShaderConstants)
+            {
+                var constant = new GfxPixelShaderConstant();
+                foreach (var p in c.Properties) constant.Properties[p.Key] = p.Value;
+                foreach (var t in c.Targets)
+                    constant.Targets.Add(t.Properties.ToDictionary(p => p.Key, p => p.Value));
+                result.PixelShaderConstants.Add(constant);
+            }
+            return result;
+        }
+
         internal static GfxElementAsset FromElement(GfxElement element)
         {
             return new GfxElementAsset

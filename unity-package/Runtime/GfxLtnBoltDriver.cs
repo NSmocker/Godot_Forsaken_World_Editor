@@ -11,14 +11,32 @@ namespace SilverEcho.ForsakenWorld
     [ExecuteAlways]
     public sealed class GfxLtnBoltDriver : GfxElementDriver
     {
-                private GfxLtnBoltParams boltParams;
+        [SerializeField, HideInInspector] private GfxLtnBoltParams boltParams;
         private readonly List<GfxLightningDriver> strokes = new List<GfxLightningDriver>();
-        private Texture sharedTexture;
-        private bool gfx2d;
+        [SerializeField] private Texture sharedTexture;
+        [SerializeField] private bool gfx2d;
+        [SerializeField] private GfxProperty[] parentProperties = Array.Empty<GfxProperty>();
+        [NonSerialized] private bool referencesRestored;
         private IDictionary<string, string> parentProps;
 
         public GfxLtnBoltParams Params => boltParams;
-        public IReadOnlyList<GfxLightningDriver> Strokes => strokes;
+        public IReadOnlyList<GfxLightningDriver> Strokes { get { RestoreRuntimeReferences(); return strokes; } }
+
+        private void RestoreRuntimeReferences()
+        {
+            if (referencesRestored) return;
+            parentProps = new Dictionary<string, string>();
+            foreach (var property in parentProperties) parentProps[property.Key] = property.Value;
+            strokes.Clear();
+            for (var i = 0; i < transform.childCount; i++)
+            {
+                var child = transform.GetChild(i);
+                var stroke = child.GetComponent<GfxLightningDriver>();
+                if (stroke != null && child.name.StartsWith("Stroke_", StringComparison.Ordinal))
+                    strokes.Add(stroke);
+            }
+            referencesRestored = true;
+        }
 
         public void Configure(
             GfxLtnBoltParams bolt,
@@ -34,6 +52,8 @@ namespace SilverEcho.ForsakenWorld
             sharedTexture = texture;
             gfx2d = gfx2dRender;
             parentProps = properties;
+            parentProperties = GfxProperty.FromDictionary(properties != null
+                ? new Dictionary<string, string>(properties) : new Dictionary<string, string>());
             SystemId = "151";
 
             if (bolt.Warp && warnings != null)
@@ -52,11 +72,14 @@ namespace SilverEcho.ForsakenWorld
 
         public void RebuildStrokes(IList<string> warnings = null)
         {
+            RestoreRuntimeReferences();
             // Clear previous children
             for (var i = transform.childCount - 1; i >= 0; i--)
             {
                 var child = transform.GetChild(i);
-                UnityEngine.Object.DestroyImmediate(child.gameObject);
+                if (child.GetComponent<GfxLightningDriver>() != null &&
+                    child.name.StartsWith("Stroke_", StringComparison.Ordinal))
+                    UnityEngine.Object.DestroyImmediate(child.gameObject);
             }
             strokes.Clear();
 
@@ -96,6 +119,7 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            RestoreRuntimeReferences();
             // Child Stroke_* GfxLightningDrivers are collected by GfxPlayer and
             // ticked there — sync timing only (avoid double OnGfxTick).
             GfxAlpha = alpha;

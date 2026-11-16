@@ -113,7 +113,7 @@ namespace SilverEcho.ForsakenWorld.Tests
 
 
         [Test]
-        public void DummyDriverUsesRenderMeshInstancedWhenTemplateHasMesh()
+        public void DummyDriverFallsBackWhenShaderHasNoPerInstanceContract()
         {
             var header = new GameObject("GFX");
             var particleGo = new GameObject("P");
@@ -145,9 +145,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             driver.Configure("Mark", 3);
             driver.EnsureBuilt();
             Assert.IsTrue(string.IsNullOrEmpty(driver.BuildError));
-            Assert.IsTrue(driver.UsesInstancing);
-            Assert.AreEqual(0, driver.SlotCount);
-            Assert.AreEqual(1, driver.BatchCount);
+            Assert.IsFalse(driver.UsesInstancing);
+            Assert.AreEqual(3, driver.SlotCount);
+            Assert.AreEqual(0, driver.BatchCount);
 
             var slots = new[]
             {
@@ -160,23 +160,11 @@ namespace SilverEcho.ForsakenWorld.Tests
                 new GfxParticleSlot { Alive = false },
                 new GfxParticleSlot { Alive = false }
             };
-            // Harness Graphics stub exposes LastRenderMeshInstanced*; real Unity does not.
-            var countProp = typeof(Graphics).GetProperty("LastRenderMeshInstancedCount");
-            if (countProp != null && countProp.CanWrite)
-                countProp.SetValue(null, -1);
             driver.Tick(slots, 1f, false);
-            if (countProp != null)
-            {
-                Assert.AreEqual(3, (int)countProp.GetValue(null));
-                var meshProp = typeof(Graphics).GetProperty("LastRenderMeshInstancedMesh");
-                Assert.IsNotNull(meshProp);
-                Assert.IsNotNull(meshProp.GetValue(null));
-            }
-            else
-            {
-                Assert.IsTrue(driver.UsesInstancing);
-                Assert.AreEqual(1, driver.BatchCount);
-            }
+            Assert.IsFalse(driver.UsesInstancing);
+            Assert.AreEqual(0, driver.BatchCount);
+            Assert.AreEqual(new Vector3(4f, 5f, 6f), driver.transform.GetChild(0).localPosition);
+            Assert.IsFalse(driver.transform.GetChild(1).gameObject.activeSelf);
 
             driver.ForceNodes = true;
             driver.EnsureBuilt();

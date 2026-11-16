@@ -27,7 +27,9 @@ namespace SilverEcho.ForsakenWorld
 
             var tGlobal = activeTimeMs;
             if (fRepeat >= 0f)
-                tGlobal = GfxMath.Fmod(activeTimeMs, Math.Max(0.001f, globalLoopTime));
+                // GDScript fmod preserves the dividend's sign. A negative seek
+                // must stay before the local window instead of wrapping to its end.
+                tGlobal = activeTimeMs % Math.Max(0.001f, globalLoopTime);
 
             var sinceStart = tGlobal - localStart;
             if (sinceStart < 0f)
@@ -37,10 +39,28 @@ namespace SilverEcho.ForsakenWorld
             if (fRepeat >= 0f && currentLoop >= fRepeat)
                 return tGlobal;
 
-            return localStart + GfxMath.Fmod(sinceStart, loopFull);
+            return localStart + sinceStart % loopFull;
         }
 
         public static GfxKeypointState Evaluate(IList<GfxKeypointSpec> keypoints, float spanMs)
+        {
+            return Evaluate(keypoints, spanMs, null);
+        }
+
+        /// <param name="bindTransformSec">
+        /// BindEle bound clock in seconds (create_id_100/101.gd:741–792): when set,
+        /// transform ctrl types (100/101/102/103/104/110) run on
+        /// max(0, boundTime - keypointBase) instead of the element's own keypoint
+        /// time; local ctrl types (105–109/111) keep t_elem_local
+        /// (create_id_101.gd:844).
+        /// </param>
+        /// <param name="spriteShaderTiming">
+        /// Use the ID100/101 shader's controller timing; false preserves the
+        /// shared gfx_keypoint_eval.gd CPU contract used by other element families.
+        /// </param>
+        public static GfxKeypointState Evaluate(
+            IList<GfxKeypointSpec> keypoints, float spanMs, float? bindTransformSec,
+            bool spriteShaderTiming = false)
         {
             if (keypoints == null || keypoints.Count == 0)
                 return new GfxKeypointState();
@@ -50,10 +70,28 @@ namespace SilverEcho.ForsakenWorld
             var axisOff = GfxMath.Vec3Zero();
             var remaining = spanMs;
             var last = keypoints.Count - 1;
+            // ctrl_to_kp_basetime (create_id_101.gd:465–492): cumulative seconds of
+            // the preceding keypoint TimeSpans; only ts > 0 advances the base.
+            var kpBaseSec = 0f;
+            var processedKeypoints = 0;
+            HashSet<float> pathBases = null;
+            if (spriteShaderTiming)
+            {
+                pathBases = new HashSet<float>();
+                var pathBase = 0f;
+                foreach (var kp in keypoints)
+                {
+                    if (kp.Ctrls != null)
+                        foreach (var ctrl in kp.Ctrls)
+                            if (ctrl != null && ctrl.Type == 110) pathBases.Add(pathBase);
+                    if (kp.TimeSpan > 0f) pathBase += kp.TimeSpan / 1000f;
+                }
+            }
 
             for (var i = 0; i < keypoints.Count; i++)
             {
                 var kp = keypoints[i];
+                processedKeypoints = i + 1;
                 var ts = kp.TimeSpan;
                 var infinite = ts < 0f;
                 var inside = infinite || remaining < ts || i == last;
@@ -78,13 +116,41 @@ namespace SilverEcho.ForsakenWorld
                 else
                 {
                     var kpSpanSec = infinite ? InfiniteSpanSec : ts / 1000f;
+                    var tLocalSec = tIn / 1000f;
+                    var tTransformSec = bindTransformSec.HasValue
+                        ? Math.Max(0f, bindTransformSec.Value - kpBaseSec)
+                        : tLocalSec;
                     axisOff = ProcessCtrls(
-                        kp.Ctrls, state, tIn / 1000f, kpSpanSec, axisOff);
+                        kp.Ctrls, state, tLocalSec, tTransformSec, kpSpanSec, axisOff,
+                        false, spriteShaderTiming, bindTransformSec.HasValue,
+                        pathBases != null && pathBases.Contains(kpBaseSec));
                 }
 
                 if (inside)
                     break;
                 remaining -= ts;
+                if (ts > 0f)
+                    kpBaseSec += ts / 1000f;
+            }
+
+            if (bindTransformSec.HasValue)
+            {
+                // The sprite shader emits transform controllers from every keypoint.
+                // A wrapped local clock must not hide later controllers whose bound
+                // clock has already reached them. Keep local color/scale on its own clock.
+                var boundBaseSec = 0f;
+                for (var i = 0; i < keypoints.Count; i++)
+                {
+                    var kp = keypoints[i];
+                    if (i >= processedKeypoints)
+                        axisOff = ProcessCtrls(kp.Ctrls, state, 0f,
+                            Math.Max(0f, bindTransformSec.Value - boundBaseSec),
+                            kp.TimeSpan < 0f ? InfiniteSpanSec : kp.TimeSpan / 1000f,
+                            axisOff, true, spriteShaderTiming, true,
+                            pathBases != null && pathBases.Contains(boundBaseSec));
+                    if (kp.TimeSpan > 0f)
+                        boundBaseSec += kp.TimeSpan / 1000f;
+                }
             }
 
             state.Scale += state.Noise;
@@ -118,12 +184,28 @@ namespace SilverEcho.ForsakenWorld
                 state.Dir = GfxMath.SlerpQuat(kp1.Dir, kp2.Dir, f);
         }
 
+        /// <summary>
+        /// create_id_101.gd:844: ctrl types evaluated on t_elem_local
+        /// (own element time, unaffected by BindEle); every other type runs on
+        /// t_elem_transform (100/101/102/103/104/110).
+        /// </summary>
+        private static bool UsesLocalCtrlTime(int type)
+        {
+            return type == 105 || type == 106 || type == 107 ||
+                   type == 108 || type == 109 || type == 111;
+        }
+
         private static float[] ProcessCtrls(
             IList<GfxCtrlSpec> ctrls,
             GfxKeypointState state,
-            float t,
+            float tLocal,
+            float tTransform,
             float kpSpanSec,
-            float[] axisOff)
+            float[] axisOff,
+            bool transformsOnly = false,
+            bool spriteShaderTiming = false,
+            bool boundClock = false,
+            bool suppressLinear = false)
         {
             var lin = GfxMath.Vec3Zero();
             var jump = GfxMath.Vec3Zero();
@@ -139,9 +221,14 @@ namespace SilverEcho.ForsakenWorld
             {
                 if (c == null)
                     continue;
+                if (transformsOnly && UsesLocalCtrlTime(c.Type))
+                    continue;
+                if (suppressLinear && (c.Type == 100 || c.Type == 104))
+                    continue;
+                var t = UsesLocalCtrlTime(c.Type) ? tLocal : tTransform;
                 var s = c.Start;
                 var e = c.End;
-                if (t < s || (e >= 0f && s > e))
+                if ((t < s || (e >= 0f && s > e)) && !(spriteShaderTiming && c.Type == 110))
                     continue;
 
                 var a0 = s;
@@ -149,7 +236,14 @@ namespace SilverEcho.ForsakenWorld
                 var type = c.Type;
                 var dist = 0f;
                 if (c.HasVelocity)
-                    dist = c.Vel * (a1 - a0) + 0.5f * c.Acc * (a1 * a1 - a0 * a0);
+                {
+                    var elapsed = a1 - a0;
+                    // Sprite shader controls start accelerating at StartTime.
+                    // The shared Godot CPU evaluator uses absolute-time integration;
+                    // keep that contract for other element families and CPU callers.
+                    dist = c.Vel * elapsed + 0.5f * c.Acc *
+                        (spriteShaderTiming ? elapsed * elapsed : a1 * a1 - a0 * a0);
+                }
 
                 switch (type)
                 {
@@ -264,19 +358,37 @@ namespace SilverEcho.ForsakenWorld
                         break;
                     case 110:
                     {
-                        if (c.CurvePath != null)
+                        var rawPath = spriteShaderTiming && c.CurveVertices != null && c.CurveVertices.Length >= 2;
+                        if (c.CurvePath != null || rawPath)
                         {
+                            var progress = a1 / Math.Max(kpSpanSec, 0.000001f);
+                            if (spriteShaderTiming)
+                            {
+                                // ID100/101 uses elapsed controller time and an explicit
+                                // duration. Parsed BindEle targets have no KeyPoint_0
+                                // duration, so an open-ended bound path stays at point 0.
+                                var duration = e >= 0f ? Math.Max(0.0001f, e - s)
+                                    : boundClock || kpSpanSec >= InfiniteSpanSec ? 0f
+                                    : Math.Max(0.0001f, kpSpanSec - s);
+                                progress = duration > 0.001f
+                                    ? GfxMath.Clamp((t - s) / duration, 0f, 1f) : 0f;
+                            }
                             float[] ptPos;
                             float[] ptQuat;
-                            GfxCurvePath.InterpPoint(
-                                c.CurvePath,
-                                a1 / Math.Max(kpSpanSec, 0.000001f),
-                                out ptPos,
-                                out ptQuat);
-                            jump = GfxMath.Add3(
-                                jump,
-                                GfxMath.Sub3(ptPos, GfxMath.Add3(pRel, lin)));
-                            pRel = GfxMath.Sub3(ptPos, lin);
+                            if (rawPath)
+                                GfxCurvePath.InterpSpriteVertices(c.CurveVertices, progress, out ptPos, out ptQuat);
+                            else
+                                GfxCurvePath.InterpPoint(c.CurvePath, progress, out ptPos, out ptQuat);
+                            if (spriteShaderTiming)
+                            {
+                                pRel = GfxMath.Add3(pRel, ptPos);
+                                jump = GfxMath.Add3(jump, ptPos);
+                            }
+                            else
+                            {
+                                jump = GfxMath.Add3(jump, GfxMath.Sub3(ptPos, GfxMath.Add3(pRel, lin)));
+                                pRel = GfxMath.Sub3(ptPos, lin);
+                            }
                             if (c.CalcDir)
                                 state.Dir = ptQuat;
                         }

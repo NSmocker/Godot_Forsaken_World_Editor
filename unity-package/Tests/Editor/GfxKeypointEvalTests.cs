@@ -5,6 +5,18 @@ namespace SilverEcho.ForsakenWorld.Tests
 {
     public sealed class GfxKeypointEvalTests
     {
+        [TestCase(-1f, 1, -1f)]
+        [TestCase(-3001f, 1, -1f)]
+        [TestCase(-3000f, 1, 0f)]
+        [TestCase(-3001f, -1, -3001f)]
+        [TestCase(3001f, 1, 1f)]
+        [TestCase(3000f, 1, 0f)]
+        public void ElementTimePreservesSignedSeek(float time, int repeats, float expected)
+        {
+            Assert.AreEqual(expected,
+                GfxKeypointEval.ElementTime(time, 3000f, 100f, 1100f, repeats, 200f));
+        }
+
         [Test]
         public void ElementTimeRespectsLocalWindowAndRepeat()
         {

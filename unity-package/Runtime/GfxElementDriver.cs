@@ -21,9 +21,46 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private float repeatDelay;
         [SerializeField] private bool isEndless;
         [SerializeField] private float gfxAlpha = 1f;
+        [SerializeField] private bool bindEleActive;
+        [SerializeField] private float bindEleStartMs;
 
         private List<GfxKeypointSpec> keypoints = new List<GfxKeypointSpec>();
         private GfxKeypointState lastState;
+        [SerializeField] private GfxElementAsset animationSource;
+        // Unity hot reload serializes private primitive fields, but not the runtime
+        // keypoint graph. Restore both together instead of retaining a stale flag.
+        [NonSerialized] private bool animationRestored;
+
+        /// <summary>Dummy flag from the persisted source, also for drivers without typed dummy params.</summary>
+        public bool IsDummySource
+        {
+            get
+            {
+                if (animationSource == null) return false;
+                foreach (var property in animationSource.Properties)
+                    if (property.Key == "IsDummy")
+                        return GfxPropertyValues.ParseBool(property.Value, false);
+                return false;
+            }
+        }
+
+        public void SetAnimationSource(GfxElement source)
+        {
+            animationSource = GfxElementAsset.FromElement(source);
+            animationRestored = false;
+        }
+
+        protected GfxElement RestoreAnimationSource()
+        {
+            if (animationSource == null) return null;
+            var source = animationSource.ToElement();
+            if (!animationRestored)
+            {
+                keypoints = GfxKeypointBuilder.Build(source);
+                animationRestored = true;
+            }
+            return source;
+        }
 
         /// <summary>The element's own "Name:" value (parsed_data["Name"] in Godot).</summary>
         public string ElementName
@@ -92,6 +129,59 @@ namespace SilverEcho.ForsakenWorld
             set { gfxAlpha = value; }
         }
 
+        /// <summary>
+        /// BindEle resolved at build time (create_id_100/101.gd:591–677). When set,
+        /// transform controllers run on the bound clock instead of the element's own
+        /// loop time; local controllers (105–109/111) keep their own time.
+        /// </summary>
+        public bool BindEleActive
+        {
+            get { return bindEleActive; }
+        }
+
+        /// <summary>Target element StartTime in ms (Godot b_start).</summary>
+        public float BindEleStartMs
+        {
+            get { return bindEleStartMs; }
+        }
+
+        [SerializeField] private GfxElementDriver boundTransformTarget;
+        public GfxElementDriver BoundTransformTarget => boundTransformTarget;
+
+        public void SetBoundTransformTarget(GfxElementDriver target)
+        {
+            boundTransformTarget = target == this ? null : target;
+        }
+
+        // A3DGFXElement::GetCurKeyPoint: BindEle замінює позицію й орієнтацію,
+        // зберігаючи власні колір і масштаб. Обмеження захищає від циклів у файлі.
+        public GfxKeypointState EvaluateBoundKeypoint(float activeMs, int depth = 0)
+        {
+            var t = IsEndless ? activeMs : GfxKeypointEval.ElementTime(activeMs,
+                GlobalLoopTime, LocalStartTime, LocalTotalTime, RepeatCount, RepeatDelay);
+            var state = GfxKeypointEval.Evaluate(GetKeypoints(), Math.Max(0f, t - LocalStartTime));
+            if (boundTransformTarget != null && depth < 16)
+            {
+                var target = boundTransformTarget.EvaluateBoundKeypoint(activeMs, depth + 1);
+                state.Pos = target.Pos;
+                state.Dir = target.Dir;
+            }
+            return state;
+        }
+
+        public void SetBindEle(float targetStartMs)
+        {
+            bindEleActive = true;
+            bindEleStartMs = targetStartMs;
+        }
+
+        public void ClearBindEle()
+        {
+            boundTransformTarget = null;
+            bindEleActive = false;
+            bindEleStartMs = 0f;
+        }
+
         public GfxKeypointState LastState => lastState;
 
         public void SetKeypoints(IList<GfxKeypointSpec> specs)
@@ -101,14 +191,18 @@ namespace SilverEcho.ForsakenWorld
                 : new List<GfxKeypointSpec>();
         }
 
-        public List<GfxKeypointSpec> GetKeypoints() =>
-            new List<GfxKeypointSpec>(keypoints);
+        public List<GfxKeypointSpec> GetKeypoints()
+        {
+            if (!animationRestored) RestoreAnimationSource();
+            return new List<GfxKeypointSpec>(keypoints);
+        }
 
         /// <summary>
         /// Called by GfxPlayer each tick with the shared GFX time.
         /// </summary>
         public virtual void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            if (!animationRestored) RestoreAnimationSource();
             gfxAlpha = alpha;
             if (timeManual)
                 timeMs = gfxTimeMs;

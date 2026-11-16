@@ -7,6 +7,7 @@ namespace SilverEcho.ForsakenWorld
     /// GFX ID 151 A3DGFXLtnBolt params + stroke builder (create_id_151.gd).
     /// Pure C#. Strokes become child 150 lightnings.
     /// </summary>
+    [Serializable]
     public sealed class GfxLtnBoltParams
     {
         public const int MaxStrokes = 512;

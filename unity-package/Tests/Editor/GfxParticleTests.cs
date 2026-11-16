@@ -173,7 +173,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(1f, p120.TTL, 0.001f);
             Assert.IsTrue(p120.IsBind);
             Assert.IsTrue(p120.IsAdditiveBlend);
-            Assert.AreEqual(20, p120.PoolSize);
+            // N03/N04 fix: pool = int(TTL*rate)+1 capped by quota (Godot _calc_pool_size),
+            // not quota itself when quota is not the binding constraint.
+            Assert.AreEqual(11, p120.PoolSize); // int(1*10)+1 = 11 < Quota 20
 
             var p121 = GfxParticleParams.FromProperties(doc.Elements[1].Properties, "121", 1);
             Assert.AreEqual(2f, p121.AreaSize[0], 0.001f);
@@ -451,8 +453,128 @@ namespace SilverEcho.ForsakenWorld.Tests
         [Test]
         public void PoolSizeClampedToMaxQuota()
         {
-            var p = new GfxParticleParams { Quota = 5000, EmissionRate = 1f, TTL = 1f };
+            // int(TTL*rate)+1 = 1001 must still clamp to MaxQuota (750) when quota
+            // is present but non-binding, exactly like Godot clampi(pool, 0, MAX_QUOTA).
+            var p = new GfxParticleParams { Quota = 5000, EmissionRate = 1000f, TTL = 1f };
             Assert.AreEqual(GfxParticleParams.MaxQuota, p.PoolSize);
+        }
+
+        [Test]
+        public void ZeroQuotaSelectsEmptyPoolNotAutoSize()
+        {
+            // N03: Godot _calc_pool_size clamps the pool to Quota=0; only -1 is automatic.
+            var zero = new GfxParticleParams { Quota = 0, EmissionRate = 10f, TTL = 0.7f };
+            Assert.AreEqual(0, zero.PoolSize);
+            // N04: automatic size is int(TTL*rate)+1 = 8; Ceiling alone gave 7.
+            var auto = new GfxParticleParams { Quota = -1, EmissionRate = 10f, TTL = 0.7f };
+            Assert.AreEqual(8, auto.PoolSize);
+            var capped = new GfxParticleParams { Quota = 3, EmissionRate = 10f, TTL = 0.7f };
+            Assert.AreEqual(3, capped.PoolSize);
+        }
+
+        [Test]
+        public void ZeroQuotaSimulateProducesNoSlotsAtAnyTime()
+        {
+            var p = new GfxParticleParams
+            {
+                SystemId = "120",
+                Quota = 0,
+                EmissionRate = 10f,
+                TTL = 0.7f,
+                Speed = 3f,
+                IsBind = true,
+                EmitterEnabled = true,
+                RandomSeed = 41,
+                ColorMin = GfxMath.ColorWhite(),
+                ColorMax = GfxMath.ColorWhite()
+            };
+            var kps = new List<GfxKeypointSpec>
+            {
+                new GfxKeypointSpec { TimeSpan = 2000f, Pos = GfxMath.Vec3Zero(), Dir = GfxMath.QuatIdentity(), Color = GfxMath.ColorWhite(), Scale = 1f }
+            };
+            var sim = new GfxParticleSim(p, kps, null);
+            foreach (var t in new[] { 0f, 100f, 500f, 700f, 799.99f, 800f, 1499.99f, 1500f, 3000f })
+            {
+                var slots = sim.Simulate(t, 3000f, 0f, 3000f, 1, 0f, false);
+                Assert.AreEqual(0, slots.Length, "t=" + t);
+            }
+        }
+
+        [Test]
+        public void AutoPoolKeepsFirstEmissionAliveAtWindowEdge()
+        {
+            // N04: rate=10, TTL=0.7 -> pool 8 (Godot), not 7; at t=799.99ms emission 0
+            // still has age 0.69999 < TTL in Godot and must stay alive in Unity too.
+            var p = new GfxParticleParams
+            {
+                SystemId = "120",
+                Quota = -1,
+                EmissionRate = 10f,
+                TTL = 0.7f,
+                Speed = 3f,
+                IsBind = true,
+                EmitterEnabled = true,
+                RandomSeed = 41,
+                ColorMin = GfxMath.ColorWhite(),
+                ColorMax = GfxMath.ColorWhite()
+            };
+            Assert.AreEqual(8, p.PoolSize);
+            var kps = new List<GfxKeypointSpec>
+            {
+                new GfxKeypointSpec { TimeSpan = 2000f, Pos = GfxMath.Vec3Zero(), Dir = GfxMath.QuatIdentity(), Color = GfxMath.ColorWhite(), Scale = 1f }
+            };
+            var sim = new GfxParticleSim(p, kps, null);
+            var slots = sim.Simulate(799.99f, 3000f, 0f, 3000f, 1, 0f, false);
+            var firstAlive = false;
+            foreach (var s in slots)
+                if (s.Alive && s.EIdx == 0f)
+                    firstAlive = true;
+            Assert.IsTrue(firstAlive, "emission 0 must survive until age 0.69999");
+        }
+
+        [Test]
+        public void SerializedParticleRestoresAnimationAndAdvancesGlobalSheet()
+        {
+            var doc = new GfxParser().Parse(PointGfx);
+            var element = doc.Elements[0];
+            element.Properties["TexRow"] = "5";
+            element.Properties["TexCol"] = "6";
+            element.Properties["TexInterval"] = "40";
+            element.Keypoints[0].Properties["Position"] = "1, 2, 3";
+            var built = GfxSceneBuilder.Build(doc, "SerializationTest");
+            var original = built.Root.GetComponentsInChildren<GfxParticleDriver>()[0];
+            var go = new GameObject("ReloadedParticle");
+            try
+            {
+                var restored = go.AddComponent<GfxParticleDriver>();
+                UnityEditor.EditorJsonUtility.FromJsonOverwrite(
+                    UnityEditor.EditorJsonUtility.ToJson(original), restored);
+                go.AddComponent<ParticleSystem>();
+                go.GetComponent<ParticleSystemRenderer>().sharedMaterial =
+                    new Material(original.GetComponent<ParticleSystemRenderer>().sharedMaterial);
+                Assert.AreEqual(1f, restored.GetKeypoints()[0].Pos[0]);
+                restored.OnGfxTick(80f, 1f);
+                var mat = go.GetComponent<ParticleSystemRenderer>().sharedMaterial;
+                var block = new MaterialPropertyBlock();
+                restored.GetComponent<Renderer>().GetPropertyBlock(block);
+                var first = block.GetVector("_UvRect");
+                restored.OnGfxTick(120f, 1f);
+                restored.GetComponent<Renderer>().GetPropertyBlock(block);
+                var next = block.GetVector("_UvRect");
+                Assert.AreEqual(1f / 6f, first.x, 0.0001f);
+                Assert.AreEqual(1f / 5f, first.y, 0.0001f);
+                Assert.AreNotEqual(first.z, next.z);
+                Assert.Greater(go.GetComponent<ParticleSystem>().particleCount, 0);
+                Assert.IsFalse(go.GetComponent<ParticleSystem>().textureSheetAnimation.enabled);
+                Assert.AreEqual(1f, mat.GetFloat("_UseVertexColor"));
+                Assert.AreEqual(0f, mat.GetFloat("_ZWrite"));
+                Object.DestroyImmediate(mat);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(built.Root);
+            }
         }
     }
 }

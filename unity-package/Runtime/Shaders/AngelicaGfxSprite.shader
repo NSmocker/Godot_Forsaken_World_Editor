@@ -9,11 +9,14 @@ Shader "Forsaken World/Angelica Gfx Sprite"
         _BaseMap ("Albedo", 2D) = "white" {}
         _BaseColor ("Color", Color) = (1, 1, 1, 1)
         _UvRect ("UV scale.xy offset.zw", Vector) = (1, 1, 0, 0)
+        _UvExchange ("Exchange UV axes", Float) = 0
+        _UseVertexColor ("Particle vertex color", Float) = 0
         _GfxAlpha ("GFX alpha", Range(0, 1)) = 1
         _Warp ("Warp heat distortion", Float) = 0
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 5
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 10
         _ZWrite ("ZWrite", Float) = 0
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest ("ZTest", Float) = 4
     }
     SubShader
     {
@@ -30,6 +33,7 @@ Shader "Forsaken World/Angelica Gfx Sprite"
             Tags { "LightMode"="SRPDefaultUnlit" }
             Cull Off
             ZWrite [_ZWrite]
+            ZTest [_ZTest]
             Blend [_SrcBlend] [_DstBlend]
             HLSLPROGRAM
             #pragma target 3.0
@@ -42,6 +46,8 @@ Shader "Forsaken World/Angelica Gfx Sprite"
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
                 float4 _UvRect;
+                float _UvExchange;
+                float _UseVertexColor;
                 float _GfxAlpha;
                 float _Warp;
             CBUFFER_END
@@ -49,17 +55,24 @@ Shader "Forsaken World/Angelica Gfx Sprite"
             {
                 float4 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
+                half4 color : COLOR;
             };
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
+                half4 color : COLOR;
             };
             Varyings Vert(Attributes input)
             {
                 Varyings output;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-                float2 uv = input.uv * _UvRect.xy + _UvRect.zw;
+                float2 unitUV = input.uv;
+                unitUV.y = lerp(unitUV.y, 1.0 - unitUV.y, _UseVertexColor);
+                unitUV = lerp(unitUV, unitUV.yx, _UvExchange);
+                float2 uv = unitUV * _UvRect.xy + _UvRect.zw;
+                uv.y = 1.0 - uv.y;
+                output.color = lerp(half4(1,1,1,1), input.color, _UseVertexColor);
                 output.uv = uv;
                 return output;
             }
@@ -79,7 +92,7 @@ Shader "Forsaken World/Angelica Gfx Sprite"
                     half3 distorted = SampleSceneColor(screenUV + offset);
                     return half4(distorted, tex.a);
                 }
-                half4 col = tex * _BaseColor;
+                half4 col = tex * _BaseColor * input.color;
                 col.a *= _GfxAlpha;
                 return col;
             }

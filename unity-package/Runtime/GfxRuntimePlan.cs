@@ -23,10 +23,16 @@ namespace SilverEcho.ForsakenWorld
 
     public sealed class GfxElementPlan
     {
+        // Raw source retains controller arrays that Unity cannot serialize from
+        // the typed runtime keypoint graph (for example jagged color/path arrays).
+        public GfxElement SourceElement;
         public int Index = 1;
         public string SystemId = string.Empty;
         public bool IsStub = true;
         public string Name = string.Empty;
+        // Godot 4.7 String.num(index) yields "9.0"; Node sanitizes '.' to '_'.
+        // Keep Unity display names stable while preserving imported particle randomness.
+        public string GodotNodeName = string.Empty;
         public Dictionary<string, string> Properties =
             new Dictionary<string, string>(StringComparer.Ordinal);
         public List<Dictionary<string, string>> Affectors =
@@ -137,7 +143,9 @@ namespace SilverEcho.ForsakenWorld
                 var godotNode = GfxElementRegistry.HasGodotElementScript(id);
                 var el = new GfxElementPlan
                 {
+                    SourceElement = element,
                     Index = index,
+                    GodotNodeName = godotNode ? "Element_" + index + "_0_ID_" + id : string.Empty,
                     SystemId = id,
                     IsStub = !isPorted,
                     Name = godotNode

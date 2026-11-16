@@ -177,6 +177,18 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void UvExchangeSwapsInputAxesBeforeAsymmetricAtlas()
+        {
+            var p = new GfxSpriteParams { TexCol = 2, TexRow = 3,
+                TexInterval = 100, UvExchange = true, UReverse = true };
+            var uv = GfxSpriteUvEval.Evaluate(p, 150);
+            Assert.IsTrue(uv.Exchange);
+            // Input(.2,.8) -> swap(.8,.2) -> reverse(.2,.2) -> frame1.
+            Assert.AreEqual(.6f, .8f * uv.ScaleU + uv.OffsetU, 1e-6f);
+            Assert.AreEqual(.2f / 3f, .2f * uv.ScaleV + uv.OffsetV, 1e-6f);
+        }
+
+        [Test]
         public void Id100WithoutRotFromViewUsesDirection()
         {
             var dir = GfxMath.QuatIdentity();

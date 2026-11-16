@@ -25,6 +25,7 @@ namespace SilverEcho.ForsakenWorld
         public float SpeedVel = 1f;
         public bool Bind = true;
         public bool Spline;
+        public int SplineMode;
         public int TexRow = 1;
         public int TexCol = 1;
         public float TexInterval = 50f;
@@ -83,6 +84,7 @@ namespace SilverEcho.ForsakenWorld
             p.SpeedVel = GfxPropertyValues.Float(properties, "Speed_Vel", 1f);
             p.Bind = GfxPropertyValues.Bool(properties, "Bind", true);
             p.Spline = GfxPropertyValues.Bool(properties, "Spline", false);
+            p.SplineMode = GfxPropertyValues.Int(properties, "Spline", 0);
             p.TexRow = Math.Max(1, GfxPropertyValues.Int(properties, "TexRow", 1));
             p.TexCol = Math.Max(1, GfxPropertyValues.Int(properties, "TexCol", 1));
             p.TexInterval = Math.Max(1f, GfxPropertyValues.Float(properties, "TexInterval", 50f));

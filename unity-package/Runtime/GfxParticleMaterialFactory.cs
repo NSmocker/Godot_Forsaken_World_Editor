@@ -37,6 +37,7 @@ namespace SilverEcho.ForsakenWorld
                 name = string.IsNullOrEmpty(name) ? "GfxParticle" : name
             };
             mat.renderQueue = (int)RenderQueue.Transparent;
+            if (mat.HasProperty("_UseVertexColor")) mat.SetFloat("_UseVertexColor", 1f);
             if (mat.HasProperty("_SrcBlend"))
                 mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
             if (mat.HasProperty("_DstBlend"))
@@ -46,9 +47,15 @@ namespace SilverEcho.ForsakenWorld
                     additive ? (float)BlendMode.One : (float)BlendMode.OneMinusSrcAlpha);
             }
 
+            // A04: Godot create_id_120 keys depth-test disable on z_test_enabled
+            // (= ZEnable && !2DRender), matching gfx_parser.gd:102-105.
             var zTest = zEnable && !gfx2dRender;
+            if (mat.HasProperty("_ZTest"))
+                mat.SetFloat("_ZTest", zTest
+                    ? (float)CompareFunction.LessEqual
+                    : (float)CompareFunction.Always);
             if (mat.HasProperty("_ZWrite"))
-                mat.SetFloat("_ZWrite", zTest ? 1f : 0f);
+                mat.SetFloat("_ZWrite", 0f); // Translucent quads must not occlude subsequent layers.
 
             if (texture != null)
             {

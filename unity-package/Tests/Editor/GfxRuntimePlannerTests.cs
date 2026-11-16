@@ -35,6 +35,24 @@ namespace SilverEcho.ForsakenWorld.Tests
             "KEYPOINTCOUNT: 0\n";
 
         [Test]
+        public void ImportedParticleSeedMatchesGodotSanitizedNodeName()
+        {
+            var gfx = new StringBuilder();
+            for (var i = 0; i < 8; i++)
+                gfx.Append("GFXELEMENTID: 101\nStartTime: 0\nKEYPOINTCOUNT: 0\n");
+            gfx.Append("GFXELEMENTID: 123\nStartTime: 0\nKEYPOINTCOUNT: 0\n");
+            var built = GfxSceneBuilder.Build(new GfxParser().Parse(gfx.ToString()), "Seed regression");
+            try
+            {
+                var particle = built.Root.GetComponentInChildren<GfxParticleDriver>();
+                Assert.AreEqual("Element_9_ID_123", particle.name);
+                // Measured from production Godot parser: Element_9_0_ID_123.
+                Assert.AreEqual(44631, particle.Params.RandomSeed);
+            }
+            finally { Object.DestroyImmediate(built.Root); }
+        }
+
+        [Test]
         public void ElementNumberingSkipsIdsWithoutGodotScriptAndSeedsUseGodotHash()
         {
             // gfx_parser.build_file_node: element_count advances only for gfx_element_<id>.gd.
@@ -50,6 +68,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual("Skipped_ID_999", plan.Elements[1].Name);
             Assert.AreEqual("Element_2_ID_102", plan.Elements[2].Name);
             Assert.AreEqual("Element_3_ID_120", plan.Elements[3].Name);
+            Assert.AreEqual("Element_3_0_ID_120", plan.Elements[3].GodotNodeName);
             // Godot hash(String) djb2 (x*33 + c) and Random_Seed = hash & 0xFFFF.
             Assert.AreEqual(1000507488u, GfxMath.GodotStringHash("Element_1_ID_150"));
             Assert.AreEqual(34912, GfxMath.GodotNodeSeed("Element_1_ID_150"));

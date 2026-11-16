@@ -129,6 +129,24 @@ namespace SilverEcho.ForsakenWorld
             quat = GfxMath.SlerpQuat(quats[cur], quats[cur + 1], f);
         }
 
+        /// <summary>ID100/101 raw vertex-array interpolation (not the CPU smoothed path).</summary>
+        public static void InterpSpriteVertices(
+            float[][] vertices, float progress, out float[] pos, out float[] quat)
+        {
+            pos = GfxMath.Vec3Zero();
+            quat = GfxMath.QuatIdentity();
+            if (vertices == null || vertices.Length < 2) return;
+            var f = GfxMath.Clamp(progress, 0f, 1f) * (vertices.Length - 1);
+            var i0 = (int)Math.Floor(f);
+            var i1 = Math.Min(i0 + 1, vertices.Length - 1);
+            pos = GfxMath.Lerp3(vertices[i0], vertices[i1], f - i0);
+            var dir = GfxMath.Sub3(vertices[i1], vertices[i0]);
+            if (GfxMath.Length3(dir) < 0.001f && i0 > 0)
+                dir = GfxMath.Sub3(vertices[i0], vertices[i0 - 1]);
+            if (GfxMath.Length3(dir) > 0.001f)
+                quat = GfxMath.BuildLookQuat(dir);
+        }
+
         public static float[] Bezier4(
             float[] p0, float[] p1, float[] p2, float[] p3, float t)
         {

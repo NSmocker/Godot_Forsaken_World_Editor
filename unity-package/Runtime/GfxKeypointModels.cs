@@ -41,6 +41,8 @@ namespace SilverEcho.ForsakenWorld
 
         // 110
         public GfxCurvePathData CurvePath;
+        // ID100/101 shaders interpolate the source vertices uniformly by index.
+        public float[][] CurveVertices = Array.Empty<float[]>();
         public bool CalcDir;
 
         // 111

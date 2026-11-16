@@ -8,7 +8,9 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _BaseColor;
     float4 _UvRect;
-    float _GfxAlpha;
+    float _UvExchange;
+    float _UseVertexColor;
+                float _GfxAlpha;
     float _Warp;
 CBUFFER_END
 
@@ -16,18 +18,25 @@ struct Attributes
 {
     float4 positionOS : POSITION;
     float2 uv : TEXCOORD0;
+                half4 color : COLOR;
 };
 struct Varyings
 {
     float4 positionCS : SV_POSITION;
     float2 uv : TEXCOORD0;
+                half4 color : COLOR;
 };
 
 Varyings Vert(Attributes input)
 {
     Varyings output;
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-    output.uv = input.uv * _UvRect.xy + _UvRect.zw;
+    float2 unitUV = input.uv;
+    unitUV.y = lerp(unitUV.y, 1.0 - unitUV.y, _UseVertexColor);
+    unitUV = lerp(unitUV, unitUV.yx, _UvExchange);
+    output.uv = unitUV * _UvRect.xy + _UvRect.zw;
+    output.uv.y = 1.0 - output.uv.y;
+    output.color = lerp(half4(1,1,1,1), input.color, _UseVertexColor);
     return output;
 }
 
@@ -46,7 +55,7 @@ half4 Frag(Varyings input) : SV_Target
         half3 distorted = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, screenUV + offset).rgb;
         return half4(distorted, tex.a);
     }
-    half4 col = tex * _BaseColor;
+    half4 col = tex * _BaseColor * input.color;
     col.a *= _GfxAlpha;
     return col;
 }
