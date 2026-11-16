@@ -154,9 +154,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             driver.TimeManual = true;
             driver.OnGfxTick(500f, 1f); // 0.5 s → ~60 particles
             Assert.Greater(driver.ParticleCount, 10);
-            var ps = go.GetComponent<ParticleSystem>();
-            Assert.IsNotNull(ps);
-            Assert.Greater(ps.particleCount, 10);
+            Assert.IsNull(go.GetComponent<ParticleSystem>());
+            Assert.Greater(driver.RenderedParticleCount, 10);
+            Assert.IsNotNull(go.GetComponent<MeshRenderer>());
         }
 
         private static string WriteMinimalGphy(string entryName)

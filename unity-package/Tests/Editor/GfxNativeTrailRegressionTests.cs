@@ -15,13 +15,20 @@ namespace SilverEcho.ForsakenWorld.Tests
                 var d = go.AddComponent<GfxParticleDriver>();
                 d.Configure(new GfxParticleParams { Particle3D = true, Facing = false,
                     Quota = 1, EmissionRate = 1, TTL = 1 }, Texture2D.whiteTexture, false, null, null, null);
-                var r = go.GetComponent<ParticleSystemRenderer>();
-                Assert.AreEqual(ParticleSystemRenderMode.Mesh, r.renderMode);
-                Assert.IsNotNull(r.mesh);
-                Assert.AreEqual(4, r.mesh.vertexCount);
-                Assert.AreEqual(6, r.mesh.triangles.Length);
-                Assert.That(r.mesh.bounds.size.x, Is.EqualTo(1).Within(.0001));
-                Assert.That(r.mesh.bounds.size.y, Is.EqualTo(1).Within(.0001));
+                Assert.IsNull(go.GetComponent<ParticleSystem>());
+                d.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1 } });
+                d.IsEndless = true;
+                d.OnGfxTick(1100f, 1f);
+                var mesh = go.GetComponent<MeshFilter>().sharedMesh;
+                Assert.IsNotNull(mesh);
+                Assert.AreEqual(4, mesh.vertexCount);
+                Assert.AreEqual(6, mesh.triangles.Length);
+                var parts = new GfxRenderedParticle[1];
+                Assert.AreEqual(1, d.CopyRenderedParticles(parts));
+                Assert.AreEqual(GfxRuntimeParticleKind.Oriented, parts[0].Kind);
+                // Baked quad, not a unit Shuriken mesh: default width 0.25 is a half extent.
+                Assert.That(parts[0].FullSize.x, Is.EqualTo(0.5f).Within(.0001));
+                Assert.That(mesh.bounds.size.x, Is.GreaterThan(0.4f));
             }
             finally { Object.DestroyImmediate(go); }
         }
@@ -66,12 +73,13 @@ namespace SilverEcho.ForsakenWorld.Tests
                 d.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1,
                     Dir = GfxMath.QuatFromAxisAngle(GfxMath.Vec3(1, 0, 0), 1.2f) } });
                 d.OnGfxTick(200, 1);
-                var ps = go.GetComponent<ParticleSystem>();var a = new ParticleSystem.Particle[4];
-                Assert.AreEqual(1, ps.GetParticles(a));
-                Assert.That(a[0].startSize3D.x, Is.EqualTo(.4f).Within(.0001));
-                Assert.That(a[0].startSize3D.y, Is.EqualTo(.6f).Within(.0001));
-                Assert.That(a[0].rotation3D.x, Is.EqualTo(0).Within(.0001));
-                Assert.That(a[0].rotation3D.y, Is.EqualTo(0).Within(.0001));
+                var a = new GfxRenderedParticle[4];
+                Assert.AreEqual(1, d.CopyRenderedParticles(a));
+                Assert.AreEqual(GfxRuntimeParticleKind.Billboard, a[0].Kind);
+                Assert.That(a[0].FullSize.x, Is.EqualTo(.4f).Within(.0001));
+                Assert.That(a[0].FullSize.y, Is.EqualTo(.6f).Within(.0001));
+                Assert.That(a[0].RotationEuler.x, Is.EqualTo(0).Within(.0001));
+                Assert.That(a[0].RotationEuler.y, Is.EqualTo(0).Within(.0001));
             }
             finally { Object.DestroyImmediate(go); }
         }

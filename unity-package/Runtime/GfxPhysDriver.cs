@@ -7,7 +7,7 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// GFX ID 220 phys emitter (create_id_220.gd / gfx_phys_220.gd).
-    /// CPU sim via GfxPhysSim → Shuriken SetParticles. SPH / scene colliders /
+    /// CPU sim via GfxPhysSim → GfxRuntimeParticleBatch mesh. SPH / scene colliders /
     /// DummyEle / PhysX orientation (ParType 2) not ported (same as Godot).
     /// </summary>
     [ExecuteAlways]
@@ -18,13 +18,19 @@ namespace SilverEcho.ForsakenWorld
 
         [SerializeField, HideInInspector] private GfxPhysParams cachedParams;
         private GfxPhysSim sim;
-        private ParticleSystem particleSystem;
-        private ParticleSystemRenderer particleRenderer;
+        private MeshFilter meshFilter;
+        private MeshRenderer particleRenderer;
         private Material runtimeMaterial;
-        private ParticleSystem.Particle[] particleBuffer;
+        private readonly GfxRuntimeParticleBatch batch = new GfxRuntimeParticleBatch();
+        private GfxRenderedParticle[] particleBuffer = Array.Empty<GfxRenderedParticle>();
+        private GfxPhysSim.Sample[] samples = Array.Empty<GfxPhysSim.Sample>();
 
         public GfxPhysParams Params => cachedParams;
         public int ParticleCount => sim != null ? sim.ParticleCount : 0;
+        public int RenderedParticleCount => batch.Count;
+
+        public int CopyRenderedParticles(GfxRenderedParticle[] destination) =>
+            batch.CopyTo(destination);
 
         public void Configure(
             GfxPhysParams physParams,
@@ -39,18 +45,9 @@ namespace SilverEcho.ForsakenWorld
             SystemId = physParams.SystemId;
             EnsureComponents();
             sim = new GfxPhysSim(physParams);
-            particleBuffer = new ParticleSystem.Particle[physParams.PoolSize()];
-
-            var main = particleSystem.main;
-            main.playOnAwake = false;
-            main.loop = false;
-            main.simulationSpace = ParticleSystemSimulationSpace.Local;
-            main.maxParticles = physParams.PoolSize();
-            main.gravityModifier = 0f;
-            var emission = particleSystem.emission;
-            emission.enabled = false;
-            var shape = particleSystem.shape;
-            shape.enabled = false;
+            var pool = Math.Max(1, physParams.PoolSize());
+            particleBuffer = new GfxRenderedParticle[pool];
+            samples = new GfxPhysSim.Sample[pool];
 
             runtimeMaterial = GfxParticleMaterialFactory.Create(
                 "Phys_" + physParams.SystemId,
@@ -81,10 +78,10 @@ namespace SilverEcho.ForsakenWorld
             {
                 EnsureComponents();
                 sim = new GfxPhysSim(cachedParams);
-                particleBuffer = new ParticleSystem.Particle[cachedParams.PoolSize()];
-                runtimeMaterial = particleRenderer.sharedMaterial;
-                // Recreate the native edit-mode buffer without advancing simulation.
-                particleSystem.Simulate(0f, false, true, false);
+                var pool = Math.Max(1, cachedParams.PoolSize());
+                particleBuffer = new GfxRenderedParticle[pool];
+                samples = new GfxPhysSim.Sample[pool];
+                runtimeMaterial = particleRenderer != null ? particleRenderer.sharedMaterial : null;
             }
             GfxAlpha = alpha;
             if (TimeManual)
@@ -107,8 +104,8 @@ namespace SilverEcho.ForsakenWorld
                 if (sim != null && sim.Steps > 0)
                     sim.Reset();
                 SetVisualActive(false);
-                if (particleSystem != null)
-                    particleSystem.SetParticles(particleBuffer, 0);
+                batch.Set(particleBuffer, 0);
+                batch.Rebuild(transform, null);
                 return;
             }
 
@@ -139,32 +136,35 @@ namespace SilverEcho.ForsakenWorld
                 : 1f;
             var kpScale = stateNow.Scale;
 
-            int rawCount;
-            sim.WriteParticles(particleBuffer, out rawCount);
+            var rawCount = sim.CopySamples(samples);
+            var half = Math.Max(cachedParams.ParWidth, cachedParams.ParHeight) *
+                       Math.Max(0.0001f, kpScale);
             var outCount = 0;
-            for (var i = 0; i < rawCount; i++)
+            for (var i = 0; i < rawCount && outCount < particleBuffer.Length; i++)
             {
-                var c = particleBuffer[i].startColor;
-                var a = (int)Math.Round(c.a * kpA);
-                if (a < 5)
+                var sample = samples[i];
+                var a = sample.A * kpA;
+                if (a * 255f < 5f)
                     continue;
-                c.a = (byte)Math.Max(0, Math.Min(255, a));
-                particleBuffer[outCount] = particleBuffer[i];
-                particleBuffer[outCount].startColor = c;
-                particleBuffer[outCount].startSize =
-                    sim.ParticleScale(i) * Math.Max(cachedParams.ParWidth, cachedParams.ParHeight) *
-                    2f * Math.Max(0.0001f, kpScale);
-                outCount++;
+                var size = sample.Scale * half;
+                particleBuffer[outCount++] = new GfxRenderedParticle
+                {
+                    Position = new Vector3(sample.X, sample.Y, sample.Z),
+                    HalfWidth = size,
+                    HalfHeight = size,
+                    Color = new Color(sample.R, sample.G, sample.B, a),
+                    ScreenAngle = sample.Rotation,
+                    Orientation = Quaternion.identity,
+                    Move = Vector3.forward,
+                    Uv = new Rect(0f, 0f, 1f, 1f),
+                    Kind = GfxRuntimeParticleKind.Billboard
+                };
             }
 
-            // Edit Mode: SetParticles alone may leave particleCount at 0 until the system
-            // has been played/simulated at least once (real Unity; harness always counted).
-            if (!particleSystem.isPlaying && !particleSystem.isPaused)
-            {
-                particleSystem.Play(true);
-                particleSystem.Pause(true);
-            }
-            particleSystem.SetParticles(particleBuffer, outCount);
+            batch.Set(particleBuffer, outCount);
+            batch.Rebuild(transform, null);
+            if (meshFilter != null && meshFilter.sharedMesh != batch.Mesh)
+                meshFilter.sharedMesh = batch.Mesh;
             SetVisualActive(outCount > 0);
 
             if (runtimeMaterial != null && runtimeMaterial.HasProperty("_GfxAlpha"))
@@ -173,12 +173,42 @@ namespace SilverEcho.ForsakenWorld
 
         private void EnsureComponents()
         {
-            particleSystem = gameObject.GetComponent<ParticleSystem>();
-            if (particleSystem == null)
-                particleSystem = gameObject.AddComponent<ParticleSystem>();
-            particleRenderer = gameObject.GetComponent<ParticleSystemRenderer>();
+            var systems = gameObject.GetComponents<ParticleSystem>();
+            for (var i = 0; i < systems.Length; i++)
+            {
+                if (systems[i] != null)
+                    DestroyImmediate(systems[i]);
+            }
+
+            var legacy = gameObject.GetComponents<ParticleSystemRenderer>();
+            for (var i = 0; i < legacy.Length; i++)
+            {
+                if (legacy[i] != null)
+                    DestroyImmediate(legacy[i]);
+            }
+
+            meshFilter = gameObject.GetComponent<MeshFilter>();
+            if (meshFilter == null)
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+            particleRenderer = gameObject.GetComponent<MeshRenderer>();
             if (particleRenderer == null)
-                particleRenderer = gameObject.AddComponent<ParticleSystemRenderer>();
+                particleRenderer = gameObject.AddComponent<MeshRenderer>();
+            particleRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            particleRenderer.receiveShadows = false;
+            batch.EnsureMesh();
+            meshFilter.sharedMesh = batch.Mesh;
+        }
+
+        private void OnWillRenderObject()
+        {
+            if (batch.Count == 0)
+                return;
+            batch.Rebuild(transform, Camera.current);
+        }
+
+        private void OnDestroy()
+        {
+            batch.Release();
         }
 
         private void SetVisualActive(bool active)

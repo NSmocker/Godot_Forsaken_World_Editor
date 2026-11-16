@@ -168,7 +168,7 @@ public static class GfxCppUnityBatchCapture {
                 renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
             }
             foreach (var p in built.Root.GetComponentsInChildren<GfxPlayer>(true)) p.enabled = false;
-            foreach (var ps in built.Root.GetComponentsInChildren<ParticleSystem>(true)) ps.Simulate(0, false, true, false);
+            // Runtime particles are a MeshRenderer; no ParticleSystem buffer to prime.
             var player = built.Player;
             player.Playing = false; player.TimeManual = true;
 
@@ -192,12 +192,11 @@ public static class GfxCppUnityBatchCapture {
 
                 var elements = new JArray();
                 foreach (var d in built.Root.GetComponentsInChildren<GfxElementDriver>(true)) {
-                    var ps = d.GetComponent<ParticleSystem>();
                     var mf = d.GetComponent<MeshFilter>();
                     var element = new JObject {
                         ["name"] = d.name,
                         ["keypoints"] = d.GetKeypoints().Count,
-                        ["particles"] = ps == null ? -1 : ps.particleCount,
+                        ["particles"] = GfxRuntimeParticleBatch.RenderedCount(d),
                         ["mesh_vertices"] = mf == null || mf.sharedMesh == null ? -1 : mf.sharedMesh.vertexCount,
                         ["mesh_area"] = mf == null ? -1f : Area(mf.sharedMesh),
                         ["active"] = d.gameObject.activeInHierarchy

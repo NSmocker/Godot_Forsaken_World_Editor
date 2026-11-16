@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld
 {
@@ -64,22 +63,35 @@ namespace SilverEcho.ForsakenWorld
                 Step(emitterAtMs);
         }
 
-        public void WriteParticles(ParticleSystem.Particle[] buffer, out int count)
+        public struct Sample
         {
-            count = Math.Min(pos.Count, buffer != null ? buffer.Length : 0);
+            public float X, Y, Z;
+            public float Scale;
+            public float Rotation;
+            public float R, G, B, A;
+        }
+
+        public int CopySamples(Sample[] buffer)
+        {
+            var count = Math.Min(pos.Count, buffer != null ? buffer.Length : 0);
             for (var i = 0; i < count; i++)
             {
                 var c = color[i];
-                buffer[i] = new ParticleSystem.Particle
+                buffer[i] = new Sample
                 {
-                    position = new Vector3(pos[i][0], pos[i][1], pos[i][2]),
-                    startSize = scale[i] * Math.Max(p.ParWidth, p.ParHeight) * 2f,
-                    startColor = new Color(c[0], c[1], c[2], c[3]),
-                    remainingLifetime = p.Lifetime > 0f ? Math.Max(0.01f, p.Lifetime - life[i]) : 1000f,
-                    startLifetime = p.Lifetime > 0f ? p.Lifetime : 1000f,
-                    rotation3D = new Vector3(0f, 0f, rot[i])
+                    X = pos[i][0],
+                    Y = pos[i][1],
+                    Z = pos[i][2],
+                    Scale = scale[i],
+                    Rotation = rot[i],
+                    R = c[0],
+                    G = c[1],
+                    B = c[2],
+                    A = c[3]
                 };
             }
+
+            return count;
         }
 
         /// <summary>Particle scale factor (without ParWidth/Height) for KP size multiply.</summary>

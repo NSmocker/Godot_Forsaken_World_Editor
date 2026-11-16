@@ -187,12 +187,15 @@ namespace SilverEcho.ForsakenWorld.Tests
             return driver;
         }
 
-        private static ParticleSystem.Particle[] EmittedParticles(GfxParticleDriver driver)
+        private static GfxRenderedParticle[] EmittedParticles(GfxParticleDriver driver)
         {
-            var ps = driver.GetComponent<ParticleSystem>();
-            var parts = new ParticleSystem.Particle[ps.particleCount];
-            ps.GetParticles(parts);
-            return parts;
+            var parts = new GfxRenderedParticle[System.Math.Max(1, driver.RenderedParticleCount)];
+            var n = driver.CopyRenderedParticles(parts);
+            if (n == parts.Length)
+                return parts;
+            var trimmed = new GfxRenderedParticle[n];
+            System.Array.Copy(parts, trimmed, n);
+            return trimmed;
         }
 
         [Test]
@@ -211,8 +214,8 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.AreEqual(2, parts.Length);
                 // Births at 500ms and 1000ms of shared time → target spans of
                 // 250ms and 750ms after its 250ms StartTime → x 0.25 / 0.75.
-                Assert.AreEqual(0.25f, parts[0].position.x, 0.01f);
-                Assert.AreEqual(0.75f, parts[1].position.x, 0.01f);
+                Assert.AreEqual(0.25f, parts[0].Position.x, 0.01f);
+                Assert.AreEqual(0.75f, parts[1].Position.x, 0.01f);
             }
             finally
             {
@@ -233,7 +236,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 var parts = EmittedParticles(driver);
                 Assert.AreEqual(1, parts.Length);
                 // Birth at 500ms is 500ms before the target starts → identity pose.
-                Assert.AreEqual(0f, parts[0].position.x, 0.01f);
+                Assert.AreEqual(0f, parts[0].Position.x, 0.01f);
             }
             finally
             {
@@ -260,7 +263,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 driver.OnGfxTick(1250f, 1f);
                 var parts = EmittedParticles(driver);
                 Assert.Greater(parts.Length, 0);
-                Assert.AreEqual(0f, parts[0].position.x, 0.01f);
+                Assert.AreEqual(0f, parts[0].Position.x, 0.01f);
                 // Clear detaches the sampler again.
                 var target = NewTarget(root, 1f);
                 driver.SetBindEleTarget(target, 250f);
@@ -272,7 +275,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 driver.OnGfxTick(1250f, 1f);
                 parts = EmittedParticles(driver);
                 Assert.Greater(parts.Length, 0);
-                Assert.AreEqual(0f, parts[0].position.x, 0.01f);
+                Assert.AreEqual(0f, parts[0].Position.x, 0.01f);
             }
             finally
             {
@@ -309,12 +312,10 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.IsNotNull(resolved);
                 Assert.AreEqual("Ring", resolved.ElementName);
                 restored.OnGfxTick(1250f, 1f);
-                var ps = restoredGo.GetComponent<ParticleSystem>();
-                Assert.Greater(ps.particleCount, 0);
-                var parts = new ParticleSystem.Particle[ps.particleCount];
-                ps.GetParticles(parts);
-                Assert.AreEqual(0.25f, parts[0].position.x, 0.01f);
-                Assert.AreEqual(0.75f, parts[1].position.x, 0.01f);
+                var parts = EmittedParticles(restored);
+                Assert.Greater(parts.Length, 0);
+                Assert.AreEqual(0.25f, parts[0].Position.x, 0.01f);
+                Assert.AreEqual(0.75f, parts[1].Position.x, 0.01f);
             }
             finally
             {

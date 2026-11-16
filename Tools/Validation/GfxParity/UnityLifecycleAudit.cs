@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEditor;
@@ -13,8 +14,8 @@ public static class GfxLifecycleAudit
  static void Tick(GameObject root) {foreach(var d in root.GetComponentsInChildren<GfxElementDriver>())d.OnGfxTick(100,1);}
  static JObject State(GameObject root) {
   var g=root.GetComponentInChildren<GfxGridDriver>();var p=root.GetComponentInChildren<GfxPhysDriver>();var b=root.GetComponentInChildren<GfxLtnBoltDriver>();
-  var ps=p.GetComponent<ParticleSystem>();var particles=new ParticleSystem.Particle[ps.particleCount];ps.GetParticles(particles);
-  return new JObject {["gridParams"]=g.Params!=null,["gridVisible"]=g.GetComponent<Renderer>().enabled,["gridData"]=g.Params==null?null:JObject.FromObject(g.Params),["gridVertices"]=JArray.FromObject(Array.ConvertAll(g.GetComponent<MeshFilter>().sharedMesh.vertices,v=>new[]{v.x,v.y,v.z})),["physParams"]=p.Params!=null,["physData"]=p.Params==null?null:JObject.FromObject(p.Params),["physParticles"]=p.ParticleCount,["physNativePositions"]=JArray.FromObject(Array.ConvertAll(particles,v=>new[]{v.position.x,v.position.y,v.position.z})),["boltParams"]=b.Params!=null,["boltStrokes"]=b.Strokes.Count,["boltChildObjects"]=b.transform.childCount};
+  var particles=new GfxRenderedParticle[System.Math.Max(1,p.RenderedParticleCount)];var nPhys=p.CopyRenderedParticles(particles);
+  return new JObject {["gridParams"]=g.Params!=null,["gridVisible"]=g.GetComponent<Renderer>().enabled,["gridData"]=g.Params==null?null:JObject.FromObject(g.Params),["gridVertices"]=JArray.FromObject(Array.ConvertAll(g.GetComponent<MeshFilter>().sharedMesh.vertices,v=>new[]{v.x,v.y,v.z})),["physParams"]=p.Params!=null,["physData"]=p.Params==null?null:JObject.FromObject(p.Params),["physParticles"]=p.ParticleCount,["physNativePositions"]=JArray.FromObject(System.Linq.Enumerable.Range(0,nPhys).Select(i=>new[]{particles[i].Position.x,particles[i].Position.y,particles[i].Position.z}).ToArray()),["boltParams"]=b.Params!=null,["boltStrokes"]=b.Strokes.Count,["boltChildObjects"]=b.transform.childCount};
  }
  public static object Main() {
   var scene=EditorSceneManager.NewPreviewScene();var root=new GameObject("Lifecycle audit");SceneManager.MoveGameObjectToScene(root,scene);

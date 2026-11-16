@@ -34,7 +34,7 @@ namespace SilverEcho.ForsakenWorld
     /// <summary>
     /// CPU particle simulation for GFX 120–125 mirroring gfx_particle_eval.gd /
     /// create_id_120.gd (stateless emission→slot FIFO, InitParticle, ApplyMotion, affectors).
-    /// Unity-free; drives Shuriken via GfxParticleDriver.SetParticles.
+    /// Unity-free; GfxParticleDriver draws the slots with GfxRuntimeParticleBatch.
     /// </summary>
     public sealed class GfxParticleSim
     {

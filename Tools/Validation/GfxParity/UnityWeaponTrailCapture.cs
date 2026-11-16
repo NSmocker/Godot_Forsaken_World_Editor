@@ -27,7 +27,7 @@ public static class UnityWeaponTrailCapture {
    var built=GfxSceneBuilder.BuildFromFile("B:/Git/PW146RUUnpackedAssets/gfx/人物/通用/武器/武器效果/2品法宝_加速_轨迹.gfx",null,index);
    SceneManager.MoveGameObjectToScene(built.Root,scene);
    foreach(var p in built.Root.GetComponentsInChildren<GfxPlayer>(true))p.enabled=false;
-   foreach(var ps in built.Root.GetComponentsInChildren<ParticleSystem>(true))ps.Simulate(0,false,true,false);
+   // Runtime particles are a MeshRenderer; no ParticleSystem buffer to prime.
    var player=built.Player;player.Playing=false;player.TimeManual=true;
    var samples=new JArray();
    for(int frame=1;frame<=30;frame++){

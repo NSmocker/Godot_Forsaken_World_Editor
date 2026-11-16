@@ -37,16 +37,14 @@ public static class GfxReferenceCapture {
     for(var i=0;i<elements.Length;i++){var src=savedElements[i].GetComponent<Renderer>();var dst=elements[i].GetComponent<Renderer>();if(src!=null&&dst!=null&&src.sharedMaterial!=null&&dst.sharedMaterial!=null&&src.sharedMaterial.HasProperty("_BaseMap"))dst.sharedMaterial.SetTexture("_BaseMap",src.sharedMaterial.GetTexture("_BaseMap"));}
     if(matchedSeed)foreach(var d in elements.OfType<GfxParticleDriver>()){d.Params.RandomSeed=GfxMath.GodotNodeSeed(d.name.Replace("_ID_","_0_ID_"));typeof(GfxParticleDriver).GetMethod("RebuildSim",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(d,null);}
     if(rebuild)foreach(var d in elements.OfType<GfxParticleDriver>())typeof(GfxParticleDriver).GetMethod("RebuildSim",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(d,null);
-    // Moving a live ParticleSystem into a preview scene invalidates its native buffer.
-    // Reinitialize without advancing; GFX will repopulate it on the next manual tick.
-    foreach(var d in elements.OfType<GfxParticleDriver>())d.GetComponent<ParticleSystem>().Simulate(0,false,true,false);
+    // Runtime particles are a MeshRenderer; moving the object does not drop a native buffer.
     saved.gameObject.SetActive(false);players=new[]{built.Player};
    }
    foreach(var p in players){p.Playing=false;p.TimeManual=true;p.enabled=false;}
    var rows=new JArray();foreach(var t in new[]{0f,100f,250f,500f,750f,1000f,1250f,1500f,1750f,1999f,2001f,2250f}){
     foreach(var p in players){p.TimeMs=t;p.Tick(0);}
     cam.Render();var old=RenderTexture.active;RenderTexture.active=rt;var tex=new Texture2D(354,394,TextureFormat.RGB24,false);
-    try{tex.ReadPixels(new Rect(0,0,354,394),0,0);tex.Apply();var path=Dir+"reference-"+(rebuild?"rebuild":fresh?"fresh":"saved")+"-"+t.ToString("0000")+".png";File.WriteAllBytes(path,tex.EncodeToPNG());var elements=new JArray();foreach(var p in players)foreach(var d in p.GetComponentsInChildren<GfxElementDriver>(true)){var ps=d.GetComponent<ParticleSystem>();elements.Add(new JObject{["name"]=d.name,["keypoints"]=d.GetKeypoints().Count,["particles"]=ps==null?-1:ps.particleCount});}rows.Add(new JObject{["timeMs"]=t,["image"]=path,["elements"]=elements});}
+    try{tex.ReadPixels(new Rect(0,0,354,394),0,0);tex.Apply();var path=Dir+"reference-"+(rebuild?"rebuild":fresh?"fresh":"saved")+"-"+t.ToString("0000")+".png";File.WriteAllBytes(path,tex.EncodeToPNG());var elements=new JArray();foreach(var p in players)foreach(var d in p.GetComponentsInChildren<GfxElementDriver>(true)){elements.Add(new JObject{["name"]=d.name,["keypoints"]=d.GetKeypoints().Count,["particles"]=GfxRuntimeParticleBatch.RenderedCount(d)});}rows.Add(new JObject{["timeMs"]=t,["image"]=path,["elements"]=elements});}
     finally{RenderTexture.active=old;UnityEngine.Object.DestroyImmediate(tex);}
    }
    foreach(var p in players){p.TimeMs=1000;p.Tick(0);}

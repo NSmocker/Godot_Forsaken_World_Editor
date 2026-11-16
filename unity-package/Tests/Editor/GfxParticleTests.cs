@@ -549,12 +549,10 @@ namespace SilverEcho.ForsakenWorld.Tests
                 var restored = go.AddComponent<GfxParticleDriver>();
                 UnityEditor.EditorJsonUtility.FromJsonOverwrite(
                     UnityEditor.EditorJsonUtility.ToJson(original), restored);
-                go.AddComponent<ParticleSystem>();
-                go.GetComponent<ParticleSystemRenderer>().sharedMaterial =
-                    new Material(original.GetComponent<ParticleSystemRenderer>().sharedMaterial);
                 Assert.AreEqual(1f, restored.GetKeypoints()[0].Pos[0]);
                 restored.OnGfxTick(80f, 1f);
-                var mat = go.GetComponent<ParticleSystemRenderer>().sharedMaterial;
+                Assert.IsNull(go.GetComponent<ParticleSystem>());
+                var mat = go.GetComponent<MeshRenderer>().sharedMaterial;
                 var block = new MaterialPropertyBlock();
                 restored.GetComponent<Renderer>().GetPropertyBlock(block);
                 var first = block.GetVector("_UvRect");
@@ -564,8 +562,7 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.AreEqual(1f / 6f, first.x, 0.0001f);
                 Assert.AreEqual(1f / 5f, first.y, 0.0001f);
                 Assert.AreNotEqual(first.z, next.z);
-                Assert.Greater(go.GetComponent<ParticleSystem>().particleCount, 0);
-                Assert.IsFalse(go.GetComponent<ParticleSystem>().textureSheetAnimation.enabled);
+                Assert.Greater(restored.RenderedParticleCount, 0);
                 Assert.AreEqual(1f, mat.GetFloat("_UseVertexColor"));
                 Assert.AreEqual(0f, mat.GetFloat("_ZWrite"));
                 Object.DestroyImmediate(mat);

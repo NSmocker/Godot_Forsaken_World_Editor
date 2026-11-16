@@ -7,8 +7,9 @@ namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
     /// CPU particle element for GFX IDs 120–125 (create_id_120–125.gd).
-    /// Simulates with GfxParticleSim (Godot gfx_particle_eval parity) and pushes
-    /// results into Unity ParticleSystem via SetParticles (Shuriken, not VFX Graph). DummyEle → GfxDummyParticlesDriver node copies (gfx_dummy_particles.gd; no MultiMesh).
+    /// Simulates with GfxParticleSim and draws a package MeshRenderer
+    /// (GfxRuntimeParticleBatch). No Unity ParticleSystem. DummyEle →
+    /// GfxDummyParticlesDriver node copies (gfx_dummy_particles.gd; no MultiMesh).
     /// </summary>
     [ExecuteAlways]
     public sealed class GfxParticleDriver : GfxElementDriver
@@ -19,14 +20,15 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private bool warpUnsupportedLogged;
         [SerializeField] private bool dummyUnsupportedLogged;
 
-        private ParticleSystem particleSystem;
-        private ParticleSystemRenderer particleRenderer;
+        private MeshFilter meshFilter;
+        private MeshRenderer particleRenderer;
         private Material runtimeMaterial;
         private MaterialPropertyBlock propertyBlock;
         private GfxParticleParams cachedParams;
         private GfxParticleSim sim;
         private GfxSpriteParams uvParams;
-        private ParticleSystem.Particle[] particleBuffer;
+        private readonly GfxRuntimeParticleBatch batch = new GfxRuntimeParticleBatch();
+        private GfxRenderedParticle[] particleBuffer = Array.Empty<GfxRenderedParticle>();
         private GfxDummyParticlesDriver dummyDriver;
         private bool dummyActive;
         private List<GfxCtrlSpec> affectors = new List<GfxCtrlSpec>();
@@ -44,6 +46,12 @@ namespace SilverEcho.ForsakenWorld
 
         public GfxParticleParams Params =>
             cachedParams ?? (cachedParams = paramsSerial.ToParams());
+
+        /// <summary>Quads last pushed to the runtime mesh. Not a Shuriken count.</summary>
+        public int RenderedParticleCount => batch.Count;
+
+        public int CopyRenderedParticles(GfxRenderedParticle[] destination) =>
+            batch.CopyTo(destination);
 
         public void Configure(
             GfxParticleParams particleParams,
@@ -69,7 +77,7 @@ namespace SilverEcho.ForsakenWorld
 
             EnsureComponents();
             RebuildSim();
-            ConfigureShuriken();
+            ConfigureRenderer();
 
             runtimeMaterial = GfxParticleMaterialFactory.Create(
                 string.IsNullOrEmpty(particleParams.Name)
@@ -201,9 +209,22 @@ namespace SilverEcho.ForsakenWorld
                     extraEmitterCtrls = source.ControlMethods.ConvertAll(GfxKeypointBuilder.FromDictionary)
                         .FindAll(c => c != null && c.Type == 110);
                 }
-                runtimeMaterial = particleRenderer.sharedMaterial;
                 RebuildSim();
-                ConfigureShuriken();
+                ConfigureRenderer();
+                if (particleRenderer.sharedMaterial == null)
+                {
+                    runtimeMaterial = GfxParticleMaterialFactory.Create(
+                        "Particle_" + Params.SystemId,
+                        Params.IsAdditiveBlend,
+                        Params.ZEnable,
+                        header2dRender,
+                        null);
+                    particleRenderer.sharedMaterial = runtimeMaterial;
+                }
+                else
+                {
+                    runtimeMaterial = particleRenderer.sharedMaterial;
+                }
                 dummyActive = !string.IsNullOrEmpty(Params.DummyEle);
                 if (dummyActive)
                     EnsureDummyDriver(Params.DummyEle, Math.Max(1, Params.PoolSize), null);
@@ -297,7 +318,8 @@ namespace SilverEcho.ForsakenWorld
             sim = new GfxParticleSim(Params, GetKeypoints(), affectors, extraEmitterCtrls);
             sim.BindEleSampler = BindEleSampler;
             var pool = Math.Max(1, Params.PoolSize);
-            particleBuffer = new ParticleSystem.Particle[pool];
+            if (particleBuffer.Length < pool)
+                particleBuffer = new GfxRenderedParticle[pool];
         }
 
         private Func<float, GfxParticleEmitterState> BindEleSampler
@@ -366,75 +388,54 @@ namespace SilverEcho.ForsakenWorld
 
         private void EnsureComponents()
         {
-            particleSystem = GetComponent<ParticleSystem>();
-            if (particleSystem == null)
-                particleSystem = gameObject.AddComponent<ParticleSystem>();
-            particleRenderer = GetComponent<ParticleSystemRenderer>();
+            StripParticleSystem();
+            meshFilter = GetComponent<MeshFilter>();
+            if (meshFilter == null)
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+            particleRenderer = GetComponent<MeshRenderer>();
             if (particleRenderer == null)
-                particleRenderer = gameObject.AddComponent<ParticleSystemRenderer>();
+                particleRenderer = gameObject.AddComponent<MeshRenderer>();
+            batch.EnsureMesh();
+            meshFilter.sharedMesh = batch.Mesh;
         }
 
-        private void ConfigureShuriken()
+        private void ConfigureRenderer()
         {
-            particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            var main = particleSystem.main;
-            main.startSize3D = true;
-            main.playOnAwake = false;
-            main.loop = false;
-            main.simulationSpace = ParticleSystemSimulationSpace.Local;
-            main.maxParticles = Math.Max(1, Params.PoolSize);
-            main.startLifetime = 1f;
-            main.startSize = 1f;
-            main.startColor = Color.white;
-            main.gravityModifier = 0f;
-            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
-
-            var emission = particleSystem.emission;
-            emission.enabled = false;
-            var shape = particleSystem.shape;
-            shape.enabled = false;
-
-            // Billboard for 2D particles; mesh/aligned for 3DParticle/Facing.
-            if (Params.Particle3D && Params.Facing)
-                particleRenderer.renderMode = ParticleSystemRenderMode.Stretch;
-            else if (Params.Particle3D)
-            {
-                particleRenderer.renderMode = ParticleSystemRenderMode.Mesh;
-                // Fill_Vert_3D: орієнтований quad, а не стандартний mesh Shuriken.
-                particleRenderer.mesh = NativeParticleQuad;
-                particleRenderer.alignment = ParticleSystemRenderSpace.Local;
-            }
-            else
-                particleRenderer.renderMode = ParticleSystemRenderMode.Billboard;
-
-            // Global sheets use _UvRect; Shuriken only handles individual particle frames.
-            var sheet = particleSystem.textureSheetAnimation;
-            if ((Params.IsUseParUV || Params.InitRandomTexture) &&
-                (Params.TexCol > 1 || Params.TexRow > 1) && !Params.TileMode)
-            {
-                sheet.enabled = true;
-                sheet.numTilesX = Math.Max(1, Params.TexCol);
-                sheet.numTilesY = Math.Max(1, Params.TexRow);
-                sheet.animation = ParticleSystemAnimationType.WholeSheet;
-                sheet.frameOverTime = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0f, 1f, 1f));
-            }
-            else
-            {
-                sheet.enabled = false;
-            }
-
-            particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            // A deserialized, stopped system has no native simulation buffer in edit mode.
-            // Initialize it without advancing; all particle state is supplied by GFX.
-            particleSystem.Simulate(0f, false, true, false);
+            EnsureComponents();
+            particleRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            particleRenderer.receiveShadows = false;
+            particleRenderer.lightProbeUsage = LightProbeUsage.Off;
+            particleRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
         }
+
+        private static void StripParticleSystem(GameObject go)
+        {
+            if (go == null)
+                return;
+            var systems = go.GetComponents<ParticleSystem>();
+            for (var i = 0; i < systems.Length; i++)
+            {
+                if (systems[i] != null)
+                    DestroyImmediate(systems[i]);
+            }
+
+            var renderers = go.GetComponents<ParticleSystemRenderer>();
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    DestroyImmediate(renderers[i]);
+            }
+        }
+
+        private void StripParticleSystem() => StripParticleSystem(gameObject);
 
         private void ApplySlots(GfxParticleSlot[] slots)
         {
-            if (particleSystem == null)
-                return;
+            if (meshFilter == null)
+                EnsureComponents();
             var alive = 0;
             var pool = particleBuffer != null ? particleBuffer.Length : 0;
+            var perParticleUv = Params.IsUseParUV || Params.InitRandomTexture;
             if (slots != null)
             {
                 for (var i = 0; i < slots.Length && alive < pool; i++)
@@ -460,69 +461,63 @@ namespace SilverEcho.ForsakenWorld
                         h *= s.KeyScale;
                     }
 
-                    var p = new ParticleSystem.Particle();
-                    p.position = new Vector3(s.Pos[0], s.Pos[1], s.Pos[2]);
-                    p.startColor = new Color(
-                        s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale);
-                    // A3DParticleSystemEx::Fill_Verts_2D використовує width/height
-                    // як піврозміри, а Shuriken — як повні розміри quad.
-                    p.startSize3D = new Vector3(w * 2f, h * 2f, 1f);
-
-                    p.remainingLifetime = Math.Max(0.0001f, Params.TTL - s.Age);
-                    p.startLifetime = Math.Max(0.0001f, Params.TTL);
-                    if (Params.Particle3D)
-                        p.rotation3D = QuaternionToEuler(s.Rot);
-                    else
-                        // Billboard обертається тільки в площині екрана.
-                        p.rotation = -s.BillboardAngle * Mathf.Rad2Deg;
-                    p.angularVelocity = 0f;
-                    p.velocity = Vector3.zero;
-                    // Encode sheet frame in remainingLifetime ratio for optional custom shaders;
-                    // TextureSheetAnimation uses startLifetime when global.
-                    if (Params.IsUseParUV || Params.InitRandomTexture)
+                    var kind = GfxRuntimeParticleKind.Billboard;
+                    var orientation = Quaternion.identity;
+                    if (Params.Particle3D && Params.Facing)
+                        kind = GfxRuntimeParticleKind.Stretch;
+                    else if (Params.Particle3D)
                     {
-                        var total = Math.Max(1, Params.TexCol * Params.TexRow);
-                        p.startLifetime = 1f;
-                        p.remainingLifetime = Math.Max(0.0001f, 1f - ((s.Frame + 0.01f) / total));
+                        kind = GfxRuntimeParticleKind.Oriented;
+                        var q = s.Rot;
+                        if (q != null && q.Length >= 4)
+                            orientation = new Quaternion(q[0], q[1], q[2], q[3]);
                     }
 
-                    particleBuffer[alive++] = p;
+                    var move = s.Move ?? GfxMath.Vec3(0f, 0f, 1f);
+                    particleBuffer[alive++] = new GfxRenderedParticle
+                    {
+                        Position = new Vector3(s.Pos[0], s.Pos[1], s.Pos[2]),
+                        HalfWidth = w,
+                        HalfHeight = h,
+                        Color = new Color(
+                            s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale),
+                        // Fill_Vert_2D rotates in the camera plane only.
+                        ScreenAngle = -s.BillboardAngle,
+                        Orientation = orientation,
+                        Move = new Vector3(move[0], move[1], move[2]),
+                        OrgCoefX = GfxRuntimeParticleBatch.OrgCoefficient(Params.OrgPt1),
+                        OrgCoefY = GfxRuntimeParticleBatch.OrgCoefficient(Params.OrgPt2),
+                        Uv = perParticleUv
+                            ? GfxRuntimeParticleBatch.FrameUv(s.Frame, Params.TexCol, Params.TexRow)
+                            : new Rect(0f, 0f, 1f, 1f),
+                        Kind = kind
+                    };
                 }
             }
 
-            particleSystem.SetParticles(particleBuffer, alive);
+            batch.Set(particleBuffer, alive);
+            batch.Rebuild(transform, null);
+            if (meshFilter != null && meshFilter.sharedMesh != batch.Mesh)
+                meshFilter.sharedMesh = batch.Mesh;
         }
 
-        private static Vector3 QuaternionToEuler(float[] q)
+        private void OnWillRenderObject()
         {
-            // Approximate for Mesh/Stretch modes; Billboard ignores rotation3D pitch/yaw.
-            if (q == null || q.Length < 4)
-                return Vector3.zero;
-            var qq = new Quaternion(q[0], q[1], q[2], q[3]);
-            return qq.eulerAngles;
-        }
-
-        private static Mesh nativeParticleQuad;
-        private static Mesh NativeParticleQuad
-        {
-            get
-            {
-                if (nativeParticleQuad != null) return nativeParticleQuad;
-                nativeParticleQuad = new Mesh { name = "Angelica particle quad", hideFlags = HideFlags.HideAndDontSave };
-                nativeParticleQuad.vertices = new[] { new Vector3(-.5f,.5f,0), new Vector3(.5f,.5f,0),
-                    new Vector3(-.5f,-.5f,0), new Vector3(.5f,-.5f,0) };
-                nativeParticleQuad.uv = new[] { new Vector2(0,1),new Vector2(1,1),new Vector2(0,0),new Vector2(1,0) };
-                nativeParticleQuad.triangles = new[] { 0,1,2,2,1,3 };
-                nativeParticleQuad.RecalculateBounds();
-                return nativeParticleQuad;
-            }
+            if (batch.Count == 0)
+                return;
+            batch.Rebuild(transform, Camera.current);
         }
 
         private void SetVisualActive(bool active)
         {
             visualActive = active;
             if (particleRenderer != null)
-                particleRenderer.enabled = active;
+                particleRenderer.enabled = active && !dummyActive;
+        }
+
+        private void OnDestroy()
+        {
+            batch.Release();
         }
     }
 
