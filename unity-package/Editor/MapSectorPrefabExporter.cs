@@ -47,7 +47,13 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (buildings != null)
                     foreach (Transform group in buildings)
                         foreach (Transform building in group)
-                            Copy(building, Group(Group(roots[Owner(building.position)].transform, "Buildings"), group.name));
+                        {
+                            var parent = Group(Group(roots[Owner(building.position)].transform, "Buildings"), group.name);
+                            var litInstance = building.GetComponent<LitModelInstance>();
+                            var model = litInstance?.SourceData != null
+                                ? PrefabUtility.GetCorrespondingObjectFromSource(building.gameObject) : null;
+                            Copy(building, parent, model);
+                        }
 
                 var objects = map.transform.Find("Objects");
                 if (objects != null)
@@ -212,9 +218,10 @@ namespace SilverEcho.ForsakenWorld.Editor
             var group = new GameObject(name).transform; group.SetParent(parent, false); return group;
         }
 
-        private static GameObject Copy(Transform source, Transform parent)
+        private static GameObject Copy(Transform source, Transform parent, GameObject model = null)
         {
-            var copy = Object.Instantiate(source.gameObject, parent, false);
+            var copy = model != null ? (GameObject)PrefabUtility.InstantiatePrefab(model, parent) :
+                Object.Instantiate(source.gameObject, parent, false);
             copy.name = source.name;
             copy.transform.SetPositionAndRotation(source.position, source.rotation);
             copy.transform.localScale = source.lossyScale;

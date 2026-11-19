@@ -56,6 +56,7 @@ namespace SilverEcho.ForsakenWorld
             var first = reader.ReadUInt32LittleEndian();
             if (first >= BuildingFlagsVersion)
             {
+                document.BuildingVersion = first;
                 document.CollideOnly = reader.ReadByte() != 0;
             }
             else

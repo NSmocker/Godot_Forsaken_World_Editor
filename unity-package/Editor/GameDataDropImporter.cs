@@ -50,7 +50,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                         // A failed required leaf prevents its parent data asset as well as its prefab.
                         if (node.Required.Any(d => !assets.ContainsKey(d)))
                             throw new InvalidDataException("A required dependency could not be imported.");
-                        assets[node] = ImportData(node);
+                        assets[node] = ImportData(node, graph.Index, decoder, result);
                         result.ImportedFiles++;
                     }
                     catch (Exception e) when (IsImportError(e)) { node.Errors.Add(e.Message); }
@@ -124,7 +124,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             catch (Exception e) when (IsImportError(e)) { }
         }
 
-        private static Object ImportData(GameDataDependencyGraph.Node node)
+        private static Object ImportData(GameDataDependencyGraph.Node node, GameDataIndex index,
+            GfxTextDecoder decoder, Result result)
         {
             var f = node.File;
             switch (f.Extension)
@@ -143,6 +144,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 case "stck": return Save(StckAsset.CreateFrom(f.RelativePath, (StckDocument)node.Document), DataPath(f, "Tracks"));
                 case "ecm": return Save(EcmAsset.CreateFrom(f.RelativePath, (EcmDocument)node.Document), DataPath(f, "ECM"));
                 case "gfx": return Save(GfxAsset.CreateFrom(f.RelativePath, (GfxDocument)node.Document), DataPath(f, "GFX"));
+                case "bmd":
+                    var building = BuildingAssetImporter.ImportNative(f, index, decoder);
+                    result.Warnings.AddRange(building.Warnings);
+                    return AssetDatabase.LoadMainAssetAtPath(building.BmdPath);
                 default:
                     // Preserve auxiliary payloads without pretending they are standalone meshes/clips.
                     var path = ImportRoot + "/Sources/" + f.RelativePath + (f.Extension == "ttf" ? "" : ".bytes");
@@ -164,10 +169,6 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 case "smd": case "ecm":
                     return ExportModel(node, graph, decoder, result);
-                case "bmd":
-                    var building = BuildingAssetImporter.Import(file, graph.Index, decoder, false);
-                    result.Warnings.AddRange(building.Warnings);
-                    return string.IsNullOrEmpty(building.PrefabPath) ? null : AssetDatabase.LoadAssetAtPath<GameObject>(building.PrefabPath);
                 case "trn2": case "ecwld":
                     var terrain = file.Extension == "trn2" ? file : graph.Sibling(file, "trn2");
                     var map = MapAssetImporter.Import(terrain ?? file, graph.Index, decoder, false, terrain != null);

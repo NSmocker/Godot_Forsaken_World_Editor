@@ -326,8 +326,11 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private void Buildings(Node node, EcbsdDocument bsd)
         {
-            foreach (var file in MapAssetImporter.FindBuildingFiles(node.File.Name, Index,
-                         bsd == null ? null : EcbsdParser.BuildingFiles(bsd))) Add(node, file);
+            var sources = MapAssetImporter.FindBuildingSources(node.File.Name, Index,
+                bsd == null ? null : EcbsdParser.BuildingFiles(bsd), out _);
+            foreach (var source in sources)
+                if (source.ProjectPath == null)
+                    Add(node, source.ExternalFile);
         }
 
         public AngelicaUi CreateUi(GameDataFile file)

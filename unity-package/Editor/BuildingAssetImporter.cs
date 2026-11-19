@@ -29,6 +29,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         public sealed class Result
         {
             public string PrefabPath = string.Empty;
+            public string BmdPath = string.Empty;
             public string MeshPath = string.Empty;
             public int Surfaces;
             public int Vertices;
@@ -53,6 +54,9 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
+        internal static string GetNativeAssetPath(string relativePath) =>
+            GetOutputFolder(relativePath) + "/" + Sanitize(Path.GetFileNameWithoutExtension(relativePath)) + ".bmd";
+
         public static Result Import(
             GameDataFile file,
             GameDataIndex index,
@@ -62,6 +66,67 @@ namespace SilverEcho.ForsakenWorld.Editor
             using (new GameDataImportSession())
             using (GameDataImportSession.Stage("Buildings"))
                 return ImportCore(file, index, decoder, showProgress, parsedDocument);
+        }
+
+        /// <summary>Copy the BMD and let the scripted importer produce the Unity model.</summary>
+        public static Result ImportNative(GameDataFile file, GameDataIndex index, GfxTextDecoder decoder)
+        {
+            if (file == null) throw new ArgumentNullException(nameof(file));
+            if (index == null) throw new ArgumentNullException(nameof(index));
+
+            using (new GameDataImportSession())
+            using (GameDataImportSession.Stage("Native buildings"))
+            {
+                var bytes = File.ReadAllBytes(file.FullPath);
+                var document = new BmdParser(decoder ?? GameDataBrowserWindow.GetGameDataDecoder()).Parse(bytes, file.RelativePath);
+                var result = new Result { CollideOnly = document.CollideOnly };
+                var bindings = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+                var attempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!document.CollideOnly)
+                foreach (var surface in document.Meshes)
+                {
+                    if (surface.Indices.Length == 0 || string.IsNullOrWhiteSpace(surface.Texture) ||
+                        !attempted.Add(surface.Texture))
+                        continue;
+                    if (index.TryResolve(surface.Texture, out var source, out var error, true))
+                    {
+                        var texture = AssembledTextureImporter.ImportOrUpdate(source.FullPath, source.RelativePath);
+                        if (texture.Texture != null)
+                            bindings.Add(surface.Texture, texture.Texture);
+                        else
+                            result.Warnings.Add(texture.Error);
+                    }
+                    else
+                    {
+                        result.Warnings.Add(error);
+                    }
+                }
+
+                result.BmdPath = GetNativeAssetPath(file.RelativePath);
+                AngelicaAssetFolders.Ensure(Path.GetDirectoryName(result.BmdPath));
+                var destination = AngelicaAssetFolders.AssetPathToAbsolute(result.BmdPath);
+                bool changed = !File.Exists(destination) || !bytes.AsSpan().SequenceEqual(File.ReadAllBytes(destination));
+                if (changed)
+                    File.WriteAllBytes(destination, bytes);
+                if (changed || AssetImporter.GetAtPath(result.BmdPath) == null)
+                    AssetDatabase.ImportAsset(result.BmdPath, ImportAssetOptions.ForceSynchronousImport);
+
+                if (!(AssetImporter.GetAtPath(result.BmdPath) is BmdAssetImporter importer))
+                    throw new IOException("Could not import building BMD: " + result.BmdPath);
+                importer.SetSourceAndTextures(file.RelativePath, bindings);
+                var root = AssetDatabase.LoadAssetAtPath<GameObject>(result.BmdPath);
+                if (root == null)
+                    throw new IOException("Unity did not produce a model for " + result.BmdPath);
+                var mesh = root.GetComponent<MeshFilter>()?.sharedMesh;
+                if (mesh != null)
+                {
+                    result.Surfaces = mesh.subMeshCount;
+                    result.Vertices = mesh.vertexCount;
+                    for (int i = 0; i < mesh.subMeshCount; i++)
+                        result.Triangles += (int)mesh.GetIndexCount(i) / 3;
+                }
+                return result;
+            }
         }
 
         private static Result ImportCore(GameDataFile file, GameDataIndex index,
@@ -147,25 +212,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
 
                 Progress(showProgress, "Saving prefab", 0.8f);
-                root = new GameObject(Sanitize(file.DisplayName));
-                root.transform.localPosition = new Vector3(
-                    assembled.LocalPosition[0],
-                    assembled.LocalPosition[1],
-                    assembled.LocalPosition[2]);
-                root.transform.localRotation = new Quaternion(
-                    assembled.LocalRotation[0],
-                    assembled.LocalRotation[1],
-                    assembled.LocalRotation[2],
-                    assembled.LocalRotation[3]);
-                root.transform.localScale = new Vector3(
-                    assembled.LocalScale[0],
-                    assembled.LocalScale[1],
-                    assembled.LocalScale[2]);
-                root.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var renderer = root.AddComponent<MeshRenderer>();
-                renderer.sharedMaterials = materials;
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
+                root = CreateBuildingObject(Sanitize(file.DisplayName), assembled, mesh, materials);
 
                 result.PrefabPath = folder + "/" + Sanitize(file.Name) + ".prefab";
                 PrefabUtility.SaveAsPrefabAsset(root, result.PrefabPath, out bool saved);
@@ -248,18 +295,46 @@ namespace SilverEcho.ForsakenWorld.Editor
             return mesh;
         }
 
-        private static Material CreateMaterial(
-            AssembledBuildingSurface surface,
-            Shader shader,
-            GameDataIndex index,
-            List<string> warnings)
+        internal static GameObject CreateBuildingObject(string name, AssembledBuilding building, Mesh mesh, Material[] materials)
         {
-            if (shader == null)
-                shader = Shader.Find("Hidden/InternalErrorShader");
+            var root = new GameObject(name);
+            var p = building.LocalPosition;
+            var q = building.LocalRotation;
+            var s = building.LocalScale;
+            root.transform.SetLocalPositionAndRotation(new Vector3(p[0], p[1], p[2]), new Quaternion(q[0], q[1], q[2], q[3]));
+            root.transform.localScale = new Vector3(s[0], s[1], s[2]);
+            if (mesh == null)
+                return root;
 
-            if (shader == null)
-                throw new System.InvalidOperationException("No shader for material.");
+            root.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = root.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = materials;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            return root;
+        }
 
+        private static Material CreateMaterial(
+            AssembledBuildingSurface surface, Shader shader, GameDataIndex index, List<string> warnings)
+        {
+            if (string.IsNullOrEmpty(surface.TextureName))
+                return CreateLitModelMaterial(surface, shader, null);
+
+            if (!index.TryResolve(surface.TextureName, out var textureFile, out var error, true))
+            {
+                warnings.Add("Building texture " + surface.TextureName + " not found" +
+                    (string.IsNullOrEmpty(error) ? string.Empty : " (" + error + ")"));
+                return CreateLitModelMaterial(surface, shader, null);
+            }
+
+            var imported = AssembledTextureImporter.ImportOrUpdate(textureFile.FullPath, textureFile.RelativePath);
+            if (imported.Texture == null && !string.IsNullOrEmpty(imported.Error))
+                warnings.Add(imported.Error);
+            return CreateLitModelMaterial(surface, shader, imported.Texture);
+        }
+
+        internal static Material CreateLitModelMaterial(AssembledBuildingSurface surface, Shader shader, Texture2D texture)
+        {
             var material = new Material(shader)
             {
                 name = string.IsNullOrEmpty(surface.Name) ? "LitModel" : surface.Name
@@ -268,27 +343,11 @@ namespace SilverEcho.ForsakenWorld.Editor
             material.SetFloat("_Brightness", DefaultLitModelBrightness);
             material.SetFloat("_HasDayNightColors", 1f);
             material.SetFloat("_Cull", surface.TwoSided ? (float)CullMode.Off : (float)CullMode.Back);
-
-            if (string.IsNullOrEmpty(surface.TextureName))
-                return material;
-
-            if (!index.TryResolve(surface.TextureName, out var textureFile, out var error, true))
+            if (texture != null)
             {
-                warnings.Add("Building texture " + surface.TextureName + " not found" +
-                    (string.IsNullOrEmpty(error) ? string.Empty : " (" + error + ")"));
-                return material;
+                material.SetTexture("_Albedo", texture);
+                material.SetFloat("_AlbedoIsSRGB", GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat) ? 1f : 0f);
             }
-
-            var imported = AssembledTextureImporter.ImportOrUpdate(
-                textureFile.FullPath,
-                textureFile.RelativePath);
-            if (imported.Texture != null)
-            {
-                material.SetTexture("_Albedo", imported.Texture);
-                material.SetFloat("_AlbedoIsSRGB", GraphicsFormatUtility.IsSRGBFormat(imported.Texture.graphicsFormat) ? 1f : 0f);
-            }
-            else if (!string.IsNullOrEmpty(imported.Error))
-                warnings.Add(imported.Error);
             return material;
         }
 

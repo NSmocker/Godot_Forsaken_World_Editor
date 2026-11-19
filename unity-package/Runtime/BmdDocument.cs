@@ -9,6 +9,7 @@ namespace SilverEcho.ForsakenWorld
     public sealed class BmdDocument
     {
         public string SourcePath = string.Empty;
+        public uint BuildingVersion;
         public bool CollideOnly;
         public uint LitModelVersion;
         public float[] Scale = { 1f, 1f, 1f };

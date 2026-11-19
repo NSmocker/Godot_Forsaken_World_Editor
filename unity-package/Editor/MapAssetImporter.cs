@@ -405,19 +405,72 @@ namespace SilverEcho.ForsakenWorld.Editor
             return bundle;
         }
 
-        internal static List<GameDataFile> FindBuildingFiles(string mapName, GameDataIndex index, List<string> only)
+        internal sealed class BuildingSource
         {
+            internal string RelativePath;
+            internal GameDataFile ExternalFile;
+            internal string ProjectPath;
+        }
+
+        internal static List<BuildingSource> FindBuildingSources(string mapName, GameDataIndex index,
+            List<string> only, out int unused)
+        {
+            var comparer = StringComparer.OrdinalIgnoreCase;
             var prefix = "litmodels/" + mapName + "/";
             var files = index.Files.Where(f => f.Extension == "bmd" &&
                 f.RelativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
             if (files.Count == 0)
                 files = index.Files.Where(f => f.Extension == "bmd" &&
                     f.RelativePath.IndexOf("/" + prefix, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
-            if (only == null) return files;
-            var filter = new HashSet<string>(only.Select(p => p.Replace('\\', '/').TrimStart('/')), StringComparer.OrdinalIgnoreCase);
-            return files.Where(f => filter.Contains(f.RelativePath.Substring(
-                f.RelativePath.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) + prefix.Length)) ||
-                filter.Contains(f.Name + ".bmd")).ToList();
+
+            var originals = new Dictionary<string, GameDataFile>(comparer);
+            foreach (var file in files)
+                originals.TryAdd(BuildingRelativePath(file.RelativePath, prefix), file);
+
+            var project = AssetDatabase.GetAllAssetPaths()
+                .Where(path => path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) &&
+                    path.EndsWith(".bmd", StringComparison.OrdinalIgnoreCase))
+                .Select(path => (Path: path, Relative: BuildingRelativePath(path, prefix)))
+                .Where(asset => asset.Relative != null)
+                .OrderBy(asset => asset.Path.Count(c => c == '/'))
+                .ThenBy(asset => asset.Path, comparer)
+                .ToLookup(asset => asset.Relative, asset => asset.Path, comparer);
+
+            var filter = only == null ? null :
+                new HashSet<string>(only.Select(p => p.Replace('\\', '/').TrimStart('/')), comparer);
+            var sources = new List<BuildingSource>();
+            unused = 0;
+            foreach (var relative in originals.Keys.Union(project.Select(group => group.Key), comparer))
+            {
+                if (filter != null && !filter.Contains(relative) && !filter.Contains(Path.GetFileName(relative)))
+                {
+                    unused++;
+                    continue;
+                }
+
+                originals.TryGetValue(relative, out var file);
+                var projectPath = project[relative].FirstOrDefault(IsImportedBuilding);
+                if (projectPath == null && file != null)
+                {
+                    var nativePath = BuildingAssetImporter.GetNativeAssetPath(file.RelativePath);
+                    if (IsImportedBuilding(nativePath))
+                        projectPath = nativePath;
+                }
+                if (projectPath != null || file != null)
+                    sources.Add(new BuildingSource { RelativePath = relative, ExternalFile = file, ProjectPath = projectPath });
+            }
+            return sources;
+        }
+
+        private static bool IsImportedBuilding(string path) =>
+            AssetDatabase.GetMainAssetTypeAtPath(path) == typeof(GameObject);
+
+        private static string BuildingRelativePath(string path, string prefix)
+        {
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return path.Substring(prefix.Length);
+            var index = path.LastIndexOf("/" + prefix, StringComparison.OrdinalIgnoreCase);
+            return index < 0 ? null : path.Substring(index + prefix.Length + 1);
         }
 
         private static void PlaceBuildings(
@@ -435,88 +488,96 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (world.Bsd != null && !result.MissingBsdFile && world.Document != null)
                 only = EcbsdParser.BuildingFiles(world.Bsd);
 
-            // Collect .bmd under litmodels/<map>/ (case-insensitive path match).
-            var prefix = "litmodels/" + mapName + "/";
-            var all = FindBuildingFiles(mapName, index, null);
-
-            HashSet<string> filter = null;
-            if (only != null)
-            {
-                filter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var path in only)
-                    filter.Add(path.Replace('\\', '/').TrimStart('/'));
-            }
+            var sources = FindBuildingSources(mapName, index, only, out var unused);
+            result.UnusedBuildings = unused;
 
             var buildingsRoot = new GameObject("Buildings");
             buildingsRoot.transform.SetParent(root.transform, false);
             var groups = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
             var parser = new BmdParser(decoder);
-            var used = 0;
-            var unused = 0;
 
             // Keep only a bounded source snapshot alive. The same parsed documents drive
             // selection, texture prefetch and mesh assembly; no BMD is read a second time.
             const int buildingBatchSize = 32;
-            for (var offset = 0; offset < all.Count; offset += buildingBatchSize)
+            for (var offset = 0; offset < sources.Count; offset += buildingBatchSize)
             {
                 var prepared = new List<PreparedBuilding>(buildingBatchSize);
-                var end = Math.Min(offset + buildingBatchSize, all.Count);
+                var end = Math.Min(offset + buildingBatchSize, sources.Count);
                 for (var i = offset; i < end; i++)
                 {
-                    var file = all[i];
-                    if (!TryBuildingRelative(file, prefix, out var relUnderMap))
-                        continue;
-                    if (filter != null && !filter.Contains(relUnderMap) &&
-                        !filter.Contains(file.Name + ".bmd"))
-                    {
-                        unused++;
-                        continue;
-                    }
-
+                    var source = sources[i];
+                    var file = source.ExternalFile;
                     // Cancellation stays available even while rejecting many off-sector BMDs.
-                    Progress(showProgress, "Reading building " + file.Name, 0.5f);
+                    Progress(showProgress, "Reading building " + source.RelativePath, 0.5f);
+                    var projectModel = source.ProjectPath != null
+                        ? AssetDatabase.LoadAssetAtPath<GameObject>(source.ProjectPath) : null;
+                    var projectData = projectModel != null ? projectModel.GetComponent<LitModelInstance>()?.SourceData : null;
                     try
                     {
-                        var parsed = parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath);
+                        if (projectData == null && file == null)
+                            throw new InvalidDataException("Unity could not load the project BMD.");
+                        var parsed = projectData == null ? parser.Parse(File.ReadAllBytes(file.FullPath), file.RelativePath) :
+                            sectors != null ? projectData.ReadDocument(decoder) : null;
                         if (sectors != null && !sectors.Intersects(MapSectorFilter.BuildingBounds(parsed)))
                         {
                             result.SkippedOutsideSectors++;
                             continue;
                         }
-                        prepared.Add(new PreparedBuilding(file, relUnderMap, parsed));
+                        if (projectData != null && projectData.CollideOnly)
+                            continue;
+                        if (projectData != null && projectModel.GetComponent<MeshFilter>()?.sharedMesh == null)
+                            throw new InvalidDataException(source.ProjectPath + ": building has no drawable surfaces.");
+                        prepared.Add(projectData != null
+                            ? new PreparedBuilding(source, projectModel, null)
+                            : new PreparedBuilding(source, null, parsed));
                     }
                     catch (Exception e) when (
                         e is IOException || e is InvalidDataException || e is InvalidOperationException ||
                         e is NotSupportedException || e is FileNotFoundException)
                     {
-                        result.Warnings.Add(file.RelativePath + ": " + e.Message);
+                        result.Warnings.Add((projectData != null ? source.ProjectPath : file?.RelativePath ?? source.ProjectPath) +
+                            ": " + e.Message);
                     }
                 }
 
                 PrefetchBuildingTextures(prepared, index, showProgress);
                 foreach (var building in prepared)
                 {
-                    var file = building.File;
-                    Progress(showProgress, "Building " + file.Name, 0.5f);
-                    BuildingAssetImporter.Result imported;
-                    try
+                    var source = building.Source;
+                    var file = source.ExternalFile;
+                    Progress(showProgress, "Building " + source.RelativePath, 0.5f);
+                    var prefab = building.ProjectModel;
+                    var name = prefab != null ? prefab.name : file.DisplayName;
+                    if (prefab == null)
                     {
-                        imported = BuildingAssetImporter.Import(
-                            file, index, decoder, showProgress: false, parsedDocument: building.Document);
+                        BuildingAssetImporter.Result imported;
+                        try
+                        {
+                            imported = BuildingAssetImporter.Import(
+                                file, index, decoder, showProgress: false, parsedDocument: building.Document);
+                        }
+                        catch (Exception e) when (
+                            e is IOException || e is InvalidDataException || e is InvalidOperationException ||
+                            e is NotSupportedException || e is FileNotFoundException)
+                        {
+                            result.Warnings.Add(file.RelativePath + ": " + e.Message);
+                            continue;
+                        }
+
+                        result.Warnings.AddRange(imported.Warnings);
+                        if (imported.Skipped || string.IsNullOrEmpty(imported.PrefabPath))
+                            continue;
+                        prefab = AssetDatabase.LoadAssetAtPath<GameObject>(imported.PrefabPath);
                     }
-                    catch (Exception e) when (
-                        e is IOException || e is InvalidDataException || e is InvalidOperationException ||
-                        e is NotSupportedException || e is FileNotFoundException)
+
+                    var instance = prefab != null ? PrefabUtility.InstantiatePrefab(prefab) as GameObject : null;
+                    if (instance == null)
                     {
-                        result.Warnings.Add(file.RelativePath + ": " + e.Message);
+                        result.Warnings.Add(source.RelativePath + ": could not instantiate the building.");
                         continue;
                     }
 
-                    result.Warnings.AddRange(imported.Warnings);
-                    if (imported.Skipped || string.IsNullOrEmpty(imported.PrefabPath))
-                        continue;
-
-                    var groupName = Path.GetDirectoryName(building.RelativePath)?.Replace('\\', '/') ?? "";
+                    var groupName = Path.GetDirectoryName(source.RelativePath)?.Replace('\\', '/') ?? "";
                     if (string.IsNullOrEmpty(groupName))
                         groupName = "Main";
                     Transform group;
@@ -528,40 +589,38 @@ namespace SilverEcho.ForsakenWorld.Editor
                         groups[groupName] = group;
                     }
 
-                    var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(imported.PrefabPath);
-                    var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                    if (instance == null)
-                        instance = new GameObject(Sanitize(file.DisplayName));
-                    instance.name = Sanitize(file.DisplayName);
+                    instance.name = Sanitize(name);
                     instance.transform.SetParent(group, false);
 
                     // Add round-trip tracking for buildings
-                    var litInstance = instance.AddComponent<LitModelInstance>();
-                    litInstance.OriginalBmdPath = file.RelativePath;
+                    var litInstance = instance.GetComponent<LitModelInstance>();
+                    if (litInstance == null)
+                    {
+                        litInstance = instance.AddComponent<LitModelInstance>();
+                        litInstance.OriginalBmdPath = file.RelativePath;
+                    }
                     litInstance.OriginalEcwldIndex = -1; // Will be filled from ecwld if available
                     litInstance.RecordOriginalTransform();
 
                     result.Buildings++;
-                    result.BuildingPaths.Add(imported.PrefabPath);
-                    used++;
+                    result.BuildingPaths.Add(AssetDatabase.GetAssetPath(prefab));
                 }
             }
 
-            result.UnusedBuildings = unused;
-            if (used == 0 && buildingsRoot.transform.childCount == 0)
+            if (buildingsRoot.transform.childCount == 0)
                 Object.DestroyImmediate(buildingsRoot);
         }
 
         private sealed class PreparedBuilding
         {
-            internal readonly GameDataFile File;
-            internal readonly string RelativePath;
+            internal readonly BuildingSource Source;
+            internal readonly GameObject ProjectModel;
             internal readonly BmdDocument Document;
 
-            internal PreparedBuilding(GameDataFile file, string relativePath, BmdDocument document)
+            internal PreparedBuilding(BuildingSource source, GameObject projectModel, BmdDocument document)
             {
-                File = file;
-                RelativePath = relativePath;
+                Source = source;
+                ProjectModel = projectModel;
                 Document = document;
             }
         }
@@ -572,6 +631,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var building in buildings)
             {
+                if (building.ProjectModel != null)
+                    continue;
                 var parsed = building.Document;
                 if (parsed.CollideOnly || parsed.Meshes == null)
                     continue;
@@ -652,27 +713,6 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             GameDataNativeImportBatch.Import(pending);
-        }
-
-        private static bool TryBuildingRelative(GameDataFile file, string prefix, out string relUnderMap)
-        {
-            relUnderMap = file.RelativePath.Replace('\\', '/');
-            var idx = relUnderMap.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                relUnderMap = relUnderMap.Substring(idx + prefix.Length);
-                return true;
-            }
-
-            var needle = "/litmodels/";
-            var mapNeedle = prefix.StartsWith("litmodels/", StringComparison.OrdinalIgnoreCase)
-                ? "/" + prefix
-                : needle;
-            idx = relUnderMap.IndexOf(mapNeedle, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0)
-                return false;
-            relUnderMap = relUnderMap.Substring(idx + mapNeedle.Length);
-            return true;
         }
 
         private static int PlaceWater(

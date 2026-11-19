@@ -243,6 +243,100 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void SectorImportPrefersProjectBmdsAndFallsBackByFullRelativePath()
+        {
+            string projectRoot = "Assets/" + mapFile.Name;
+            string mapFolder = "litmodels/" + mapFile.Name;
+            string shadowed = mapFolder + "/36/wall.bmd";
+            string fallback = mapFolder + "/37/wall.bmd";
+            string projectFolder = projectRoot + "/LitModels/" + mapFile.Name.ToUpperInvariant() + "/36/";
+            string projectModel = projectFolder + "Wall.bmd";
+            string projectOnly = projectFolder + "custom.bmd";
+
+            try
+            {
+                WriteFile(Path.Combine(sourceRoot, shadowed), Model(8f));
+                WriteFile(Path.Combine(sourceRoot, fallback), Model(-1f));
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(projectModel), Model(-1.75f));
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(projectOnly), Model(-1.25f));
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                index.Scan();
+
+                var result = ImportMap(0);
+                Assert.AreEqual(3, result.Buildings, string.Join("\n", result.Warnings));
+                Assert.AreEqual(0, result.SkippedOutsideSectors);
+                CollectionAssert.AreEquivalent(new[]
+                {
+                    projectModel, projectOnly, BuildingAssetImporter.GetOutputFolder(fallback) + "/wall.prefab"
+                }, result.BuildingPaths);
+                Assert.IsFalse(AssetDatabase.IsValidFolder(BuildingAssetImporter.GetOutputFolder(shadowed)));
+
+                var sector = AssetDatabase.LoadAssetAtPath<GameObject>(result.SectorPrefabPaths.Single());
+                var wall = sector.transform.Find("Buildings/36/Wall");
+                Assert.IsNotNull(wall);
+                Assert.AreEqual(-1.75f, wall.localPosition.x);
+                Assert.AreEqual(-1f, sector.transform.Find("Buildings/37/wall").localPosition.x);
+                var placed = wall.GetComponents<LitModelInstance>().Single();
+                Assert.AreEqual(projectModel, AssetDatabase.GetAssetPath(placed.SourceData));
+                Assert.AreEqual(projectModel, PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(wall));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(MapAssetImporter.GetOutputFolder(mapFile.RelativePath));
+                AssetDatabase.DeleteAsset(BuildingAssetImporter.GetOutputFolder(fallback));
+                AssetDatabase.DeleteAsset(projectRoot);
+            }
+
+            byte[] Model(float x) => BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04,
+                posX: x, posY: 0f, posZ: 1f, scaleX: 0.1f);
+        }
+
+        [Test]
+        public void DroppedMapDoesNotReadShadowedExternalBmd()
+        {
+            string projectRoot = "Assets/" + mapFile.Name;
+            string mapDirectory = Path.Combine(sourceRoot, mapFile.Name);
+            string rawAssetFolder = GameDataDropImporter.ImportRoot + "/Sources/" + mapFile.Name;
+            string model = "LitModels/" + mapFile.Name + "/36/wall.bmd";
+            string projectPath = projectRoot + "/" + model;
+            string fallback = "LitModels/" + mapFile.Name + "/37/wall.bmd";
+            try
+            {
+                Directory.CreateDirectory(mapDirectory);
+                foreach (var file in Directory.GetFiles(sourceRoot))
+                    File.Move(file, Path.Combine(mapDirectory, Path.GetFileName(file)));
+
+                WriteFile(Path.Combine(sourceRoot, model), new byte[] { 0 });
+                var modelBytes = BmdParserTests.BuildBmd(true, false, BmdParser.MeshVersion04, posX: -1f, posZ: 1f);
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(projectPath), modelBytes);
+                WriteFile(Path.Combine(sourceRoot, fallback), modelBytes);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                index.Scan();
+                mapFile = index.Files.Single(f => f.Extension == "trn2");
+
+                var dropped = GameDataDropImporter.Import(index, new[] { mapFile.FullPath }, decoder, false);
+                Assert.IsEmpty(dropped.Errors);
+                Assert.AreEqual(fallback, dropped.Graph.ImportOrder.Single(node => node.File.Extension == "bmd").File.RelativePath);
+                CollectionAssert.AreEquivalent(new[] { projectPath, BuildingAssetImporter.GetNativeAssetPath(fallback) },
+                    dropped.Maps.Single().BuildingPaths);
+                Assert.IsFalse(AssetDatabase.IsValidFolder(BuildingAssetImporter.GetOutputFolder(model)));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(MapAssetImporter.GetOutputFolder(mapFile.RelativePath));
+                AssetDatabase.DeleteAsset(rawAssetFolder);
+                AssetDatabase.DeleteAsset(BuildingAssetImporter.GetOutputFolder(fallback));
+                AssetDatabase.DeleteAsset(projectRoot);
+            }
+        }
+
+        private static void WriteFile(string path, byte[] bytes)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllBytes(path, bytes);
+        }
+
+        [Test]
         public void UnreadableSelectionDoesNotImportOtherSectors()
         {
             File.WriteAllBytes(Path.Combine(sourceRoot, "sub3.t2bk"), new byte[] { 0 });

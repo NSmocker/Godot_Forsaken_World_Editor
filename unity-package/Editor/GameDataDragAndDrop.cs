@@ -98,7 +98,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         private static DragAndDropVisualMode OnProjectDrop(int id, string path, bool perform) =>
-            Handle(perform, false, null, Vector3.zero, default);
+            Handle(perform, false, null, Vector3.zero, default, allowBmdCopy: true);
 
         private static DragAndDropVisualMode OnSceneDrop(Object upon, Vector3 position, Vector2 viewport, Transform parent, bool perform) =>
             Handle(perform, true, parent, position, SceneManager.GetActiveScene());
@@ -111,13 +111,17 @@ namespace SilverEcho.ForsakenWorld.Editor
             return Handle(perform, true, dropParent, Vector3.zero, target != null ? target.scene : SceneManager.GetActiveScene());
         }
 
-        private static DragAndDropVisualMode Handle(bool perform, bool instantiate, Transform parent, Vector3 position, Scene scene)
+        private static DragAndDropVisualMode Handle(bool perform, bool instantiate, Transform parent, Vector3 position,
+            Scene scene, bool allowBmdCopy = false)
         {
             var paths = Paths();
             if (paths.Length == 0) return DragAndDropVisualMode.None;
             if (importing || EditorApplication.isPlayingOrWillChangePlaymode) return DragAndDropVisualMode.Rejected;
             var data = GetIndex();
             var mode = Classify(data, paths, out var error);
+            if (allowBmdCopy && mode != DragAndDropVisualMode.Copy &&
+                paths.Any(p => string.Equals(Path.GetExtension(p), ".bmd", StringComparison.OrdinalIgnoreCase)))
+                return DragAndDropVisualMode.None; // Let Unity copy BMD sources into the selected Assets folder.
             if (perform)
             {
                 if (mode == DragAndDropVisualMode.Copy)

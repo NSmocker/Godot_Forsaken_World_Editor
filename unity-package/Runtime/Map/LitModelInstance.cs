@@ -11,6 +11,7 @@ namespace SilverEcho.ForsakenWorld
     {
         [Header("Original Data")]
         public string OriginalBmdPath;
+        public BmdAsset SourceData;
         public int OriginalEcwldIndex = -1;     // індекс у списку Models в .ecwld
         public Vector3 OriginalPosition;
         public Vector3 OriginalRotationEuler;

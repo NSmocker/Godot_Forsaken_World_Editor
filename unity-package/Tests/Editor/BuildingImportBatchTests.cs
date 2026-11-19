@@ -59,10 +59,12 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.AreEqual(32, result.Buildings, string.Join("\n", result.Warnings));
                 Assert.IsFalse(result.Warnings.Any(w => w.Contains(ordered[0].RelativePath)));
                 Assert.IsTrue(result.Warnings.Any(w => w.Contains(ordered[32].RelativePath)));
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
-                Assert.IsNotNull(prefab);
-                Assert.AreEqual(32, prefab.GetComponentsInChildren<LitModelInstance>().Length);
-                Assert.IsTrue(prefab.GetComponentsInChildren<LitModelInstance>()
+                Assert.IsNotEmpty(result.SectorPrefabPaths);
+                var sectors = result.SectorPrefabPaths.Select(AssetDatabase.LoadAssetAtPath<GameObject>).ToArray();
+                Assert.IsTrue(sectors.All(sector => sector != null));
+                var instances = sectors.SelectMany(sector => sector.GetComponentsInChildren<LitModelInstance>()).ToArray();
+                Assert.AreEqual(32, instances.Length);
+                Assert.IsTrue(instances
                     .Select(b => b.GetComponent<MeshRenderer>()).All(r => r != null &&
                     r.sharedMaterial != null && r.sharedMaterial.GetTexture("_Albedo") != null));
             }

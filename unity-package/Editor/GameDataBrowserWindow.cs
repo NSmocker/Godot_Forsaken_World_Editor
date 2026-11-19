@@ -397,12 +397,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                         selectedFile == null ||
                         selectedFile.Extension != "bmd" ||
                         selectedBuilding == null ||
-                        selectedAssembledBuilding == null ||
-                        selectedAssembledBuilding.CollideOnly ||
-                        selectedAssembledBuilding.Surfaces.Length == 0))
+                        selectedAssembledBuilding == null))
                     {
-                        if (GUILayout.Button("Import building Prefab"))
-                            ImportSelectedBuilding();
+                        if (GUILayout.Button("Import building (.bmd)"))
+                            ImportSelectedBuilding(native: true);
+                        using (new EditorGUI.DisabledScope(selectedAssembledBuilding == null ||
+                            selectedAssembledBuilding.CollideOnly || selectedAssembledBuilding.Surfaces.Length == 0))
+                        {
+                            if (GUILayout.Button("Import building Prefab"))
+                                ImportSelectedBuilding(native: false);
+                        }
                     }
 
                     using (new EditorGUI.DisabledScope(
@@ -1514,13 +1518,12 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             EditorGUILayout.HelpBox(
-                "Import builds a Mesh, Angelica LitModel materials (vertex day color × texture × 2), " +
-                "and a Prefab under Assets/ForsakenWorld/Imported/Buildings with the building's " +
-                "world transform. Map import filters buildings via .ecwld/.ecbsd ornament lists.",
+                "Import as .bmd to keep the original file and its source data alongside Unity meshes and materials. " +
+                "To import a copied game folder, keep LitModels and Building under the same folder in Assets.",
                 MessageType.Info);
         }
 
-        private void ImportSelectedBuilding()
+        private void ImportSelectedBuilding(bool native)
         {
             if (selectedFile == null ||
                 selectedFile.Extension != "bmd" ||
@@ -1533,18 +1536,17 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             try
             {
-                var result = BuildingAssetImporter.Import(
-                    selectedFile,
-                    index,
-                    GetGameDataDecoder(),
-                    showProgress: true);
+                var decoder = GetGameDataDecoder();
+                var result = native ? BuildingAssetImporter.ImportNative(selectedFile, index, decoder) :
+                    BuildingAssetImporter.Import(selectedFile, index, decoder, showProgress: true);
                 if (result.Skipped)
                 {
                     status = "Skipped collide-only building " + selectedFile.RelativePath;
                     return;
                 }
 
-                status = "Imported building prefab " + result.PrefabPath +
+                var path = native ? result.BmdPath : result.PrefabPath;
+                status = "Imported building " + path +
                     " (" + result.Surfaces + " surfaces, " +
                     result.Vertices + " verts, " +
                     result.Triangles + " tris" +
@@ -1554,8 +1556,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     ")";
                 foreach (var warning in result.Warnings)
                     Debug.LogWarning(warning);
-                AssetDatabase.Refresh();
-                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(result.PrefabPath);
+                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(path);
             }
             catch (Exception exception) when (
                 exception is IOException ||
