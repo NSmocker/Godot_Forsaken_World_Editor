@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld.Editor
 {
-    /// <summary>Textures retain file row order and gamma-encoded RGB, as in the Godot terrain shader.</summary>
+    /// <summary>Textures retain file row order and gamma-encoded RGB for Angelica sampling.</summary>
     public static class TerrainTextureBuilder
     {
         public static Texture2D DecodeDds(byte[] bytes, string source)
@@ -53,6 +53,46 @@ namespace SilverEcho.ForsakenWorld.Editor
             var imported = AssembledTextureImporter.ImportOrUpdate(file.FullPath, file.RelativePath);
             if (imported.Texture == null) throw new InvalidDataException(imported.Error);
             return CopyFileRows(imported.Texture);
+        }
+
+        public static Texture2D LoadGroundTexture(GameDataFile file, bool projectCopy)
+        {
+            Texture2D texture;
+            if (TextureFileFormat.DetectFile(file.FullPath) == ".dds")
+            {
+                var bytes = File.ReadAllBytes(file.FullPath);
+                var header = new DdsHeaderParser().Parse(bytes, file.RelativePath);
+                if (header.Width > 8192 || header.Height > 8192 || header.IsVolume || (header.Caps2 & 0x200) != 0)
+                    throw new InvalidDataException(file.RelativePath + ": unsupported ground DDS dimensions");
+                int levels = header.Compression == DdsCompression.UncompressedRgb ? 1 : Math.Max(1, header.MipMapCount);
+                if (levels > header.ExpectedFullMipChainCount)
+                    throw new InvalidDataException(file.RelativePath + ": invalid DDS mip count");
+
+                // The D3D9 terrain shaders blend the source RGB bytes and convert only
+                // the final color for Unity's linear framebuffer. Keep DDS row 0 at V=0.
+                texture = new Texture2D(header.Width, header.Height, TextureFormat.RGBA32, levels, true);
+                try
+                {
+                    for (int mip = 0; mip < levels; mip++)
+                    {
+                        if (!DdsDxtDecoder.TryDecodeMipRgba(bytes, header, mip, out var rgba, out var error))
+                            throw new InvalidDataException(file.RelativePath + ": " + error);
+                        texture.SetPixelData(rgba, mip);
+                    }
+                    texture.Apply(false, false);
+                }
+                catch
+                {
+                    UnityEngine.Object.DestroyImmediate(texture);
+                    throw;
+                }
+            }
+            else
+                texture = projectCopy ? LoadProjectTexture(file) : LoadSource(file);
+
+            texture.wrapMode = TextureWrapMode.Repeat;
+            texture.filterMode = FilterMode.Trilinear;
+            return texture;
         }
 
         /// <summary>Exact game-relative lookup; never searches by basename or reads the external source.</summary>

@@ -51,9 +51,13 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(24, mesh.Indices.Length); // 2x2 quads * 6
             Assert.AreEqual(-1f, mesh.Positions[0], 0.0001f); // left
             Assert.AreEqual(1f, mesh.Positions[2], 0.0001f); // top (+Z)
-            Assert.AreEqual(0, mesh.Indices[0]);
-            Assert.AreEqual(1, mesh.Indices[1]);
-            Assert.AreEqual(3, mesh.Indices[2]);
+            CollectionAssert.AreEqual(new[]
+            {
+                0, 1, 4, 0, 4, 3,
+                1, 2, 4, 2, 5, 4,
+                3, 4, 6, 4, 7, 6,
+                4, 5, 8, 4, 8, 7
+            }, mesh.Indices);
 
             blocks[TerrainBlock.Key(0, 0)].Flags = 1;
             var hidden = TerrainMeshAssembler.BuildArea(terrain, blocks, 0, 0);

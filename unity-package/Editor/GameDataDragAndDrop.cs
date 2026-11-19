@@ -92,7 +92,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             var paths = DragAndDrop.paths ?? Array.Empty<string>();
             // Native textures/audio/XML from elsewhere keep Unity's normal copy behavior.
             var root = EditorPrefs.GetString(RootPreference, "").TrimEnd('/', '\\') + Path.DirectorySeparatorChar;
-            var proprietary = new[] { ".smd", ".bon", ".ski", ".stck", ".ecm", ".gfx", ".trn2", ".ecwld", ".ecbsd", ".bmd", ".dcf", ".stf", ".t2bk", ".t2mk", ".t2lm", ".gphy" };
+            var proprietary = new[] { ".smd", ".bon", ".ski", ".stck", ".ecm", ".gfx", ".trn2", ".ecwld", ".ecbsd", ".bmd", ".dcf", ".stf", ".t2bk", ".t2mk", ".t2lm", ".t2lm1", ".gphy" };
             return paths.Any(p => proprietary.Contains(Path.GetExtension(p).ToLowerInvariant()) ||
                 (Path.IsPathRooted(p) && Path.GetFullPath(p).StartsWith(root, StringComparison.OrdinalIgnoreCase))) ? paths : Array.Empty<string>();
         }

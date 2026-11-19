@@ -1,11 +1,9 @@
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
-    /// URP material for GFX particles 120–125. Reuses AngelicaGfxSprite shader
-    /// (same DestBlend add/mix + TexFile + optional Warp as create_id_120 fragment).
+    /// Material for the Angelica particle mesh, using the authored render-slot factors.
     /// </summary>
     public static class GfxParticleMaterialFactory
     {
@@ -15,6 +13,13 @@ namespace SilverEcho.ForsakenWorld
             bool zEnable,
             bool gfx2dRender,
             Texture texture)
+        {
+            return Create(name, GfxBlendFactors.A3dBlendSrcAlpha,
+                additive ? 2 : GfxBlendFactors.A3dBlendInvSrcAlpha, zEnable, gfx2dRender, texture);
+        }
+
+        public static Material Create(
+            string name, int sourceBlend, int destinationBlend, bool zEnable, bool gfx2dRender, Texture texture)
         {
             var shader = AngelicaRenderPipeline.Find(
                              GfxSpriteDriver.HdrpShaderName,
@@ -36,26 +41,8 @@ namespace SilverEcho.ForsakenWorld
             {
                 name = string.IsNullOrEmpty(name) ? "GfxParticle" : name
             };
-            mat.renderQueue = (int)RenderQueue.Transparent;
             if (mat.HasProperty("_UseVertexColor")) mat.SetFloat("_UseVertexColor", 1f);
-            if (mat.HasProperty("_SrcBlend"))
-                mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
-            if (mat.HasProperty("_DstBlend"))
-            {
-                mat.SetFloat(
-                    "_DstBlend",
-                    additive ? (float)BlendMode.One : (float)BlendMode.OneMinusSrcAlpha);
-            }
-
-            // A04: Godot create_id_120 keys depth-test disable on z_test_enabled
-            // (= ZEnable && !2DRender), matching gfx_parser.gd:102-105.
-            var zTest = zEnable && !gfx2dRender;
-            if (mat.HasProperty("_ZTest"))
-                mat.SetFloat("_ZTest", zTest
-                    ? (float)CompareFunction.LessEqual
-                    : (float)CompareFunction.Always);
-            if (mat.HasProperty("_ZWrite"))
-                mat.SetFloat("_ZWrite", 0f); // Translucent quads must not occlude subsequent layers.
+            GfxBlendFactors.ApplySlot(mat, sourceBlend, destinationBlend, zEnable && !gfx2dRender, 0);
 
             if (texture != null)
             {
@@ -70,7 +57,7 @@ namespace SilverEcho.ForsakenWorld
             if (mat.HasProperty("_GfxAlpha"))
                 mat.SetFloat("_GfxAlpha", 1f);
             if (mat.HasProperty("_MixAlphaScale"))
-                mat.SetFloat("_MixAlphaScale", additive ? 1f : 0.70f);
+                mat.SetFloat("_MixAlphaScale", 1f);
             GfxWarpMaterial.Apply(mat, false);
             return mat;
         }

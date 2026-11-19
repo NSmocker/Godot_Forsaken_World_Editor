@@ -319,18 +319,26 @@ namespace SilverEcho.ForsakenWorld.Tests
             var driver = go.AddComponent<GfxModelDriver>();
             // Each Configure takes ownership and destroys the previous child (ClearModel).
             var child = new GameObject("skinned");
-            child.AddComponent<SkinnedMeshRenderer>().sharedMesh = makeMesh();
+            var renderer = child.AddComponent<SkinnedMeshRenderer>();
+            renderer.sharedMesh = makeMesh();
+            var skinMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            skinMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            renderer.sharedMaterial = skinMaterial;
 
             var p = new GfxModelParams
             {
                 ModelPath = "x.smd",
                 SrcBlend = 5,   // A3DBLEND_SRCALPHA (无定宙水.gfx ID 160)
                 DestBlend = 2,  // A3DBLEND_ONE — additive
+                RenderLayer = 2, // Front1
                 WriteZ = false
             };
             driver.Configure(p, child, false, new List<string>());
+            Object.DestroyImmediate(skinMaterial);
             var mat = child.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
             Assert.IsNotNull(mat);
+            Assert.AreEqual(3001, mat.renderQueue);
+            Assert.AreEqual((float)UnityEngine.Rendering.CullMode.Off, mat.GetFloat("_Cull"));
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.SrcAlpha, mat.GetFloat("_SrcBlend"), 0.001f);
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.One, mat.GetFloat("_DstBlend"), 0.001f);
             Assert.AreEqual(0f, mat.GetFloat("_ZWrite"), 0.001f);
@@ -348,6 +356,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             };
             driver.Configure(pAlpha, child2, false, new List<string>());
             mat = child2.GetComponent<SkinnedMeshRenderer>().sharedMaterial;
+            Assert.AreEqual(3000, mat.renderQueue);
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.SrcAlpha, mat.GetFloat("_SrcBlend"), 0.001f);
             Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, mat.GetFloat("_DstBlend"), 0.001f);
 

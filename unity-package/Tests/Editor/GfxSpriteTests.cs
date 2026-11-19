@@ -8,6 +8,138 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxSpriteTests
     {
         [Test]
+        public void AtlasPlaybackAdvancesOneCellPerActiveTickAndFreezesAtExactLimit()
+        {
+            var parameters = new GfxSpriteParams { TexCol = 3, TexRow = 2, TexInterval = 30, TexAnimMaxTime = 100 };
+            var playback = new GfxSpriteTexturePlayback();
+            Assert.AreEqual(0f, playback.Tick(parameters, 40, false).OffsetU);
+            Assert.AreEqual(1f / 3f, playback.Tick(parameters, 75, true).OffsetU);
+            Assert.AreEqual(2f / 3f, playback.Tick(parameters, 1, true).OffsetU);
+            Assert.AreEqual(2f / 3f, playback.Tick(parameters, 24, true).OffsetU);
+            playback.ResumeLoop();
+            Assert.AreEqual(2f / 3f, playback.Tick(parameters, 1, true).OffsetU);
+            Assert.AreEqual(1f / 3f, playback.Tick(parameters, 29, true).OffsetU);
+        }
+
+        [Test]
+        public void SpriteClockConsumesDelayBeforeProcessingTheWholeTick()
+        {
+            var clock = new GfxKeypointPlaybackClock();
+            Assert.IsFalse(clock.Tick(29, 30, 130, 2, 20, false));
+            Assert.IsFalse(clock.Active);
+            Assert.IsFalse(clock.Tick(1, 30, 130, 2, 20, false));
+            Assert.IsTrue(clock.Active);
+            Assert.IsTrue(clock.Tick(115, 30, 130, 2, 20, false));
+            Assert.IsFalse(clock.Active);
+            Assert.IsFalse(clock.Tick(4, 30, 130, 2, 20, false));
+            Assert.IsFalse(clock.Active);
+            Assert.IsFalse(clock.Tick(2, 30, 130, 2, 20, false));
+            Assert.IsTrue(clock.Active);
+            Assert.AreEqual(32f, clock.TimeMs);
+            Assert.IsTrue(clock.Tick(98, 30, 130, 2, 20, false));
+            Assert.IsFalse(clock.Active);
+            Assert.IsFalse(clock.Tick(150, 30, 130, 2, 20, false));
+            Assert.IsFalse(clock.Active);
+        }
+
+        [Test]
+        public void ColorDeltaUsesTheWholeTickAndRetainsFractionalBytes()
+        {
+            var key = new GfxKeypointSpec();
+            key.Ctrls.Add(new GfxCtrlSpec { Type = 105, Start = 1f, End = 1.1f,
+                ColorDelta = new[] { 0f, 0f, 0f, -500f / 255f } });
+            var playback = GfxKeypointColorPlayback.Create(new[] { key });
+            playback.Tick(900, 200);
+            Assert.AreEqual(1f, playback.Color[3]);
+            playback.Tick(1000, 105);
+            Assert.AreEqual(203f / 255f, playback.Color[3]);
+            playback.Tick(1001, 1);
+            Assert.AreEqual(202f / 255f, playback.Color[3]);
+            playback.Tick(1200, 199);
+            Assert.AreEqual(202f / 255f, playback.Color[3]);
+            playback.Restart();
+            Assert.AreEqual(1f, playback.Color[3]);
+        }
+
+        [Test]
+        public void PlayerAtlasPlaybackHonorsStartPauseAndRestart()
+        {
+            var document = new GfxParser().Parse(
+                "MOXTVersion: 79\nGFXELEMENTID: 101\nTexCol: 4\nTexRow: 2\nTexInterval: 30\n" +
+                "StartTime: 100\nRepeatCount: 1\nKEYPOINTCOUNT: 1\nTimeSpan: 500\nCtrlMethodCount: 0\n");
+            var built = GfxSceneBuilder.Build(document, "Atlas Clock");
+            try
+            {
+                var player = built.Player;
+                var sprite = built.Root.GetComponentInChildren<GfxSpriteDriver>();
+                var renderer = sprite.GetComponent<MeshRenderer>();
+                var properties = new MaterialPropertyBlock();
+                player.Restart();
+                player.Tick(60f);
+                Assert.IsFalse(sprite.VisualActive);
+                player.Tick(60f);
+                Assert.IsTrue(sprite.VisualActive);
+                renderer.GetPropertyBlock(properties);
+                Assert.AreEqual(0.25f, properties.GetVector("_UvRect").z);
+                player.PlayerPaused = true;
+                player.Tick(100f);
+                renderer.GetPropertyBlock(properties);
+                Assert.AreEqual(0.25f, properties.GetVector("_UvRect").z);
+                player.PlayerPaused = false;
+                player.Restart();
+                player.Tick(120f);
+                renderer.GetPropertyBlock(properties);
+                Assert.AreEqual(0.25f, properties.GetVector("_UvRect").z);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(built.Root); }
+        }
+
+        [Test]
+        public void RotFromViewUsesNativeIncreasingUAxis()
+        {
+            var direction = GfxMath.QuatFromAxisAngle(new[] { 1f, 0f, 0f }, -Mathf.PI * 0.5f);
+            var rotation = GfxSpriteBillboard.ZAxisBillboard(direction, GfxMath.Vec3Zero(), new[] { 0f, 0f, 3f });
+            var q = new Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+            Assert.That(Vector3.Dot(q * Vector3.right, Vector3.left), Is.GreaterThan(0.999f));
+            Assert.That(Vector3.Dot(q * Vector3.up, Vector3.up), Is.GreaterThan(0.999f));
+        }
+
+        [Test]
+        public void ScreenDecalFollowsCameraAxesUnderRotatedParent()
+        {
+            var parent = new GameObject("Effect");
+            var context = new GameObject("Camera");
+            var existing = Camera.main;
+            Material material = null;
+            Mesh mesh = null;
+            try
+            {
+                if (existing != null) existing.enabled = false;
+                context.tag = "MainCamera";
+                var camera = context.AddComponent<Camera>();
+                camera.transform.SetPositionAndRotation(new Vector3(0, 2, 3), Quaternion.Euler(15, 180, 20));
+                parent.transform.rotation = Quaternion.Euler(0, 40, 30);
+                var decal = new GameObject("Screen decal");
+                decal.transform.SetParent(parent.transform);
+                var driver = decal.AddComponent<GfxSpriteDriver>();
+                driver.Configure(new GfxSpriteParams { SystemId = "101", RotFromView = true }, null, false, null);
+                material = decal.GetComponent<MeshRenderer>().sharedMaterial;
+                mesh = decal.GetComponent<MeshFilter>().sharedMesh;
+                driver.OnGfxTick(10f, 1f);
+                Assert.That(Vector3.Dot(decal.transform.right, camera.transform.right), Is.GreaterThan(0.999f));
+                Assert.That(Vector3.Dot(decal.transform.up, camera.transform.up), Is.GreaterThan(0.999f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+                Object.DestroyImmediate(context);
+                if (material != null) Object.DestroyImmediate(material);
+                if (mesh != null) Object.DestroyImmediate(mesh);
+                if (existing != null) existing.enabled = true;
+            }
+        }
+
+        [Test]
         public void CrossDecalUsesTwoCenteredPlanesAndARealDriver()
         {
             var doc = new GfxParser().Parse("MOXTVersion: 92\nGFXELEMENTID: 102\nWidth: 2\nHeight: 3\nKEYPOINTCOUNT: 0\n");
@@ -26,6 +158,50 @@ namespace SilverEcho.ForsakenWorld.Tests
                 Assert.AreEqual(0f, mesh.vertices[4].x);
             }
             finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RenderSlotUsesAuthoredFactorsAndLayer()
+        {
+            var parameters = GfxSpriteParams.FromProperties(new Dictionary<string, string>
+            {
+                ["SrcBlend"] = "9",
+                ["DestBlend"] = "4",
+                ["RenderLayer"] = "7"
+            }, "100");
+            parameters = GfxSpriteParamsSerial.FromParams(parameters).ToParams();
+            var material = GfxSpriteMaterialFactory.Create(parameters, Texture2D.whiteTexture, false);
+            try
+            {
+                Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.DstColor, material.GetFloat("_SrcBlend"));
+                Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcColor, material.GetFloat("_DstBlend"));
+                Assert.AreEqual(2996, material.renderQueue);
+            }
+            finally { Object.DestroyImmediate(material); }
+        }
+
+        [Test]
+        public void DecalUsesAuthoredPositionRegardlessOfElementIndex()
+        {
+            var root = new GameObject("decal-position");
+            try
+            {
+                var driver = root.AddComponent<GfxSpriteDriver>();
+                driver.Configure(new GfxSpriteParams { SystemId = "100", ElementIndex = 7 }, null,
+                    false, new List<string>());
+                driver.IsEndless = true;
+                driver.SetKeypoints(new[]
+                {
+                    new GfxKeypointSpec
+                    {
+                        Pos = GfxMath.Vec3(1, 2, 3), Dir = GfxMath.QuatIdentity(),
+                        Color = GfxMath.ColorWhite(), Scale = 1f, TimeSpan = -1f
+                    }
+                });
+                driver.OnGfxTick(50f, 1f);
+                Assert.AreEqual(new Vector3(1, 2, 3), root.transform.localPosition);
+            }
+            finally { Object.DestroyImmediate(root); }
         }
 
         private const string SpriteGfx =
@@ -108,7 +284,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             };
             var p = GfxSpriteParams.FromProperties(props, "100", 1);
             Assert.IsFalse(p.IsAdditiveBlend);
-            Assert.AreEqual(0.70f, p.MixAlphaScale, 0.001f);
+            Assert.AreEqual(1f, p.MixAlphaScale, 0.001f);
         }
 
         [Test]

@@ -23,6 +23,7 @@ namespace SilverEcho.ForsakenWorld
         private MeshFilter meshFilter;
         private MeshRenderer particleRenderer;
         private Material runtimeMaterial;
+        private Material originalSlotMaterial;
         private MaterialPropertyBlock propertyBlock;
         private GfxParticleParams cachedParams;
         private GfxParticleSim sim;
@@ -33,7 +34,7 @@ namespace SilverEcho.ForsakenWorld
         private bool dummyActive;
         private List<GfxCtrlSpec> affectors = new List<GfxCtrlSpec>();
         private List<GfxCtrlSpec> extraEmitterCtrls = new List<GfxCtrlSpec>();
-        private bool header2dRender;
+        [SerializeField] private bool header2dRender;
 
         // BindEle emitter binding (GFX-00001, ID120-125 BindEle). The component
         // reference survives scene/prefab serialization; the target name and
@@ -64,6 +65,7 @@ namespace SilverEcho.ForsakenWorld
             if (particleParams == null)
                 throw new ArgumentNullException(nameof(particleParams));
 
+            OnDisable();
             cachedParams = particleParams;
             paramsSerial = GfxParticleParamsSerial.FromParams(particleParams);
             header2dRender = gfx2dRender;
@@ -83,10 +85,12 @@ namespace SilverEcho.ForsakenWorld
                 string.IsNullOrEmpty(particleParams.Name)
                     ? "Particle_" + particleParams.SystemId
                     : particleParams.Name,
-                particleParams.IsAdditiveBlend,
+                particleParams.Warp ? GfxBlendFactors.A3dBlendSrcAlpha : particleParams.SrcBlend,
+                particleParams.Warp ? GfxBlendFactors.A3dBlendInvSrcAlpha : particleParams.DestBlend,
                 particleParams.ZEnable,
                 gfx2dRender,
                 texture);
+            runtimeMaterial.renderQueue = AngelicaRenderPipeline.GfxTransparentQueue(particleParams.RenderLayer);
             if (runtimeMaterial.HasProperty("_MixAlphaScale"))
                 runtimeMaterial.SetFloat("_MixAlphaScale", particleParams.MixAlphaScale);
             particleRenderer.sharedMaterial = runtimeMaterial;
@@ -194,17 +198,44 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            TickParticles(gfxTimeMs, alpha, null);
+        }
+
+        internal void OnGfxPlaybackTick(float gfxTimeMs, float alpha, float elapsedMs,
+            GfxParticleSim.EmissionRandom emissionRandom)
+        {
+            TickParticles(gfxTimeMs, alpha, elapsedMs, emissionRandom);
+        }
+
+        internal void ResetParticlePlayback() => sim?.ResetTicks();
+
+        private void TickParticles(float gfxTimeMs, float alpha, float? elapsedMs,
+            GfxParticleSim.EmissionRandom emissionRandom = null)
+        {
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;
 
             var active = TimeManual ? TimeMs : gfxTimeMs;
+            var is2d = header2dRender;
+            var zEnable = Params.ZEnable;
+            if (runtimeMaterial == null)
+            {
+                var player = GetComponentInParent<GfxPlayer>();
+                if (player != null)
+                {
+                    var header = player.HeaderDictionary();
+                    is2d = GfxHeaderConfig.Is2DRender(header);
+                    zEnable |= GfxHeaderConfig.ForcesElementDepthTest(GfxHeaderConfig.FileVersion(header));
+                }
+            }
             if (sim == null)
             {
                 EnsureComponents();
                 var source = RestoreAnimationSource();
                 if (source != null)
                 {
+                    Params.SrcBlend = GfxPropertyValues.Int(source.Properties, "SrcBlend", Params.SrcBlend);
                     affectors = source.Affectors.ConvertAll(GfxKeypointBuilder.FromDictionary);
                     extraEmitterCtrls = source.ControlMethods.ConvertAll(GfxKeypointBuilder.FromDictionary)
                         .FindAll(c => c != null && c.Type == 110);
@@ -215,29 +246,38 @@ namespace SilverEcho.ForsakenWorld
                 {
                     runtimeMaterial = GfxParticleMaterialFactory.Create(
                         "Particle_" + Params.SystemId,
-                        Params.IsAdditiveBlend,
-                        Params.ZEnable,
-                        header2dRender,
+                        Params.Warp ? GfxBlendFactors.A3dBlendSrcAlpha : Params.SrcBlend,
+                        Params.Warp ? GfxBlendFactors.A3dBlendInvSrcAlpha : Params.DestBlend,
+                        zEnable,
+                        is2d,
                         null);
+                    runtimeMaterial.renderQueue = AngelicaRenderPipeline.GfxTransparentQueue(Params.RenderLayer);
                     particleRenderer.sharedMaterial = runtimeMaterial;
-                }
-                else
-                {
-                    runtimeMaterial = particleRenderer.sharedMaterial;
                 }
                 dummyActive = !string.IsNullOrEmpty(Params.DummyEle);
                 if (dummyActive)
                     EnsureDummyDriver(Params.DummyEle, Math.Max(1, Params.PoolSize), null);
             }
 
-            var slots = sim.Simulate(
-                active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
-                RepeatCount, RepeatDelay, IsEndless);
+            if (runtimeMaterial == null)
+            {
+                runtimeMaterial = GfxBlendFactors.RestoreSlot(particleRenderer,
+                    Params.Warp ? GfxBlendFactors.A3dBlendSrcAlpha : Params.SrcBlend,
+                    Params.Warp ? GfxBlendFactors.A3dBlendInvSrcAlpha : Params.DestBlend,
+                    zEnable && !is2d, Params.RenderLayer, out originalSlotMaterial);
+            }
+            if (!elapsedMs.HasValue)
+                sim.ResetTicks();
+            var slots = elapsedMs.HasValue
+                ? sim.Advance(active, elapsedMs.Value, GlobalLoopTime, LocalStartTime, LocalTotalTime,
+                    RepeatCount, RepeatDelay, IsEndless, emissionRandom)
+                : sim.Simulate(active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
+                    RepeatCount, RepeatDelay, IsEndless);
 
-            var elementTime = GfxKeypointEval.ElementTime(
+            var elementTime = elapsedMs.HasValue ? sim.TickElementTime : GfxKeypointEval.ElementTime(
                 active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
                 RepeatCount, RepeatDelay);
-            var visible = IsEndless ||
+            var visible = elapsedMs.HasValue ? sim.TickKeyActive : IsEndless ||
                 (elementTime >= LocalStartTime && elementTime <= LocalTotalTime);
             SetVisualActive(visible);
             if (!visible)
@@ -481,8 +521,8 @@ namespace SilverEcho.ForsakenWorld
                         HalfHeight = h,
                         Color = new Color(
                             s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale),
-                        // Fill_Vert_2D rotates in the camera plane only.
-                        ScreenAngle = -s.BillboardAngle,
+                        // Fill_Vert_2D after converting from D3D's Y-down screen.
+                        ScreenAngle = s.BillboardAngle,
                         Orientation = orientation,
                         Move = new Vector3(move[0], move[1], move[2]),
                         OrgCoefX = GfxRuntimeParticleBatch.OrgCoefficient(Params.OrgPt1),
@@ -519,6 +559,11 @@ namespace SilverEcho.ForsakenWorld
         {
             batch.Release();
         }
+
+        private void OnDisable()
+        {
+            GfxBlendFactors.ReleaseRestoredSlot(particleRenderer, ref runtimeMaterial, ref originalSlotMaterial);
+        }
     }
 
     [Serializable]
@@ -528,7 +573,9 @@ namespace SilverEcho.ForsakenWorld
         public string Name = string.Empty;
         public int ElementIndex;
         public string TexFile = string.Empty;
+        public int SrcBlend;
         public int DestBlend = 6;
+        public int RenderLayer;
         public bool ZEnable = true;
         public bool Warp;
         public bool IsDummy;
@@ -600,7 +647,9 @@ namespace SilverEcho.ForsakenWorld
                 Name = p.Name,
                 ElementIndex = p.ElementIndex,
                 TexFile = p.TexFile,
+                SrcBlend = p.SrcBlend,
                 DestBlend = p.DestBlend,
+                RenderLayer = p.RenderLayer,
                 ZEnable = p.ZEnable,
                 Warp = p.Warp,
                 IsDummy = p.IsDummy,
@@ -674,7 +723,9 @@ namespace SilverEcho.ForsakenWorld
                 Name = Name,
                 ElementIndex = ElementIndex,
                 TexFile = TexFile,
+                SrcBlend = SrcBlend,
                 DestBlend = DestBlend,
+                RenderLayer = RenderLayer,
                 ZEnable = ZEnable,
                 Warp = Warp,
                 IsDummy = IsDummy,

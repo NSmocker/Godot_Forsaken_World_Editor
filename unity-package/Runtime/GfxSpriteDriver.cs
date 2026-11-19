@@ -29,11 +29,37 @@ namespace SilverEcho.ForsakenWorld
         private MeshFilter meshFilter;
         private MeshRenderer meshRenderer;
         private Material runtimeMaterial;
+        private Material originalSlotMaterial;
         private MaterialPropertyBlock propertyBlock;
         private GfxSpriteParams cachedParams;
-        private bool header2dRender;
+        [SerializeField] private bool header2dRender;
+        private GfxKeypointPlaybackClock playbackClock;
+        private GfxSpriteTexturePlayback texturePlayback;
+        private GfxKeypointColorPlayback colorPlayback;
+        private float lastPlaybackTime;
 
-        public GfxSpriteParams Params => cachedParams ?? (cachedParams = paramsSerial.ToParams());
+        public GfxSpriteParams Params
+        {
+            get
+            {
+                if (cachedParams != null)
+                    return cachedParams;
+                cachedParams = paramsSerial.ToParams();
+                var source = RestoreAnimationSource();
+                if (source != null)
+                {
+                    cachedParams.TexInterval = Math.Max(0, GfxPropertyValues.Int(source.Properties, "TexInterval", (int)cachedParams.TexInterval));
+                    cachedParams.TexAnimMaxTime = Math.Max(0, GfxPropertyValues.Int(source.Properties, "TexAnimMaxTime", cachedParams.TexAnimMaxTime));
+                    cachedParams.ResetLoopEnd = GfxPropertyValues.Int(source.Properties, "ResetLoopEnd", cachedParams.ResetLoopEnd ? 1 : 0) != 0;
+                    cachedParams.RenderLayer = GfxPropertyValues.Int(source.Properties, "RenderLayer", cachedParams.RenderLayer);
+                }
+                var player = GetComponentInParent<GfxPlayer>();
+                var version = GfxHeaderConfig.FileVersion(player != null ? player.HeaderDictionary() : null);
+                if (version >= 0 && version < 75) cachedParams.TexAnimMaxTime = 0;
+                if (version >= 0 && version < 74) cachedParams.ResetLoopEnd = false;
+                return cachedParams;
+            }
+        }
 
         public void Configure(
             GfxSpriteParams spriteParams,
@@ -44,6 +70,8 @@ namespace SilverEcho.ForsakenWorld
             if (spriteParams == null)
                 throw new ArgumentNullException(nameof(spriteParams));
 
+            OnDisable();
+            ResetPlayback();
             cachedParams = spriteParams;
             paramsSerial = GfxSpriteParamsSerial.FromParams(spriteParams);
             header2dRender = gfx2dRender;
@@ -80,6 +108,7 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            ResetPlayback();
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;
@@ -114,16 +143,95 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
+            ApplyKeypointVisual(keypoints, span, active, elementTime, alpha, null);
+        }
+
+        internal void ResetPlayback()
+        {
+            playbackClock = null;
+            texturePlayback = null;
+            colorPlayback = null;
+        }
+
+        internal void OnGfxPlaybackTick(float gfxTimeMs, float alpha, float step, bool advance)
+        {
+            var keypoints = GetKeypoints();
+            if (keypoints.Count == 0)
+            {
+                OnGfxTick(gfxTimeMs, alpha);
+                return;
+            }
+
+            var priorTime = gfxTimeMs - step;
+            if (playbackClock == null || Math.Abs(lastPlaybackTime - priorTime) > 0.01f)
+            {
+                playbackClock = new GfxKeypointPlaybackClock();
+                texturePlayback = new GfxSpriteTexturePlayback();
+                colorPlayback = GfxKeypointColorPlayback.Create(keypoints);
+                if (priorTime > 0f)
+                {
+                    playbackClock.Tick(priorTime, LocalStartTime, LocalTotalTime, RepeatCount, RepeatDelay, IsEndless);
+                    texturePlayback.Tick(Params, priorTime, playbackClock.Active);
+                    if (playbackClock.Active)
+                    {
+                        var span = playbackClock.TimeMs - LocalStartTime;
+                        colorPlayback?.Tick(span, span);
+                    }
+                }
+            }
+
+            lastPlaybackTime = gfxTimeMs;
+            var wasActive = playbackClock.Active;
+            var looped = advance && playbackClock.Tick(step, LocalStartTime, LocalTotalTime,
+                RepeatCount, RepeatDelay, IsEndless);
+            if (looped)
+            {
+                if (Params.ResetLoopEnd)
+                    texturePlayback.ResumeLoop();
+                colorPlayback?.Restart();
+            }
+            GfxAlpha = alpha;
+            TimeMs = gfxTimeMs;
+            lastCurrentTimeMs = playbackClock.TimeMs;
+            SetVisualActive(playbackClock.Active);
+            if (!playbackClock.Active)
+                return;
+
+            // The native element only ticks its atlas while both its own
+            // keypoint and the bound element's keypoint are active.
+            var bound = BoundTransformTarget;
+            var boundActive = bound == null || IsBoundKeypointActive(bound, gfxTimeMs);
+            var uv = texturePlayback.Tick(Params, step, advance && boundActive);
+            var localSpan = lastCurrentTimeMs - LocalStartTime;
+            if (advance)
+                colorPlayback?.Tick(localSpan, wasActive && !looped ? step : localSpan);
+            ApplyKeypointVisual(keypoints, localSpan, gfxTimeMs, lastCurrentTimeMs, alpha, uv, colorPlayback?.Color);
+        }
+
+        private static bool IsBoundKeypointActive(GfxElementDriver target, float timeMs)
+        {
+            if (target is GfxSpriteDriver sprite && sprite.playbackClock != null)
+                return sprite.playbackClock.Active;
+            var t = target.IsEndless ? timeMs : GfxKeypointEval.ElementTime(timeMs, target.GlobalLoopTime,
+                target.LocalStartTime, target.LocalTotalTime, target.RepeatCount, target.RepeatDelay);
+            return t >= target.LocalStartTime && (target.IsEndless || t < target.LocalTotalTime);
+        }
+
+        private void ApplyKeypointVisual(IList<GfxKeypointSpec> keypoints, float span, float active,
+            float elementTime, float alpha, GfxSpriteUvState? playbackUv, float[] playbackColor = null)
+        {
             var state = GfxKeypointEval.Evaluate(keypoints, span,
                 BoundTransformTarget == null ? BindTimeSec(active) : null,
                 Params.SystemId == "100" || Params.SystemId == "101");
+            if (playbackColor != null)
+                state.Color = playbackColor;
             if (BoundTransformTarget != null)
             {
                 var bound = BoundTransformTarget.EvaluateBoundKeypoint(active);
                 state.Pos = bound.Pos;
                 state.Dir = bound.Dir;
             }
-            ApplySpriteState(state, elementTime, alpha);
+            ApplySpriteState(state, elementTime, alpha, playbackUv);
         }
 
         /// <summary>
@@ -165,23 +273,16 @@ namespace SilverEcho.ForsakenWorld
                 alpha);
         }
 
-        private void ApplySpriteState(GfxKeypointState state, float elementTime, float alpha)
+        private void ApplySpriteState(GfxKeypointState state, float elementTime, float alpha, GfxSpriteUvState? playbackUv = null)
         {
             if (state == null)
                 return;
 
             var p = Params;
             var pos = state.Pos ?? GfxMath.Vec3Zero();
-            // Priority Z-fighting offset along local +Z (create_id_100 face_dir * index * 0.001).
-            var face = GfxMath.RotateVec3(
-                state.Dir ?? GfxMath.QuatIdentity(), GfxMath.Vec3(0f, 0f, 1f));
-            if (GfxMath.Length3(face) < GfxMath.Epsilon)
-                face = GfxMath.Vec3(0f, 0f, 1f);
-            else
-                face = GfxMath.Normalize3(face);
-            var zOff = GfxMath.Scale3(face, p.ElementIndex * 0.001f);
-            var worldPos = GfxMath.Add3(pos, zOff);
-            transform.localPosition = new Vector3(worldPos[0], worldPos[1], worldPos[2]);
+            // A3DDecalEx::Update_3D uses the keypoint transform and parent
+            // matrix. The element's index is unrelated to the decal position.
+            transform.localPosition = new Vector3(pos[0], pos[1], pos[2]);
 
             float[] camPos = null;
             var cam = Camera.main;
@@ -197,21 +298,53 @@ namespace SilverEcho.ForsakenWorld
                 transform.position.y,
                 transform.position.z
             };
-            var rot = GfxSpriteBillboard.ComputeRotation(
-                p.IsFullBillboardDefault,
-                p.SystemId != "102" && p.RotFromView,
-                state.Dir,
-                elemPos,
-                camPos,
-                p.SystemId == "102" ? 0f : state.Rad);
-            transform.localRotation = new Quaternion(rot[0], rot[1], rot[2], rot[3]);
+            if (p.SystemId == "101" && cam != null)
+            {
+                // A3DDecalEx::Fill_Verts_2D projects the center, then lays the
+                // quad out in screen right/up. Its U axis never faces back
+                // toward the camera with the decal normal.
+                transform.rotation = cam.transform.rotation *
+                    Quaternion.AngleAxis(state.Rad * Mathf.Rad2Deg, Vector3.forward);
+            }
+            else if (p.SystemId == "100" && p.RotFromView && camPos != null)
+            {
+                var dir = state.Dir ?? GfxMath.QuatIdentity();
+                var worldDir = transform.parent == null ? new Quaternion(dir[0], dir[1], dir[2], dir[3])
+                    : transform.parent.rotation * new Quaternion(dir[0], dir[1], dir[2], dir[3]);
+                var rot = GfxSpriteBillboard.ZAxisBillboard(
+                    new[] { worldDir.x, worldDir.y, worldDir.z, worldDir.w }, elemPos, camPos);
+                transform.rotation = new Quaternion(rot[0], rot[1], rot[2], rot[3]);
+            }
+            else
+            {
+                var rot = GfxSpriteBillboard.ComputeRotation(
+                    p.IsFullBillboardDefault,
+                    p.SystemId != "102" && p.RotFromView,
+                    state.Dir,
+                    elemPos,
+                    camPos,
+                    p.SystemId == "102" ? 0f : state.Rad);
+                transform.localRotation = new Quaternion(rot[0], rot[1], rot[2], rot[3]);
+            }
 
             var s = Math.Max(0f, state.Scale);
             transform.localScale = new Vector3(s, s, s);
 
             EnsureComponents();
             if (runtimeMaterial == null)
-                runtimeMaterial = meshRenderer != null ? meshRenderer.sharedMaterial : null;
+            {
+                // Older prefab materials persisted the Godot presets. Use the
+                // authored slot on this renderer without editing the shared asset.
+                var player = GetComponentInParent<GfxPlayer>();
+                var header = player != null ? player.HeaderDictionary() : null;
+                var is2d = header != null ? GfxHeaderConfig.Is2DRender(header) : header2dRender;
+                var legacyDepthTest = GfxHeaderConfig.ForcesElementDepthTest(GfxHeaderConfig.FileVersion(header));
+                runtimeMaterial = GfxBlendFactors.RestoreSlot(meshRenderer,
+                    p.Warp ? GfxBlendFactors.A3dBlendSrcAlpha : p.SrcBlend,
+                    p.Warp ? GfxBlendFactors.A3dBlendInvSrcAlpha : p.DestBlend,
+                    (p.ZEnable || legacyDepthTest) && !is2d,
+                    p.RenderLayer, out originalSlotMaterial);
+            }
             if (runtimeMaterial == null)
                 return;
 
@@ -228,7 +361,7 @@ namespace SilverEcho.ForsakenWorld
                 // Header alpha is already included in the color above.
                 propertyBlock.SetFloat("_GfxAlpha", 1f);
 
-            var uv = GfxSpriteUvEval.Evaluate(p, elementTime);
+            var uv = playbackUv ?? GfxSpriteUvEval.Evaluate(p, elementTime);
             if (runtimeMaterial.HasProperty("_UvExchange"))
                 propertyBlock.SetFloat("_UvExchange", uv.Exchange ? 1f : 0f);
             if (runtimeMaterial.HasProperty("_UvRect"))
@@ -264,6 +397,11 @@ namespace SilverEcho.ForsakenWorld
                 if (meshRenderer == null)
                     meshRenderer = gameObject.AddComponent<MeshRenderer>();
             }
+        }
+
+        private void OnDisable()
+        {
+            GfxBlendFactors.ReleaseRestoredSlot(meshRenderer, ref runtimeMaterial, ref originalSlotMaterial);
         }
 
         private void BuildMesh(GfxSpriteParams spriteParams)
@@ -305,6 +443,8 @@ namespace SilverEcho.ForsakenWorld
         public int TexRow = 1;
         public int TexCol = 1;
         public float TexInterval = 50f;
+        public int TexAnimMaxTime;
+        public bool ResetLoopEnd;
         public float TexSpeed1;
         public float TexSpeed2;
         public bool TileMode;
@@ -315,6 +455,7 @@ namespace SilverEcho.ForsakenWorld
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
+        public int RenderLayer;
         public int SrcBlend;
         public int DestBlend = 6;
         public int ElementIndex = 1;
@@ -333,6 +474,8 @@ namespace SilverEcho.ForsakenWorld
                 TexRow = TexRow,
                 TexCol = TexCol,
                 TexInterval = TexInterval,
+                TexAnimMaxTime = TexAnimMaxTime,
+                ResetLoopEnd = ResetLoopEnd,
                 TexSpeed1 = TexSpeed1,
                 TexSpeed2 = TexSpeed2,
                 TileMode = TileMode,
@@ -343,6 +486,7 @@ namespace SilverEcho.ForsakenWorld
                 Warp = Warp,
                 ZEnable = ZEnable,
                 Priority = Priority,
+                RenderLayer = RenderLayer,
                 SrcBlend = SrcBlend,
                 DestBlend = DestBlend,
                 ElementIndex = ElementIndex
@@ -365,6 +509,8 @@ namespace SilverEcho.ForsakenWorld
                 TexRow = p.TexRow,
                 TexCol = p.TexCol,
                 TexInterval = p.TexInterval,
+                TexAnimMaxTime = p.TexAnimMaxTime,
+                ResetLoopEnd = p.ResetLoopEnd,
                 TexSpeed1 = p.TexSpeed1,
                 TexSpeed2 = p.TexSpeed2,
                 TileMode = p.TileMode,
@@ -375,6 +521,7 @@ namespace SilverEcho.ForsakenWorld
                 Warp = p.Warp,
                 ZEnable = p.ZEnable,
                 Priority = p.Priority,
+                RenderLayer = p.RenderLayer,
                 SrcBlend = p.SrcBlend,
                 DestBlend = p.DestBlend,
                 ElementIndex = p.ElementIndex
@@ -413,29 +560,16 @@ namespace SilverEcho.ForsakenWorld
             };
 
             var additive = spriteParams.IsAdditiveBlend;
-            mat.renderQueue = (int)RenderQueue.Transparent;
-            if (mat.HasProperty("_SrcBlend"))
-                mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            if (mat.HasProperty("_DstBlend"))
-            {
-                mat.SetFloat(
-                    "_DstBlend",
-                    additive
-                        ? (float)UnityEngine.Rendering.BlendMode.One
-                        : (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            }
+            GfxBlendFactors.ApplySlot(mat,
+                spriteParams.Warp ? GfxBlendFactors.A3dBlendSrcAlpha : spriteParams.SrcBlend,
+                spriteParams.Warp ? GfxBlendFactors.A3dBlendInvSrcAlpha : spriteParams.DestBlend,
+                spriteParams.ZEnable && !gfx2dRender, spriteParams.RenderLayer);
 
             if (additive)
                 mat.EnableKeyword("_ADDITIVE_BLEND");
             else
                 mat.DisableKeyword("_ADDITIVE_BLEND");
 
-            // A04: header 2DRender disables the depth TEST. Godot create_id_100/101 emit
-            // depth_test_disabled keyed on 2DRender only and never read ZEnable for it.
-            if (mat.HasProperty("_ZTest"))
-                mat.SetFloat("_ZTest", gfx2dRender
-                    ? (float)UnityEngine.Rendering.CompareFunction.Always
-                    : (float)UnityEngine.Rendering.CompareFunction.LessEqual);
             if (mat.HasProperty("_ZWrite"))
                 mat.SetFloat("_ZWrite", 0f); // Translucent quads must not occlude subsequent layers.
 

@@ -52,7 +52,13 @@ namespace SilverEcho.ForsakenWorld
                 offsetV = 0f;
             }
 
-            // Godot: UVExchg, then UReverse, then VReverse on unit UV before tile/sheet.
+            return Transform(p, scaleU, scaleV, offsetU, offsetV);
+        }
+
+        internal static GfxSpriteUvState Transform(GfxSpriteParams p, float scaleU, float scaleV,
+            float offsetU, float offsetV)
+        {
+            // UVExchg, then UReverse, then VReverse on unit UV before tile/sheet.
             // Exchanging axes is an off-diagonal transform; scale/offset alone
             // cannot represent it. The shader swaps unit UV before this map.
 
@@ -76,6 +82,67 @@ namespace SilverEcho.ForsakenWorld
                 OffsetU = offsetU,
                 OffsetV = offsetV
             };
+        }
+    }
+
+    // A3DGFXElement::TickAnimation, TexAnimation and ResumeLoop keep atlas
+    // state independently of keypoint time. Each active tick advances at most
+    // one cell, even if the accumulator contains several intervals.
+    internal sealed class GfxSpriteTexturePlayback
+    {
+        private float age;
+        private float remaining;
+        private int row;
+        private int column;
+        private float u;
+        private float v;
+
+        internal void ResumeLoop()
+        {
+            age = 0f;
+            remaining = 0f;
+            row = 0;
+            column = 0;
+        }
+
+        internal GfxSpriteUvState Tick(GfxSpriteParams p, float elapsedMs, bool active)
+        {
+            int columns = Math.Max(1, p.TexCol);
+            int rows = Math.Max(1, p.TexRow);
+            if (p.TileMode)
+            {
+                if (active)
+                {
+                    float seconds = elapsedMs * 0.001f;
+                    u += p.TexSpeed1 * seconds;
+                    v += p.TexSpeed2 * seconds;
+                }
+                return GfxSpriteUvEval.Transform(p, columns, rows, u, v);
+            }
+
+            float width = 1f / columns;
+            float height = 1f / rows;
+            if (active && (columns > 1 || rows > 1))
+            {
+                age += elapsedMs;
+                if (p.TexAnimMaxTime == 0 || p.TexAnimMaxTime > age)
+                {
+                    remaining += elapsedMs;
+                    if (remaining >= p.TexInterval)
+                    {
+                        remaining -= p.TexInterval;
+                        if (++column >= columns)
+                        {
+                            column = 0;
+                            if (++row >= rows)
+                                row = 0;
+                        }
+                        u = width * column;
+                        v = height * row;
+                    }
+                }
+            }
+            return GfxSpriteUvEval.Transform(p, width, height, u, v);
         }
     }
 }

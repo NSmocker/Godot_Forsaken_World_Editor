@@ -261,7 +261,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             return file.ToArray();
         }
 
-        internal static byte[] BuildT2mk(bool compressed)
+        internal static byte[] BuildT2mk(bool compressed, int textureIndex = 0)
         {
             const int maskSize = 4;
             var mask = new byte[maskSize * maskSize];
@@ -274,7 +274,7 @@ namespace SilverEcho.ForsakenWorld.Tests
 
             var layers = new List<byte>();
             // layer 0
-            AddInt32(layers, 0); // texture
+            AddInt32(layers, textureIndex); // texture
             AddInt32(layers, 0);
             AddInt32(layers, maskSize);
             layers.Add(1); // axis
@@ -283,7 +283,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             AddFloat(layers, 1f);
             AddInt32(layers, 0);
             // layer 1
-            AddInt32(layers, 0);
+            AddInt32(layers, textureIndex);
             AddInt32(layers, 0);
             AddInt32(layers, maskSize);
             layers.Add(1);

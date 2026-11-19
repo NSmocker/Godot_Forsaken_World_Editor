@@ -95,7 +95,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                 header = null;
             }
             var isDds = extension.Equals(".dds", StringComparison.OrdinalIgnoreCase);
-            var preferNative = !isDds || header == null || header.LikelyUnityNativeImport;
+            var preferNative = !isDds || header == null ||
+                (header.LikelyUnityNativeImport && (header.HasCompleteMipChain ||
+                    header.Compression == DdsCompression.UncompressedRgb));
 
             if (preferNative)
             {
@@ -513,7 +515,43 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return result;
             }
 
+            FlipDdsRows(rgba, header.Width, header.Height);
             var texture = CreateRgbaTexture(header.Width, header.Height, rgba, sourceRelativePath);
+            if (header.MipMapCount > 1 && (header.Compression == DdsCompression.Dxt1 ||
+                header.Compression == DdsCompression.Dxt3 || header.Compression == DdsCompression.Dxt5))
+            {
+                if (header.MipMapCount > header.ExpectedFullMipChainCount)
+                {
+                    UnityEngine.Object.DestroyImmediate(texture);
+                    result.Error = CombineErrors(priorError, "DDS mip count exceeds its dimensions.");
+                    return result;
+                }
+                // D3DX keeps the DDS mip levels. A top-level-only fallback aliases
+                // when the original particle texture is minified.
+                var mips = new byte[header.MipMapCount][];
+                mips[0] = rgba;
+                for (int mip = 1; mip < mips.Length; mip++)
+                    if (!DdsDxtDecoder.TryDecodeMipRgba(bytes, header, mip, out mips[mip], out decodeError))
+                    {
+                        UnityEngine.Object.DestroyImmediate(texture);
+                        result.Error = CombineErrors(priorError, decodeError);
+                        return result;
+                    }
+                var mipTexture = new Texture2D(header.Width, header.Height, TextureFormat.RGBA32, mips.Length, false)
+                {
+                    name = texture.name,
+                    filterMode = FilterMode.Trilinear
+                };
+                mipTexture.SetPixelData(rgba, 0);
+                for (int mip = 1; mip < mips.Length; mip++)
+                {
+                    FlipDdsRows(mips[mip], Math.Max(1, header.Width >> mip), Math.Max(1, header.Height >> mip));
+                    mipTexture.SetPixelData(mips[mip], mip);
+                }
+                mipTexture.Apply(false, false);
+                UnityEngine.Object.DestroyImmediate(texture);
+                texture = mipTexture;
+            }
             var existing = AssetDatabase.LoadMainAssetAtPath(result.AssetPath);
             if (existing != null)
             {
@@ -550,6 +588,21 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             return result;
+        }
+
+        private static void FlipDdsRows(byte[] rgba, int width, int height)
+        {
+            // DDS file row zero is the top, while Unity uploads from the bottom row.
+            int stride = width * 4;
+            var row = new byte[stride];
+            for (int y = 0; y < height / 2; y++)
+            {
+                int top = y * stride;
+                int bottom = (height - 1 - y) * stride;
+                Buffer.BlockCopy(rgba, top, row, 0, stride);
+                Buffer.BlockCopy(rgba, bottom, rgba, top, stride);
+                Buffer.BlockCopy(row, 0, rgba, bottom, stride);
+            }
         }
 
         private static Texture2D CreateRgbaTexture(

@@ -125,6 +125,22 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void ColorTransitionTruncatesInterpolatedChannels()
+        {
+            var colors = new[]
+            {
+                GfxMath.Color(0f, 120f / 255f, 130f / 255f, 0f),
+                GfxMath.Color(64f / 255f, 169f / 255f, 1f, 155f / 255f)
+            };
+            var durations = new[] { 250f };
+
+            var color = GfxKeypointEval.StageColor(colors, durations, 1, 50f);
+
+            CollectionAssert.AreEqual(new[] { 12f / 255f, 129f / 255f, 155f / 255f, 31f / 255f }, color);
+            CollectionAssert.AreEqual(colors[1], GfxKeypointEval.StageColor(colors, durations, 1, 300f));
+        }
+
+        [Test]
         public void NoiseIsDeterministic()
         {
             var a = GfxKeypointEval.Fbm1d(12.5f, 4, 0.5f);

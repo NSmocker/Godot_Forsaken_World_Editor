@@ -17,6 +17,7 @@ namespace SilverEcho.ForsakenWorld
         public string TexFile = string.Empty;
         public int SrcBlend;
         public int DestBlend = 6;
+        public int RenderLayer;
         public bool ZEnable = true;
         public bool Warp;
         public string DummyEle = string.Empty;
@@ -103,7 +104,9 @@ namespace SilverEcho.ForsakenWorld
             }
         }
 
-        public float MixAlphaScale => IsAdditiveBlend ? 1f : 0.70f;
+        // A3DParticleSystemEx passes the particle alpha through the same
+        // modulation regardless of the render slot's destination blend.
+        public float MixAlphaScale => 1f;
 
         public int PoolSize
         {
@@ -145,6 +148,7 @@ namespace SilverEcho.ForsakenWorld
                 p.TexFile = GfxPropertyValues.Get(properties, "Tex File", string.Empty);
             p.SrcBlend = GfxPropertyValues.Int(properties, "SrcBlend", 0);
             p.DestBlend = GfxPropertyValues.Int(properties, "DestBlend", 6);
+            p.RenderLayer = GfxPropertyValues.Int(properties, "RenderLayer", 0);
             p.ZEnable = GfxPropertyValues.Bool(properties, "ZEnable", true);
             p.Warp = GfxPropertyValues.Bool(properties, "Warp", false);
             p.DummyEle = GfxPropertyValues.Get(properties, "DummyEle", string.Empty);

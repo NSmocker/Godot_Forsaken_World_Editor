@@ -8,7 +8,6 @@ namespace SilverEcho.ForsakenWorld.Editor
 {
     public static class TestMapRoundtrip
     {
-        [MenuItem("Angelica 2.x/Test - Roundtrip a05 Map")]
         public static void RunTest()
         {
             string mapPath = @"A:\146CleanClient\maps\a05";

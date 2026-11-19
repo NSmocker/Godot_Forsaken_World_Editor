@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -11,6 +12,16 @@ namespace SilverEcho.ForsakenWorld
     public sealed class WorldObjectsController : MonoBehaviour
     {
         public const float DefaultUpdateInterval = 0.25f;
+
+        /// <summary>
+        /// Edit-mode camera source for the load-radius test. An editor bridge
+        /// ([InitializeOnLoad], WorldSceneCameraBridge) points this at the scene view
+        /// the user actually looks through; the runtime game keeps Camera.main.
+        /// When the provider is absent or has no view, edit mode skips the distance
+        /// test so objects stay visible and inspectable instead of being culled by
+        /// an unrelated camera in the scene.
+        /// </summary>
+        public static Func<Vector3?> EditorCameraPosition { get; set; }
 
         [SerializeField, Tooltip("Switches world lighting, object visibility and baked LitModel day/night colors.")]
         private bool night;
@@ -80,9 +91,20 @@ namespace SilverEcho.ForsakenWorld
         public void ApplyTime()
         {
             // Godot compares global positions (cam.global_position vs child.global_position).
+            // Play mode uses the game camera (Camera.main). Edit mode follows the scene
+            // view the user looks through; with no scene view there is no meaningful
+            // camera, so the distance test is skipped rather than culling everything
+            // from an unrelated camera's position.
             Vector3? camPos = null;
-            if (Camera.main != null && Camera.main.transform != null)
-                camPos = Camera.main.transform.position;
+            if (Application.isPlaying)
+            {
+                if (Camera.main != null && Camera.main.transform != null)
+                    camPos = Camera.main.transform.position;
+            }
+            else if (EditorCameraPosition != null)
+            {
+                camPos = EditorCameraPosition();
+            }
 
             ApplyNode(transform, camPos);
             if (lightNight == null || lightNight.Value != night || lightMap != transform.parent)

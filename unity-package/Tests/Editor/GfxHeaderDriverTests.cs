@@ -1,15 +1,22 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace SilverEcho.ForsakenWorld.Tests
 {
     public sealed class GfxHeaderDriverTests
     {
         [Test]
-        public void TwoDRenderIsStrictOneLikeGodot()
+        public void TwoDRenderUsesTheVersionedNumericFlag()
         {
             var h = new Dictionary<string, string> { { "2DRender", " 1 " } };
             Assert.IsTrue(GfxHeaderConfig.Is2DRender(h));
+            h["2DRender"] = "-1";
+            h["MOXTVersion"] = "50";
+            Assert.IsTrue(GfxHeaderConfig.Is2DRender(h));
+            h["MOXTVersion"] = "49";
+            Assert.IsFalse(GfxHeaderConfig.Is2DRender(h));
+            h["MOXTVersion"] = "50";
             h["2DRender"] = "true";
             Assert.IsFalse(GfxHeaderConfig.Is2DRender(h));
             Assert.IsFalse(GfxHeaderConfig.Is2DRender(new Dictionary<string, string>()));
@@ -75,6 +82,28 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void NativeTickTruncatesScaledMillisecondsAndHonorsTheMinimum()
+        {
+            var driver = new GfxHeaderDriver { PlaySpeed = 0.5f };
+            float Tick(float delta) => driver.Tick(delta, null, null, null, false, out _);
+
+            Assert.AreEqual(0f, Tick(0f));
+            Assert.AreEqual(2f, Tick(1f));
+            Assert.AreEqual(6f, Tick(9f));
+            driver.PlaySpeed = 0f;
+            Assert.AreEqual(8f, Tick(50f));
+            driver.PlayerPaused = true;
+            Assert.AreEqual(8f, Tick(50f));
+
+            driver.Restart();
+            driver.PlaySpeed = 1f;
+            driver.PlayerPaused = false;
+            Assert.AreEqual(0f, Tick(0.5f));
+            Assert.AreEqual(0f, Tick(0f));
+            Assert.AreEqual(2f, Tick(0.5f));
+        }
+
+        [Test]
         public void TimeManualDoesNotAdvanceInternalClock()
         {
             var driver = new GfxHeaderDriver();
@@ -118,6 +147,47 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(0f, basis[2][0], 0.01f);
             Assert.AreEqual(0f, basis[2][1], 0.01f);
             Assert.AreEqual(1f, basis[2][2], 0.01f);
+        }
+
+        [Test]
+        public void ParentTransformsDoNotChangeWorldFacingOrDistanceFade()
+        {
+            var effectParent = new GameObject("Effect parent");
+            var cameraParent = new GameObject("Camera parent");
+            var effect = new GameObject("GFX");
+            var cameraObject = new GameObject("GFX camera");
+            var previousCamera = Camera.main;
+            try
+            {
+                if (previousCamera != null) previousCamera.enabled = false;
+                cameraObject.tag = "MainCamera";
+                cameraObject.AddComponent<Camera>();
+                effect.transform.SetParent(effectParent.transform, false);
+                cameraObject.transform.SetParent(cameraParent.transform, false);
+                effectParent.transform.SetPositionAndRotation(
+                    new Vector3(6f, 1f, 4f), Quaternion.Euler(0f, 45f, 0f));
+                cameraParent.transform.position = new Vector3(11f, 1f, 4f);
+
+                var player = effect.AddComponent<GfxPlayer>();
+                player.SetHeader(new Dictionary<string, string>
+                {
+                    ["FaceToViewer"] = "1", ["FadeByDist"] = "1",
+                    ["FadeStart"] = "0", ["FadeEnd"] = "10"
+                });
+                var elementObject = new GameObject("Element");
+                elementObject.transform.SetParent(effect.transform, false);
+                var element = elementObject.AddComponent<GfxElementDriver>();
+                player.MarkHierarchyDirty();
+                player.Tick(0f);
+                Assert.AreEqual(0.5f, element.GfxAlpha, 0.001f);
+                Assert.That(Vector3.Distance(effect.transform.forward, Vector3.right), Is.LessThan(0.001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraParent);
+                Object.DestroyImmediate(effectParent);
+                if (previousCamera != null) previousCamera.enabled = true;
+            }
         }
 
         [Test]

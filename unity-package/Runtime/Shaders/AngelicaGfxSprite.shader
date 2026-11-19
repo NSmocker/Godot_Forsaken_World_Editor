@@ -27,19 +27,13 @@ Shader "Forsaken World/Angelica Gfx Sprite"
             "RenderPipeline"="UniversalPipeline"
             "IgnoreProjector"="True"
         }
-        Pass
-        {
-            Name "GfxSprite"
-            Tags { "LightMode"="SRPDefaultUnlit" }
-            Cull Off
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Blend [_SrcBlend] [_DstBlend]
-            HLSLPROGRAM
-            #pragma target 3.0
-            #pragma vertex Vert
-            #pragma fragment Frag
+        Cull Off
+        ZWrite [_ZWrite]
+        ZTest [_ZTest]
+        Blend [_SrcBlend] [_DstBlend]
+        HLSLINCLUDE
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
             TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
             CBUFFER_START(UnityPerMaterial)
@@ -93,9 +87,49 @@ Shader "Forsaken World/Angelica Gfx Sprite"
                     return half4(distorted, tex.a);
                 }
                 half4 col = tex * _BaseColor * input.color;
+                #ifndef UNITY_COLORSPACE_GAMMA
+                    // Angelica's MODULATE uses the packed vertex RGB in the texture's
+                    // encoded color space. Vertex attributes bypass Unity's sRGB decode.
+                    if (_UseVertexColor > 0.5h)
+                        col.rgb = SRGBToLinear(LinearToSRGB(tex.rgb) * input.color.rgb) * _BaseColor.rgb;
+                #endif
                 col.a *= _GfxAlpha;
                 return col;
             }
+            float4 FragEncoded(Varyings input) : SV_Target
+            {
+                // The encoded pass composites into an ordinary UNORM attachment.
+                // Distortion remains in the scene-color pass and is not drawn here.
+                clip(0.5 - _Warp);
+                float4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
+                float4 tint = _BaseColor;
+                #ifndef UNITY_COLORSPACE_GAMMA
+                    tex.rgb = LinearToSRGB(tex.rgb);
+                    tint.rgb = LinearToSRGB(tint.rgb);
+                #endif
+                float4 color = tex * tint * input.color;
+                color.a *= _GfxAlpha;
+                return color;
+            }
+        ENDHLSL
+        Pass
+        {
+            Name "GfxSprite"
+            Tags { "LightMode"="SRPDefaultUnlit" }
+            HLSLPROGRAM
+            #pragma target 3.0
+            #pragma vertex Vert
+            #pragma fragment Frag
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "GfxSpriteEncoded"
+            Tags { "LightMode"="AngelicaGfxEncoded" }
+            HLSLPROGRAM
+            #pragma target 3.0
+            #pragma vertex Vert
+            #pragma fragment FragEncoded
             ENDHLSL
         }
     }

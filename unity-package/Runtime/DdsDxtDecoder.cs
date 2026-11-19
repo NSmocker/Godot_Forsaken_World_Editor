@@ -16,6 +16,12 @@ namespace SilverEcho.ForsakenWorld
             out byte[] rgba,
             out string error)
         {
+            return TryDecodeMipRgba(ddsBytes, header, 0, out rgba, out error);
+        }
+
+        public static bool TryDecodeMipRgba(
+            byte[] ddsBytes, DdsDocument header, int mip, out byte[] rgba, out string error)
+        {
             rgba = null;
             error = null;
             if (ddsBytes == null || header == null)
@@ -24,7 +30,13 @@ namespace SilverEcho.ForsakenWorld
                 return false;
             }
 
-            if (header.Compression == DdsCompression.UncompressedRgb)
+            if (mip < 0 || mip >= Math.Max(1, header.MipMapCount) || mip >= header.ExpectedFullMipChainCount)
+            {
+                error = "DDS mip index is out of range.";
+                return false;
+            }
+
+            if (header.Compression == DdsCompression.UncompressedRgb && mip == 0)
                 return TryDecodeUncompressedTopMip(ddsBytes, header, out rgba, out error);
 
             if (header.Compression != DdsCompression.Dxt1 &&
@@ -35,11 +47,20 @@ namespace SilverEcho.ForsakenWorld
                 return false;
             }
 
-            var offset = header.HeaderByteSize;
-            var size = header.TopMipByteSize;
+            long offset = header.HeaderByteSize;
+            int width = header.Width;
+            int height = header.Height;
+            int blockBytes = header.Compression == DdsCompression.Dxt1 ? 8 : 16;
+            for (int level = 0; level < mip; level++)
+            {
+                offset += ((width + 3L) / 4) * ((height + 3L) / 4) * blockBytes;
+                width = Math.Max(1, width / 2);
+                height = Math.Max(1, height / 2);
+            }
+            long size = ((width + 3L) / 4) * ((height + 3L) / 4) * blockBytes;
             if (size <= 0 || offset + size > ddsBytes.Length)
             {
-                error = "DDS payload is truncated for the top mip.";
+                error = "DDS payload is truncated for the requested mip.";
                 return false;
             }
 
@@ -47,9 +68,9 @@ namespace SilverEcho.ForsakenWorld
             {
                 rgba = Decode(
                     ddsBytes,
-                    offset,
-                    header.Width,
-                    header.Height,
+                    (int)offset,
+                    width,
+                    height,
                     header.Compression);
                 return true;
             }

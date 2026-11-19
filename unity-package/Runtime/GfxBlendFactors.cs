@@ -1,3 +1,4 @@
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace SilverEcho.ForsakenWorld
@@ -45,5 +46,59 @@ namespace SilverEcho.ForsakenWorld
                 default: return fallback;
             }
         }
+
+        internal static BlendMode Source(int factor) => ToUnity(factor, BlendMode.SrcAlpha);
+
+        internal static BlendMode Destination(int factor) => ToUnity(factor, BlendMode.OneMinusSrcAlpha);
+
+        internal static void ApplySlot(Material material, int source, int destination, bool zTest, int layer)
+        {
+            material.renderQueue = AngelicaRenderPipeline.GfxTransparentQueue(layer);
+            if (material.HasProperty("_SrcBlend")) material.SetFloat("_SrcBlend", (float)Source(source));
+            if (material.HasProperty("_DstBlend")) material.SetFloat("_DstBlend", (float)Destination(destination));
+            if (material.HasProperty("_ZTest")) material.SetFloat("_ZTest", (float)DepthTest(zTest));
+            if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 0f);
+        }
+
+        internal static bool MatchesSlot(Material material, int source, int destination, bool zTest, int layer)
+        {
+            return material.renderQueue == AngelicaRenderPipeline.GfxTransparentQueue(layer) &&
+                Matches("_SrcBlend", (float)Source(source)) &&
+                Matches("_DstBlend", (float)Destination(destination)) &&
+                Matches("_ZTest", (float)DepthTest(zTest)) &&
+                Matches("_ZWrite", 0f);
+
+            bool Matches(string property, float value) =>
+                !material.HasProperty(property) || material.GetFloat(property) == value;
+        }
+
+        internal static Material RestoreSlot(Renderer renderer, int source, int destination, bool zTest,
+            int layer, out Material original)
+        {
+            var material = renderer.sharedMaterial;
+            original = null;
+            if (material == null || MatchesSlot(material, source, destination, zTest, layer))
+                return material;
+
+            original = material;
+            var replacement = new Material(material) { hideFlags = HideFlags.DontSave };
+            ApplySlot(replacement, source, destination, zTest, layer);
+            renderer.sharedMaterial = replacement;
+            return replacement;
+        }
+
+        internal static void ReleaseRestoredSlot(Renderer renderer, ref Material material, ref Material original)
+        {
+            if (original == null) return;
+            if (renderer != null && renderer.sharedMaterial == material)
+                renderer.sharedMaterial = original;
+            if (Application.isPlaying) Object.Destroy(material);
+            else Object.DestroyImmediate(material);
+            material = null;
+            original = null;
+        }
+
+        private static CompareFunction DepthTest(bool enabled) =>
+            enabled ? CompareFunction.LessEqual : CompareFunction.Always;
     }
 }

@@ -36,6 +36,8 @@ namespace SilverEcho.ForsakenWorld.Tests
                     TerrainParserTests.BuildT2mk(false));
                 File.WriteAllBytes(Path.Combine(sourceRoot, "sub" + s + ".t2lm"),
                     TerrainParserTests.BuildT2lm(false));
+                File.WriteAllBytes(Path.Combine(sourceRoot, "sub" + s + ".t2lm1"),
+                    TerrainParserTests.BuildT2lm(false));
             }
             index = new GameDataIndex(sourceRoot);
             index.Scan();
@@ -62,6 +64,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             File.WriteAllBytes(Path.Combine(sourceRoot, "sub2.t2bk"), new byte[] { 0 });
             File.WriteAllBytes(Path.Combine(sourceRoot, "sub2.t2lm"), new byte[] { 0 });
             index.Scan();
+            // A scan cache written before T2LM1 support omits the night maps.
+            index.ReplaceFromRelativePaths(index.Files.Where(file => file.Extension != "t2lm1")
+                .Select(file => file.RelativePath).ToArray());
 
             var result = ImportMap(3, 1, 1); // Duplicate and unordered input must not duplicate sectors.
             Assert.AreEqual(2, result.TerrainAreas);
@@ -103,7 +108,9 @@ namespace SilverEcho.ForsakenWorld.Tests
             if (sourceMode != 0)
                 File.WriteAllBytes(external, sourceMode == 1 ? new byte[] { 0 } : sourceMode == 3 ? bytes : other);
             File.WriteAllBytes(mapFile.FullPath, TerrainParserTests.BuildTrn2(
-                width: 4, length: 4, subRows: 2, subColumns: 2, textureName: relative.Replace('/', '\\')));
+                width: 4, length: 4, subRows: 2, subColumns: 2, textures: 24, textureName: relative.Replace('/', '\\')));
+            File.WriteAllBytes(Path.Combine(sourceRoot, "sub0.t2mk"),
+                TerrainParserTests.BuildT2mk(false, textureIndex: 23));
             index.Scan();
             try
             {
@@ -122,12 +129,18 @@ namespace SilverEcho.ForsakenWorld.Tests
                 var result = TerrainAssetImporter.Import(mapFile, index, decoder, false,
                     selectedSectorIndices: new[] { 0 });
                 Assert.AreEqual(1, result.Areas);
-                Assert.IsFalse(result.Warnings.Any(w => w.Contains("magenta fallback")), string.Join("\n", result.Warnings));
+                Assert.IsFalse(result.Warnings.Any(w => w.Contains("Ground texture")), string.Join("\n", result.Warnings));
                 var terrainObject = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
-                var linked = terrainObject.GetComponentInChildren<MeshRenderer>().sharedMaterial.GetTexture("_Layer0");
+                var material = terrainObject.GetComponentInChildren<MeshRenderer>().sharedMaterial;
+                var linked = (Texture2D)material.GetTexture("_Layer0");
                 Assert.IsNotNull(linked);
-                if (sourceMode != 3)
-                    Assert.AreEqual(AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath), linked);
+                Assert.AreSame(linked, material.GetTexture("_Layer1"));
+                var parameters = (Texture2D)material.GetTexture("_LayerParams");
+                Assert.AreEqual(new Color(0, 1, 1, 1), parameters.GetPixel(0, 0));
+                Assert.AreEqual(new Color(1, 2, 2, 1), parameters.GetPixel(1, 0));
+                Assert.IsFalse(UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsSRGBFormat(linked.graphicsFormat));
+                Assert.AreEqual(new Color32(255, 0, 0, 255), linked.GetPixels32()[0]);
+                Assert.AreEqual(new Color32(0, 255, 0, 255), linked.GetPixels32()[15]);
                 if (sourceMode != 3) CollectionAssert.AreEqual(bytes, File.ReadAllBytes(absolute));
             }
             finally { AssetDatabase.DeleteAsset(Path.GetDirectoryName(assetPath).Replace('\\', '/')); }
@@ -400,6 +413,8 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.IsNotNull(material.GetTexture("_Splat0"));
             Assert.IsNotNull(material.GetTexture("_HeightMap"));
             Assert.IsNotNull(material.GetTexture("_Lightmap"));
+            Assert.AreEqual(1f, material.GetFloat("_UseNightLightmap"));
+            Assert.IsNotNull(material.GetTexture("_NightLightmap"));
         }
     }
 }

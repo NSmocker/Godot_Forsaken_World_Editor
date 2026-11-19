@@ -9,14 +9,12 @@ namespace SilverEcho.ForsakenWorld.Editor
 {
     public static class MapExporter
     {
-        [MenuItem("Tools/Angelica 2.x/Export Map Changes Back", true)]
         private static bool ValidateExportMapChanges()
         {
             return Selection.activeGameObject != null &&
                    Selection.activeGameObject.GetComponentInParent<MapSourceInfo>() != null;
         }
 
-        [MenuItem("Tools/Angelica 2.x/Export Map Changes Back")]
         private static void ExportMapChanges()
         {
             var root = Selection.activeGameObject;

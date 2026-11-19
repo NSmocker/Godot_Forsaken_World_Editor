@@ -269,6 +269,10 @@ namespace SilverEcho.ForsakenWorld
                         // under URP Lit, so they vanish under additive blending — C++
                         // A3DSkinModel adds the material emissive to the lit color.
                         mat.shaderKeywords = src.shaderKeywords;
+                        // A3DSkinRender::ApplyVSMaterial uses the original skin's
+                        // two-sided flag even when the material colors are overridden.
+                        if (src.HasProperty("_Cull") && mat.HasProperty("_Cull"))
+                            mat.SetFloat("_Cull", src.GetFloat("_Cull"));
                         if (src.HasProperty("_BaseColor"))
                             mat.SetColor("_BaseColor", src.GetColor("_BaseColor"));
                         if (src.HasProperty("_Color"))
@@ -329,6 +333,7 @@ namespace SilverEcho.ForsakenWorld
             var needsAlpha = !opaqueReplace;
             if (needsAlpha)
             {
+                mat.renderQueue = AngelicaRenderPipeline.GfxTransparentQueue(p.RenderLayer);
                 if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
                 mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
                 // C++ forwards the element's raw A3DBLEND factors to the skin model
@@ -486,6 +491,7 @@ namespace SilverEcho.ForsakenWorld
         public int SrcBlend;
         public bool Warp;
         public int Priority;
+        public int RenderLayer;
         public bool ResetLoopEnd;
 
         public static GfxModelParamsSerial FromParams(GfxModelParams p)
@@ -510,6 +516,7 @@ namespace SilverEcho.ForsakenWorld
                 SrcBlend = p.SrcBlend,
                 Warp = p.Warp,
                 Priority = p.Priority,
+                RenderLayer = p.RenderLayer,
                 ResetLoopEnd = p.ResetLoopEnd
             };
         }
@@ -537,6 +544,7 @@ namespace SilverEcho.ForsakenWorld
                 SrcBlend = SrcBlend,
                 Warp = Warp,
                 Priority = Priority,
+                RenderLayer = RenderLayer,
                 ResetLoopEnd = ResetLoopEnd
             };
         }

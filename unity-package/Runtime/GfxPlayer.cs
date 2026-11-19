@@ -20,6 +20,8 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private bool timeManual;
         [SerializeField] private float timeMs;
         [SerializeField] private float playSpeed = 1f;
+        [SerializeField, Tooltip("Initial Angelica random seed for volume ellipsoid and cylinder particle playback.")]
+        private int particleSeed = 1;
         [SerializeField] private float alpha = 1f;
         [SerializeField] private bool shakeInEditor;
         [SerializeField] private bool playerPaused;
@@ -33,6 +35,15 @@ namespace SilverEcho.ForsakenWorld
         private Vector3 appliedShake;
         private Camera shakeCamera;
         private bool hasShake;
+        private GfxParticleSim.EmissionRandom particleRandom;
+        private int activeParticleSeed;
+        private float lastParticleTime;
+
+        public int ParticleSeed
+        {
+            get => particleSeed;
+            set => particleSeed = value;
+        }
 
         public bool HeaderControl
         {
@@ -168,6 +179,8 @@ namespace SilverEcho.ForsakenWorld
             EnsureDriver();
             driver.Restart();
             timeMs = 0f;
+            ResetParticlePlayback();
+            ResetSpritePlayback();
             ClearShake();
         }
 
@@ -176,6 +189,8 @@ namespace SilverEcho.ForsakenWorld
             EnsureDriver();
             driver.PlayerSeek(realMs);
             timeMs = driver.GfxTime;
+            ResetParticlePlayback();
+            ResetSpritePlayback();
             ClearShake();
         }
 
@@ -215,6 +230,17 @@ namespace SilverEcho.ForsakenWorld
 
         public void Tick(float dtMs)
         {
+            TickInternal(dtMs, null);
+        }
+
+        /// <summary>Advance particle playback after setting TimeMs to the next recorded GFX time.</summary>
+        public void TickRecordedFrame(float gfxStepMs)
+        {
+            TickInternal(0f, gfxStepMs);
+        }
+
+        private void TickInternal(float dtMs, float? recordedGfxStepMs)
+        {
             EnsureDriver();
             SyncDriverFields();
             if (hierarchyDirty)
@@ -226,13 +252,13 @@ namespace SilverEcho.ForsakenWorld
             float[] camFwd = null;
             if (transform != null)
             {
-                var p = transform.localPosition;
+                var p = transform.position;
                 gfxPos = new[] { p.x, p.y, p.z };
             }
 
             if (cam != null && cam.transform != null)
             {
-                var cp = cam.transform.localPosition;
+                var cp = cam.transform.position;
                 camPos = new[] { cp.x, cp.y, cp.z };
                 // Approximate forward as +Z until full camera basis exists in stubs.
                 camFwd = new[] { 0f, 0f, 1f };
@@ -240,37 +266,70 @@ namespace SilverEcho.ForsakenWorld
 
             var allowShake = shakeInEditor || ApplicationIsPlaying();
             GfxShakeSample shake;
+            var priorTime = driver.GfxTime;
             var t = driver.Tick(dtMs, gfxPos, camPos, camFwd, allowShake && cam != null, out shake);
+            float? particleStep = recordedGfxStepMs ?? (timeManual ? (float?)null : Math.Max(0f, t - priorTime));
             timeMs = t;
+            if (particleStep.HasValue)
+            {
+                if (particleRandom == null || activeParticleSeed != particleSeed || t < lastParticleTime)
+                {
+                    ResetParticlePlayback();
+                    particleRandom = new GfxParticleSim.EmissionRandom(particleSeed);
+                    activeParticleSeed = particleSeed;
+                }
+                lastParticleTime = t;
+            }
+            else
+            {
+                particleRandom = null;
+            }
 
-            ApplyFace(camPos);
+            ApplyFace(gfxPos, camPos);
             var a = driver.ActualAlpha(gfxPos, camPos);
             if (a <= GfxHeaderDriver.HideAlpha)
                 a = 0f;
 
+            var advanceSprite = recordedGfxStepMs.HasValue ||
+                (playing && !playerPaused && headerControl && (dtMs == 0f || t > priorTime));
             foreach (var element in elements)
             {
                 if (element == null)
                     continue;
                 element.TimeManual = true;
-                element.OnGfxTick(t, a);
+                if (particleStep.HasValue && element is GfxParticleDriver particle)
+                    particle.OnGfxPlaybackTick(t, a, particleStep.Value, particleRandom);
+                else if (particleStep.HasValue && element is GfxSpriteDriver sprite)
+                    sprite.OnGfxPlaybackTick(t, a, particleStep.Value, advanceSprite);
+                else
+                    element.OnGfxTick(t, a);
             }
 
             ApplyShake(cam, shake);
         }
 
-        private void ApplyFace(float[] camPos)
+        private void ResetParticlePlayback()
         {
-            if (transform == null)
-                return;
-            var p = transform.localPosition;
-            var basis = driver.FaceBasis(new[] { p.x, p.y, p.z }, camPos);
+            particleRandom = null;
+            foreach (var element in elements)
+                if (element is GfxParticleDriver particle)
+                    particle.ResetParticlePlayback();
+        }
+
+        private void ResetSpritePlayback()
+        {
+            foreach (var element in elements)
+                if (element is GfxSpriteDriver sprite)
+                    sprite.ResetPlayback();
+        }
+
+        private void ApplyFace(float[] gfxPos, float[] camPos)
+        {
+            var basis = driver.FaceBasis(gfxPos, camPos);
             if (basis == null)
                 return;
             var q = GfxMath.QuatFromAxes(basis[0], basis[1], basis[2]);
-            var scale = transform.localScale;
-            transform.localRotation = new Quaternion(q[0], q[1], q[2], q[3]);
-            transform.localScale = scale;
+            transform.rotation = new Quaternion(q[0], q[1], q[2], q[3]);
         }
 
         private void ApplyShake(Camera cam, GfxShakeSample shake)

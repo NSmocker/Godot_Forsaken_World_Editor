@@ -21,7 +21,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private static readonly HashSet<string> Extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "smd", "bon", "ski", "stck", "ecm", "gfx", "trn2", "t2bk", "t2mk", "t2lm",
+            "smd", "bon", "ski", "stck", "ecm", "gfx", "trn2", "t2bk", "t2mk", "t2lm", "t2lm1",
             "ecwld", "ecbsd", "dat", "bmd", "mox", "dds", "bmp", "tga", "png", "jpg", "jpeg",
             "wav", "ogg", "mp3", "xml", "dcf", "stf", "gphy", "ttf"
         };
@@ -234,6 +234,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Resolve(node, Beside(node.File, sub.Name + ".t2bk"));
                 Resolve(node, Beside(node.File, sub.Name + ".t2mk"));
                 Resolve(node, Beside(node.File, sub.Name + ".t2lm"));
+                Resolve(node, Beside(node.File, sub.Name + ".t2lm1"), optional: true);
             }
             foreach (var texture in terrain.Textures)
             {

@@ -29,6 +29,7 @@ namespace SilverEcho.ForsakenWorld
         // 107 / 109
         public float[] BaseColor = GfxMath.ColorWhite();
         public float Amplitude;
+        public int NoiseBufferLength = 256;
         public float WaveLen = 1f;
         public float Persistence = 0.25f;
         public int Octaves = 5;

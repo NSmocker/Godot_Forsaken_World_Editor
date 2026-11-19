@@ -1,9 +1,7 @@
 Shader "Forsaken World/Angelica Terrain"
 {
-    // Mesh terrain, not Unity Terrain. Color slots are direct Texture2D links to the
-    // imported DDS files (ps/t2_4layer_batch_14.txt t0-t3). Splat, height and lightmap
-    // are generated assets. Blend matches angelica_terrain.gdshader / A3DTerrain2:
-    // layer 0 is opaque, each later layer lerps over it by its mask, then lightmap x2.
+    // Mesh terrain using mask-area-local color slots. Ground DDS samples retain
+    // file row order and numeric RGB values until the final framebuffer conversion.
     Properties
     {
         _Layer0 ("Layer 0", 2D) = "white" {}
@@ -28,11 +26,14 @@ Shader "Forsaken World/Angelica Terrain"
         _Splat3 ("Splat 3", 2D) = "black" {}
         _LayerParams ("Layer parameters", 2D) = "black" {}
         _Lightmap ("Daytime lightmap", 2D) = "white" {}
+        _NightLightmap ("Nighttime lightmap", 2D) = "white" {}
+        [HideInInspector] _UseNightLightmap ("Use nighttime lightmap", Float) = 0
+        [HideInInspector] _MapDayNight ("Map day/night factor", Float) = 0
         _HeightMap ("Height map", 2D) = "black" {}
         _LayerCount ("Layer count", Int) = 1
         _MinHeight ("Subterrain minimum height", Float) = 0
         [Toggle] _UseLightmap ("Use daytime lightmap", Float) = 0
-        _Brightness ("Brightness", Range(0, 4)) = 2
+        _Brightness ("Brightness", Range(0, 4)) = 1
     }
     SubShader
     {
@@ -58,9 +59,11 @@ Shader "Forsaken World/Angelica Terrain"
             SAMPLER(sampler_Splat0);
             TEXTURE2D(_LayerParams);
             TEXTURE2D(_Lightmap); SAMPLER(sampler_Lightmap);
+            TEXTURE2D(_NightLightmap);
             TEXTURE2D(_HeightMap);
             CBUFFER_START(UnityPerMaterial)
                 float _LayerCount, _MinHeight, _UseLightmap, _Brightness;
+                float _UseNightLightmap, _MapDayNight;
             CBUFFER_END
             struct Attributes { float4 positionOS : POSITION; float2 uv : TEXCOORD0; };
             struct Varyings { float4 positionCS : SV_POSITION; float3 terrainPosition : TEXCOORD0; float2 uv : TEXCOORD1; };
@@ -83,7 +86,7 @@ Shader "Forsaken World/Angelica Terrain"
                 if (index == 14) return SAMPLE_TEXTURE2D(_Layer14, sampler_Layer0, uv).rgb;
                 return SAMPLE_TEXTURE2D(_Layer15, sampler_Layer0, uv).rgb;
             }
-            // t2_4layer_batch_14.txt packs four overlay masks as alpha, red, green, blue.
+            // Unity's mask packing order is alpha, red, green, blue.
             float SampleOverlay(int layer, float2 uv)
             {
                 int splat = (layer - 1) / 4;
@@ -113,13 +116,21 @@ Shader "Forsaken World/Angelica Terrain"
                 {
                     float4 p = LOAD_TEXTURE2D(_LayerParams, int2(i, 0));
                     float3 pos = input.terrainPosition;
+                    // FillVertexBuffer / ApplyLayerTexture: YZ, XZ, XY.
+                    // The retail world uses zero X/Z texture offsets.
                     float2 uv = p.w < 0.5 ? float2(pos.z, pos.y - _MinHeight) :
                         (p.w < 1.5 ? pos.xz : float2(pos.x, pos.y - _MinHeight));
                     float3 layer = SampleLayer((int)p.x, uv * p.yz);
                     float mask = i == 0 ? 1 : SampleOverlay(i, input.uv);
                     color = lerp(color, layer, mask);
                 }
-                if (_UseLightmap > 0.5) color *= SAMPLE_TEXTURE2D(_Lightmap, sampler_Lightmap, input.uv).rgb * 2;
+                if (_UseLightmap > 0.5)
+                {
+                    float3 light = SAMPLE_TEXTURE2D(_Lightmap, sampler_Lightmap, input.uv).rgb;
+                    if (_UseNightLightmap > 0.5)
+                        light = lerp(light, SAMPLE_TEXTURE2D(_NightLightmap, sampler_Lightmap, input.uv).rgb, saturate(_MapDayNight));
+                    color *= light * 2;
+                }
                 color = saturate(color * _Brightness);
                 #ifndef UNITY_COLORSPACE_GAMMA
                     color = SRGBToLinear(color);

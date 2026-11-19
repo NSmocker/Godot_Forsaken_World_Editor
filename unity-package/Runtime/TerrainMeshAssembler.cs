@@ -33,10 +33,22 @@ namespace SilverEcho.ForsakenWorld
                 for (int j = 0; j < n; j++)
                 {
                     if (grid[i / bg, j / bg].NoRender) continue;
-                    int a = i * side + j, b = a + 1, d = a + side;
-                    // Unity front faces, opposite to Godot's generated winding.
-                    indices.Add(a); indices.Add(b); indices.Add(d);
-                    indices.Add(b); indices.Add(d + 1); indices.Add(d);
+                    int a = i * side + j, b = a + 1, d = a + side, e = d + 1;
+                    // A3DTerrain2LOD uses the upper-left to lower-right diagonal
+                    // throughout a full-detail block except at these two corners.
+                    int blockRow = i % bg, blockColumn = j % bg;
+                    bool opposite = (blockRow == 0 && blockColumn == bg - 1) ||
+                        (blockRow == bg - 1 && blockColumn == 0);
+                    if (opposite)
+                    {
+                        indices.Add(a); indices.Add(b); indices.Add(d);
+                        indices.Add(b); indices.Add(e); indices.Add(d);
+                    }
+                    else
+                    {
+                        indices.Add(a); indices.Add(b); indices.Add(e);
+                        indices.Add(a); indices.Add(e); indices.Add(d);
+                    }
                 }
             mesh.Indices = indices.ToArray();
             return mesh;

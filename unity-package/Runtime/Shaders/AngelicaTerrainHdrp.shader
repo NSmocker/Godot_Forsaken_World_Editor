@@ -1,7 +1,6 @@
 Shader "Forsaken World/HDRP/Angelica Terrain"
 {
-    // HDRP twin of Forsaken World/Angelica Terrain. Same mesh slots: direct DDS
-    // color links plus generated splat, height and lightmap textures.
+    // HDRP twin of Forsaken World/Angelica Terrain with mask-area-local slots.
     Properties
     {
         _Layer0 ("Layer 0", 2D) = "white" {}
@@ -26,11 +25,14 @@ Shader "Forsaken World/HDRP/Angelica Terrain"
         _Splat3 ("Splat 3", 2D) = "black" {}
         _LayerParams ("Layer parameters", 2D) = "black" {}
         _Lightmap ("Daytime lightmap", 2D) = "white" {}
+        _NightLightmap ("Nighttime lightmap", 2D) = "white" {}
+        [HideInInspector] _UseNightLightmap ("Use nighttime lightmap", Float) = 0
+        [HideInInspector] _MapDayNight ("Map day/night factor", Float) = 0
         _HeightMap ("Height map", 2D) = "black" {}
         _LayerCount ("Layer count", Int) = 1
         _MinHeight ("Subterrain minimum height", Float) = 0
         [Toggle] _UseLightmap ("Use daytime lightmap", Float) = 0
-        _Brightness ("Brightness", Range(0, 4)) = 2
+        _Brightness ("Brightness", Range(0, 4)) = 1
     }
     SubShader
     {

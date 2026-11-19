@@ -18,6 +18,15 @@ namespace SilverEcho.ForsakenWorld
         public const string HdrpLit = "HDRP/Lit";
         public const string HdrpUnlit = "HDRP/Unlit";
 
+        public static int GfxTransparentQueue(int renderLayer)
+        {
+            // A3DGFXRenderMan draws Base4 through Base1, Normal,
+            // then Front1 through Front4. The serialized enum interleaves Base and Front.
+            int offset = renderLayer < 0 || renderLayer > 8 ? -5 :
+                (renderLayer % 2 == 0 ? renderLayer / 2 : -(renderLayer + 1) / 2);
+            return (int)RenderQueue.Transparent + offset;
+        }
+
         public static bool IsHdrp
         {
             get

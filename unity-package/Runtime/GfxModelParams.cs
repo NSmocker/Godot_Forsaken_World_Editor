@@ -29,6 +29,7 @@ namespace SilverEcho.ForsakenWorld
         public int SrcBlend;
         public bool Warp;
         public int Priority;
+        public int RenderLayer;
         public bool ResetLoopEnd;
         /// <summary>ECM BaseActName fallbacks (GFX 230); empty for 160.</summary>
         public List<string> BaseActionNames = new List<string>();
@@ -63,6 +64,7 @@ namespace SilverEcho.ForsakenWorld
             p.SrcBlend = GfxPropertyValues.Int(properties, "SrcBlend", 0);
             p.Warp = GfxPropertyValues.Bool(properties, "Warp", false);
             p.Priority = GfxPropertyValues.Int(properties, "Priority", 0);
+            p.RenderLayer = GfxPropertyValues.Int(properties, "RenderLayer", 0);
             p.ResetLoopEnd = GfxPropertyValues.Bool(properties, "ResetLoopEnd", false);
             return p;
         }

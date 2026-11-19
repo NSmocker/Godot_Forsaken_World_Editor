@@ -435,7 +435,19 @@ namespace SilverEcho.ForsakenWorld
             }
 
             var next = Math.Min(seg + 1, values.Length - 1);
-            return GfxMath.LerpColor(values[seg], values[next], portion);
+            var from = values[seg];
+            var to = values[next];
+            var color = new float[4];
+            var remaining = 1f - portion;
+            // Interp_Color interpolates the packed channels, then truncates each byte.
+            for (var channel = 0; channel < color.Length; channel++)
+            {
+                var first = (int)Math.Round(from[channel] * 255f);
+                var second = (int)Math.Round(to[channel] * 255f);
+                color[channel] = (int)(first * remaining + second * portion) / 255f;
+            }
+
+            return color;
         }
 
         public static float StageFloat(
@@ -499,6 +511,123 @@ namespace SilverEcho.ForsakenWorld
             var frac = v - Math.Floor(v);
             if (frac < 0) frac += 1.0;
             return (float)frac;
+        }
+    }
+
+    // Clock portion of A3DGFXKeyPointSet::TickAnimation. The last finite
+    // keypoint ends on its exclusive boundary. Crossing a repeat enters
+    // delay before processing the overrun, and delay consumes whole ticks.
+    internal sealed class GfxKeypointPlaybackClock
+    {
+        private float elapsed;
+        private float delay;
+        private int completed;
+        private bool waiting;
+
+        internal bool Active { get; private set; }
+        internal float TimeMs => elapsed;
+
+        internal bool Tick(float step, float start, float end, int repeat, float repeatDelay, bool endless)
+        {
+            if (completed == repeat)
+                return false;
+            if (waiting)
+            {
+                delay += step;
+                if (delay < repeatDelay)
+                    return false;
+                waiting = false;
+            }
+
+            elapsed += step;
+            if (elapsed < start)
+                return false;
+            if (endless || elapsed < end)
+            {
+                Active = true;
+                return false;
+            }
+
+            if (repeat != -1)
+                completed++;
+            var duration = end - start;
+            var remainder = duration > 0f ? (elapsed - end) % duration : 0f;
+            elapsed = start;
+            Active = false;
+            delay = remainder;
+            waiting = true;
+            if (duration > 0f && completed != repeat && delay >= repeatDelay)
+            {
+                waiting = false;
+                elapsed += remainder;
+                Active = true;
+            }
+            return true;
+        }
+    }
+
+    // A3DGFXCtrlColorChange works on four packed byte channels. The
+    // controller checks the end of the tick, then applies its entire delta.
+    internal sealed class GfxKeypointColorPlayback
+    {
+        private readonly GfxKeypointSpec keypoint;
+        private readonly List<(GfxCtrlSpec Control, float[] Remainder)> controls =
+            new List<(GfxCtrlSpec Control, float[] Remainder)>();
+        internal float[] Color { get; } = new float[4];
+
+        private GfxKeypointColorPlayback(GfxKeypointSpec source)
+        {
+            keypoint = source;
+            foreach (var control in source.Ctrls)
+                if (control != null && control.Type == 105)
+                    controls.Add((control, new float[4]));
+            Restart();
+        }
+
+        internal static GfxKeypointColorPlayback Create(IList<GfxKeypointSpec> keypoints)
+        {
+            // Multiple keypoints, interpolation, noise and transition can
+            // mutate the same packed color. Their existing evaluator stays
+            // the entry point until those controllers share the native state.
+            if (keypoints.Count != 1 || keypoints[0].InterpolateMode != 0)
+                return null;
+            var key = keypoints[0];
+            if (key.Ctrls == null || !key.Ctrls.Exists(c => c?.Type == 105) ||
+                key.Ctrls.Exists(c => c?.Type == 107 || c?.Type == 108))
+                return null;
+            return new GfxKeypointColorPlayback(key);
+        }
+
+        internal void Restart()
+        {
+            foreach (var control in controls)
+                Array.Clear(control.Remainder, 0, 4);
+            Array.Copy(keypoint.Color, Color, 4);
+        }
+
+        internal void Tick(float elapsedMs, float stepMs)
+        {
+            float time = elapsedMs / 1000f;
+            float step = stepMs / 1000f;
+            foreach (var (control, remainder) in controls)
+            {
+                if (time < control.Start || (control.End >= 0f && time > control.End))
+                    continue;
+                ApplyDelta(control, remainder, Color, step);
+            }
+        }
+
+        internal static void ApplyDelta(GfxCtrlSpec control, float[] remainder, float[] color, float stepSeconds)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                float change = (float)Math.Round(control.ColorDelta[i] * 255f) * stepSeconds + remainder[i];
+                int delta = (int)change;
+                int value = (int)Math.Round(color[i] * 255f) + delta;
+                int clamped = Math.Max(0, Math.Min(255, value));
+                remainder[i] = clamped == value ? change - delta : 0f;
+                color[i] = clamped / 255f;
+            }
         }
     }
 }

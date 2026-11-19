@@ -19,6 +19,8 @@ namespace SilverEcho.ForsakenWorld
         public int TexRow = 1;
         public int TexCol = 1;
         public float TexInterval = 50f;
+        public int TexAnimMaxTime;
+        public bool ResetLoopEnd;
         public float TexSpeed1;
         public float TexSpeed2;
         public bool TileMode;
@@ -29,6 +31,7 @@ namespace SilverEcho.ForsakenWorld
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
+        public int RenderLayer;
         public int SrcBlend;
         public int DestBlend = 6;
         public bool CanDoFadeOut = true;
@@ -45,8 +48,8 @@ namespace SilverEcho.ForsakenWorld
             }
         }
 
-        /// <summary>Godot mix-path damps alpha by 0.70 so layered sprites are less opaque.</summary>
-        public float MixAlphaScale => IsAdditiveBlend ? 1f : 0.70f;
+        /// <summary>Angelica uses the alpha from the keypoint and parent GFX at full strength.</summary>
+        public float MixAlphaScale => 1f;
 
         public static GfxSpriteParams FromProperties(
             IDictionary<string, string> properties,
@@ -72,8 +75,9 @@ namespace SilverEcho.ForsakenWorld
             p.OrgPt2 = GfxPropertyValues.Float(properties, "OrgPt_2", 0.5f);
             p.TexRow = Math.Max(1, GfxPropertyValues.Int(properties, "TexRow", 1));
             p.TexCol = Math.Max(1, GfxPropertyValues.Int(properties, "TexCol", 1));
-            p.TexInterval = Math.Max(
-                1f, GfxPropertyValues.Float(properties, "TexInterval", 50f));
+            p.TexInterval = Math.Max(0, GfxPropertyValues.Int(properties, "TexInterval", 50));
+            p.TexAnimMaxTime = Math.Max(0, GfxPropertyValues.Int(properties, "TexAnimMaxTime"));
+            p.ResetLoopEnd = GfxPropertyValues.Int(properties, "ResetLoopEnd") != 0;
             p.TexSpeed1 = GfxPropertyValues.Float(properties, "TexSpeed_1", 0f);
             p.TexSpeed2 = GfxPropertyValues.Float(properties, "TexSpeed_2", 0f);
             p.TileMode = GfxPropertyValues.Bool(properties, "TileMode", false);
@@ -84,6 +88,7 @@ namespace SilverEcho.ForsakenWorld
             p.Warp = GfxPropertyValues.Bool(properties, "Warp", false);
             p.ZEnable = GfxPropertyValues.Bool(properties, "ZEnable", true);
             p.Priority = GfxPropertyValues.Int(properties, "Priority", 0);
+            p.RenderLayer = GfxPropertyValues.Int(properties, "RenderLayer", 0);
             p.SrcBlend = GfxPropertyValues.Int(properties, "SrcBlend", 0);
             p.DestBlend = GfxPropertyValues.Int(properties, "DestBlend", 6);
             p.CanDoFadeOut = GfxPropertyValues.Bool(properties, "CanDoFadeOut", true);

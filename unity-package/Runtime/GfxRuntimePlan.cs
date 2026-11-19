@@ -127,6 +127,8 @@ namespace SilverEcho.ForsakenWorld
 
             var index = 1;
             var fileLoop = 0f;
+            var version = GfxHeaderConfig.FileVersion(document.Header);
+            var legacyDepthTest = GfxHeaderConfig.ForcesElementDepthTest(version);
             foreach (var element in document.Elements)
             {
                 var id = element.SystemId ?? string.Empty;
@@ -155,6 +157,12 @@ namespace SilverEcho.ForsakenWorld
                 };
                 foreach (var pair in element.Properties)
                     el.Properties[pair.Key] = pair.Value;
+                if (legacyDepthTest)
+                    el.Properties["ZEnable"] = "1";
+                if (version >= 0 && version < 75)
+                    el.Properties.Remove("TexAnimMaxTime");
+                if (version >= 0 && version < 74)
+                    el.Properties.Remove("ResetLoopEnd");
                 foreach (var a in element.Affectors)
                     el.Affectors.Add(new Dictionary<string, string>(a));
                 foreach (var c in element.ControlMethods)

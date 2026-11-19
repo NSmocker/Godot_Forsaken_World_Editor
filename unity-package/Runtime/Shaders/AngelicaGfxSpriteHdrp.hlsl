@@ -56,6 +56,12 @@ half4 Frag(Varyings input) : SV_Target
         return half4(distorted, tex.a);
     }
     half4 col = tex * _BaseColor * input.color;
+    #ifndef UNITY_COLORSPACE_GAMMA
+        // Angelica's MODULATE uses the packed vertex RGB in the texture's
+        // encoded color space. Vertex attributes bypass Unity's sRGB decode.
+        if (_UseVertexColor > 0.5h)
+            col.rgb = SRGBToLinear(LinearToSRGB(tex.rgb) * input.color.rgb) * _BaseColor.rgb;
+    #endif
     col.a *= _GfxAlpha;
     return col;
 }

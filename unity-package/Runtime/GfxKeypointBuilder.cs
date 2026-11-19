@@ -137,6 +137,7 @@ namespace SilverEcho.ForsakenWorld
                     break;
                 case 107:
                     spec.BaseColor = GfxPropertyValues.ArgbColor(raw, "BaseColor");
+                    spec.NoiseBufferLength = GfxPropertyValues.Int(raw, "BufLen", 256);
                     spec.Amplitude = GfxPropertyValues.Float(raw, "Amplitude");
                     spec.WaveLen = GfxPropertyValues.Float(raw, "WaveLen", 1f);
                     spec.Persistence = GfxPropertyValues.Float(raw, "Persistence", 0.5f);
@@ -165,6 +166,7 @@ namespace SilverEcho.ForsakenWorld
                     break;
                 }
                 case 109:
+                    spec.NoiseBufferLength = GfxPropertyValues.Int(raw, "BufLen", 256);
                     spec.Amplitude = GfxPropertyValues.Float(raw, "Amplitude");
                     spec.WaveLen = GfxPropertyValues.Float(raw, "WaveLen", 1f);
                     spec.Persistence = GfxPropertyValues.Float(raw, "Persistence", 0.25f);

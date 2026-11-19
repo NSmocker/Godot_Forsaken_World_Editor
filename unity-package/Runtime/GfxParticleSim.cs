@@ -48,11 +48,58 @@ namespace SilverEcho.ForsakenWorld
         private readonly List<GfxKeypointSpec> _keypoints;
         private readonly List<EmitterCtrl> _emitterCtrls = new List<EmitterCtrl>();
         private readonly List<GfxCtrlSpec> _affectors = new List<GfxCtrlSpec>();
+        private readonly List<int> _motionAffectorIndices = new List<int>();
+        private readonly Dictionary<GfxCtrlSpec, ParticleNoise> _affectorNoise = new Dictionary<GfxCtrlSpec, ParticleNoise>();
+        private readonly float[][] _tickColorRemainders;
         private readonly string _axisAffectorPrefix; // last axis affector index as string key
         private int _axisAffectorIndex = -1;
         private readonly int _avgRingCount;
         private readonly int _avgCycle;
         private GfxParticleEmitterState _fixedEmitter;
+        private readonly GfxKeypointColorPlayback _tickKeyColor;
+        private GfxKeypointPlaybackClock _tickClock;
+        private readonly List<TickParticle> _tickParticles = new List<TickParticle>();
+        private float _tickRemainder;
+        private float _previousTickTime = -1f;
+        private int _tickEmissionIndex;
+        private bool _tickKeyActive;
+        private float _lastPlaybackTime;
+        internal bool TickKeyActive => _tickKeyActive;
+        internal float TickElementTime { get; private set; }
+
+        private struct TickParticle
+        {
+            public int Index;
+            public float Age;
+            public float BirthTime;
+            public float BirthActiveTimeMs;
+            public float BirthAlpha;
+            public float[] Color;
+            public float[] AffectorTravel;
+            public VolumeBirth Birth;
+        }
+
+        internal sealed class EmissionRandom
+        {
+            private uint state;
+
+            public EmissionRandom(int seed) => state = unchecked((uint)seed);
+
+            public float Next()
+            {
+                // Windows CRT rand(), used by Angelica's _UnitRandom.
+                state = unchecked(state * 214013u + 2531011u);
+                return ((state >> 16) & 0x7fffu) / 32767f;
+            }
+        }
+
+        private sealed class VolumeBirth
+        {
+            public float[] UnitPosition;
+            public float ColorR, ColorG, ColorB, ColorA;
+            public float Scale, Rotation;
+            public float DirectionTilt, DirectionPhase;
+        }
 
         private struct EmitterCtrl
         {
@@ -73,6 +120,7 @@ namespace SilverEcho.ForsakenWorld
             _keypoints = keypoints != null
                 ? new List<GfxKeypointSpec>(keypoints)
                 : new List<GfxKeypointSpec>();
+            _tickKeyColor = GfxKeypointColorPlayback.Create(_keypoints);
             if (affectors != null)
             {
                 for (var i = 0; i < affectors.Count; i++)
@@ -81,9 +129,23 @@ namespace SilverEcho.ForsakenWorld
                     if (a == null)
                         continue;
                     _affectors.Add(a);
+                    if (a.Type >= 100 && a.Type <= 104)
+                        _motionAffectorIndices.Add(_affectors.Count - 1);
+                    if (a.Type == 107 || a.Type == 109)
+                        _affectorNoise[a] = new ParticleNoise(a, unchecked((uint)(_p.RandomSeed + i + 1)));
                     if (a.Type == 102 || a.Type == 103 || a.Type == 104)
                         _axisAffectorIndex = _affectors.Count - 1;
                 }
+            }
+
+            if (_affectors.Exists(a => a.Type == 105))
+            {
+                // Angelica has one remainder per affector instance. It is
+                // carried from one particle to the next in active-list order.
+                _tickColorRemainders = new float[_affectors.Count][];
+                for (int i = 0; i < _affectors.Count; i++)
+                    if (_affectors[i].Type == 105)
+                        _tickColorRemainders[i] = new float[4];
             }
 
             _axisAffectorPrefix = _axisAffectorIndex >= 0 ? "a" + _axisAffectorIndex : "";
@@ -154,6 +216,240 @@ namespace SilverEcho.ForsakenWorld
         }
 
         public int PoolSize => _p.PoolSize;
+
+        public void ResetTicks()
+        {
+            _tickClock = null;
+            _previousTickTime = -1f;
+            _lastPlaybackTime = 0f;
+            TickElementTime = 0f;
+            ResetPopulation();
+        }
+
+        private void ResetPopulation()
+        {
+            _tickParticles.Clear();
+            _tickRemainder = 0f;
+            _tickEmissionIndex = 0;
+            _tickKeyActive = false;
+            _tickKeyColor?.Restart();
+            if (_tickColorRemainders != null)
+                foreach (var remainder in _tickColorRemainders)
+                    if (remainder != null)
+                        Array.Clear(remainder, 0, remainder.Length);
+        }
+
+        // A3DParticleSystemEx expires, emits, then advances every active particle,
+        // including births, using the elapsed GFX interval of the current tick.
+        public GfxParticleSlot[] Advance(float activeTimeMs, float elapsedMs, float globalLoopTime,
+            float localStartTime, float localTotalTime, int repeatCount, float repeatDelay, bool isEndless)
+        {
+            return Advance(activeTimeMs, elapsedMs, globalLoopTime, localStartTime, localTotalTime,
+                repeatCount, repeatDelay, isEndless, null);
+        }
+
+        internal GfxParticleSlot[] Advance(float activeTimeMs, float elapsedMs, float globalLoopTime,
+            float localStartTime, float localTotalTime, int repeatCount, float repeatDelay, bool isEndless,
+            EmissionRandom emissionRandom)
+        {
+            elapsedMs = Math.Max(0f, elapsedMs);
+            float elapsed = elapsedMs * 0.001f;
+            _tickParticles.RemoveAll(p => p.Age + elapsed >= _p.TTL);
+            bool active;
+            if (_keypoints.Count > 0)
+            {
+                var priorTime = activeTimeMs - elapsedMs;
+                if (_tickClock == null || Math.Abs(priorTime - _lastPlaybackTime) > 0.01f)
+                {
+                    ResetPopulation();
+                    _tickClock = new GfxKeypointPlaybackClock();
+                    if (priorTime > 0f)
+                    {
+                        _tickClock.Tick(priorTime, localStartTime, localTotalTime, repeatCount, repeatDelay, isEndless);
+                        if (_tickClock.Active)
+                        {
+                            var span = _tickClock.TimeMs - localStartTime;
+                            _tickKeyColor?.Tick(span, span);
+                            _tickKeyActive = true;
+                        }
+                    }
+                }
+                _lastPlaybackTime = activeTimeMs;
+                // A3DParticleSystemEx::ResumeLoop resets its pool and affectors
+                // even on a finite element's final boundary.
+                if (_tickClock.Tick(elapsedMs, localStartTime, localTotalTime, repeatCount, repeatDelay, isEndless))
+                    ResetPopulation();
+                TickElementTime = _tickClock.TimeMs;
+                active = _tickClock.Active;
+            }
+            else
+            {
+                TickElementTime = GfxKeypointEval.ElementTime(activeTimeMs, globalLoopTime, localStartTime,
+                    localTotalTime, repeatCount, repeatDelay);
+                active = activeTimeMs >= localStartTime && (isEndless || TickElementTime <= localTotalTime);
+                float fallbackTime = Math.Max(0f, TickElementTime - localStartTime) * 0.001f;
+                if (fallbackTime < _previousTickTime)
+                    ResetPopulation();
+                _previousTickTime = fallbackTime;
+            }
+
+            var localMs = Math.Max(0f, TickElementTime - localStartTime);
+            var now = localMs * 0.001f;
+            var wasActive = _tickKeyActive;
+            _tickKeyActive = active;
+            if (!active)
+                return Array.Empty<GfxParticleSlot>();
+
+            var emitterNow = EmitterState(now);
+            if (_tickKeyColor != null)
+            {
+                _tickKeyColor.Tick(localMs, wasActive ? elapsedMs : localMs);
+                emitterNow.Alpha = _tickKeyColor.Color[3];
+            }
+            if (elapsed > 0f && _p.EmitterEnabled && _p.EmissionRate > 0f && _p.TTL > 0f)
+            {
+                _tickRemainder += _p.EmissionRate * elapsed;
+                int requested = (int)_tickRemainder;
+                _tickRemainder -= requested;
+                if (_p.Quota > 0)
+                    requested = Math.Min(requested, Math.Max(0, _p.Quota - _tickEmissionIndex));
+
+                int admitted = Math.Min(requested, Math.Max(0, _p.PoolSize - _tickParticles.Count));
+                // A3DEllipsoidEmitter and A3DCylinderEmitter consume the same
+                // global CRT stream, continuing into the next emitter.
+                bool cylinder = _p.SystemId == "124";
+                bool volume = emissionRandom != null && (_p.SystemId == "123" || cylinder) &&
+                    !_p.IsAvgGen && !_p.IsSurface;
+                for (int i = 0; i < admitted; i++)
+                {
+                    var birth = volume ? SampleVolumeBirth(emissionRandom, cylinder) : null;
+                    var index = _tickEmissionIndex + i;
+                    _tickParticles.Add(new TickParticle
+                    {
+                        Index = index,
+                        BirthTime = now,
+                        BirthActiveTimeMs = activeTimeMs,
+                        BirthAlpha = emitterNow.Alpha,
+                        Color = _tickColorRemainders == null ? null : ResolveBirthColor(index, birth, emitterNow.Alpha),
+                        AffectorTravel = _motionAffectorIndices.Count > 0 ? new float[_affectors.Count] : null,
+                        Birth = birth
+                    });
+                }
+                _tickEmissionIndex += requested;
+            }
+
+            var boundNow = BindEleSampler?.Invoke(activeTimeMs);
+            var slots = new GfxParticleSlot[_tickParticles.Count];
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var particle = _tickParticles[i];
+                var boundBirth = BindEleSampler?.Invoke(particle.BirthActiveTimeMs);
+                var prior = _p.Facing && elapsed > 0f
+                    ? EvalParticle(particle.Index, particle.Age, particle.BirthTime,
+                        Math.Max(0f, now - elapsed), null, boundBirth, boundBirth,
+                        particle.AffectorTravel, particle.Birth, particle.BirthAlpha, particle.Color)
+                    : null;
+                particle.Age += elapsed;
+                AccumulateAffectorTravel(particle, elapsed);
+                if (particle.Color != null)
+                    TickAffectorColor(particle.Color, particle.Age, elapsed);
+                _tickParticles[i] = particle;
+                var slot = EvalParticle(particle.Index, particle.Age, particle.BirthTime, now, emitterNow,
+                    boundBirth, boundNow, particle.AffectorTravel, particle.Birth, particle.BirthAlpha, particle.Color);
+                slot.Alive = true;
+                slot.EIdx = particle.Index;
+                slot.Age = particle.Age;
+                if (prior != null)
+                {
+                    var displacement = GfxMath.Sub3(slot.Pos, prior.Pos);
+                    if (GfxMath.Length3(displacement) > 0.000001f)
+                        slot.Move = displacement;
+                }
+                slot.Frame = ComputeFrame(particle.Index, particle.Age, TickElementTime);
+                slots[i] = slot;
+            }
+            return slots;
+        }
+
+        private void TickAffectorColor(float[] color, float age, float elapsed)
+        {
+            for (int i = 0; i < _affectors.Count; i++)
+            {
+                var a = _affectors[i];
+                if (age < a.Start || (a.End >= 0f && age > a.End))
+                    continue;
+                switch (a.Type)
+                {
+                    case 105:
+                        GfxKeypointColorPlayback.ApplyDelta(a, _tickColorRemainders[i], color, elapsed);
+                        break;
+                    case 107:
+                        Array.Copy(a.BaseColor, color, 4);
+                        color[3] = GfxMath.Clamp(color[3] + (int)_affectorNoise[a].Sample(age * 1000f) / 255f, 0f, 1f);
+                        break;
+                    case 108:
+                        if (a.StageCount <= 0)
+                            break;
+                        var target = GfxKeypointEval.StageColor(a.Colors, a.Times, a.StageCount, age * 1000f);
+                        if (a.AlphaOnly)
+                            color[3] = target[3];
+                        else
+                            Array.Copy(target, color, 4);
+                        break;
+                }
+            }
+        }
+
+        private bool HasVariableBirthColor =>
+            _p.ColorMin[0] != _p.ColorMax[0] || _p.ColorMin[1] != _p.ColorMax[1] ||
+            _p.ColorMin[2] != _p.ColorMax[2] || _p.ColorMin[3] != _p.ColorMax[3];
+
+        private VolumeBirth SampleVolumeBirth(EmissionRandom random, bool cylinder)
+        {
+            var birth = new VolumeBirth();
+            if (HasVariableBirthColor)
+            {
+                birth.ColorR = random.Next();
+                if (!_p.IsUseHSVInterp)
+                {
+                    birth.ColorG = random.Next();
+                    birth.ColorB = random.Next();
+                    birth.ColorA = random.Next();
+                }
+            }
+
+            birth.Scale = random.Next();
+            birth.Rotation = random.Next();
+            float x, y, z;
+            do
+            {
+                x = random.Next() * 2f - 1f;
+                y = random.Next() * 2f - 1f;
+                z = random.Next() * 2f - 1f;
+            } while (x * x + y * y + (cylinder ? 0f : z * z) > 1f);
+            birth.UnitPosition = GfxMath.Vec3(x, y, z);
+            if (_p.Angle != 0f)
+            {
+                birth.DirectionTilt = random.Next();
+                birth.DirectionPhase = random.Next();
+            }
+            return birth;
+        }
+
+        private void AccumulateAffectorTravel(TickParticle particle, float elapsed)
+        {
+            // TriggerAffectors advances TTL before Process. CalcDist integrates the
+            // full interval beginning at that age, including ticks on either boundary.
+            foreach (var index in _motionAffectorIndices)
+            {
+                var affector = _affectors[index];
+                if (particle.Age < affector.Start || (affector.End >= 0f && particle.Age > affector.End))
+                    continue;
+                var initialVelocity = affector.Vel + affector.Acc * particle.Age;
+                var finalVelocity = initialVelocity + affector.Acc * elapsed;
+                particle.AffectorTravel[index] += 0.5f * (initialVelocity + finalVelocity) * elapsed;
+            }
+        }
 
         /// <summary>
         /// Optional BindEle emitter source (GFX-00001, ID120-125 BindEle): returns
@@ -410,6 +706,14 @@ namespace SilverEcho.ForsakenWorld
             float eIdx, float age, float tEmit, float tNow, GfxParticleEmitterState en,
             GfxParticleEmitterState boundBirth = null, GfxParticleEmitterState boundNow = null)
         {
+            return EvalParticle(eIdx, age, tEmit, tNow, en, boundBirth, boundNow, null, null);
+        }
+
+        private GfxParticleSlot EvalParticle(
+            float eIdx, float age, float tEmit, float tNow, GfxParticleEmitterState en,
+            GfxParticleEmitterState boundBirth, GfxParticleEmitterState boundNow, float[] affectorTravel,
+            VolumeBirth birth, float? birthAlpha = null, float[] playbackColor = null)
+        {
             var ee = EmitterState(tEmit);
             if (en == null)
                 en = EmitterState(tNow);
@@ -440,39 +744,15 @@ namespace SilverEcho.ForsakenWorld
 
             float[] pRel, moveDir, pRot;
             EmitterInit(eIdx, isBind, eeRot, eeScale, eeWorld, parDir,
-                out pRel, out moveDir, out pRot);
+                out pRel, out moveDir, out pRot, birth);
 
             var lin = GfxMath.Vec3Zero();
-            var pSize = GfxMath.Lerp(_p.ScaleMin, _p.ScaleMax, Rnd(eIdx, 3f));
-            var pRad = GfxMath.Lerp(_p.RotMin, _p.RotMax, Rnd(eIdx, 4f));
+            var pSize = GfxMath.Lerp(_p.ScaleMin, _p.ScaleMax, birth?.Scale ?? Rnd(eIdx, 3f));
+            var pRad = GfxMath.Lerp(_p.RotMin, _p.RotMax, birth?.Rotation ?? Rnd(eIdx, 4f));
             var pNoise = 0f;
 
-            float[] pCol;
-            if (_p.IsUseHSVInterp)
-            {
-                var f = Rnd(eIdx, 5f);
-                var hMin = Rgb2Hsv(_p.ColorMin);
-                var hMax = Rgb2Hsv(_p.ColorMax);
-                float hue;
-                if (hMin[0] > hMax[0])
-                    hue = GfxMath.Fmod(hMin[0] * f + (1f + hMax[0]) * (1f - f), 1f);
-                else
-                    hue = hMin[0] * f + hMax[0] * (1f - f);
-                var svY = hMin[1] * f + hMax[1] * (1f - f);
-                var svZ = hMin[2] * f + hMax[2] * (1f - f);
-                var rgb = Hsv2Rgb(GfxMath.Vec3(hue, svY, svZ));
-                pCol = GfxMath.Color(rgb[0], rgb[1], rgb[2],
-                    _p.ColorMin[3] * f + _p.ColorMax[3] * (1f - f));
-            }
-            else
-            {
-                pCol = GfxMath.Color(
-                    GfxMath.Lerp(_p.ColorMin[0], _p.ColorMax[0], Rnd(eIdx, 5f)),
-                    GfxMath.Lerp(_p.ColorMin[1], _p.ColorMax[1], Rnd(eIdx, 6f)),
-                    GfxMath.Lerp(_p.ColorMin[2], _p.ColorMax[2], Rnd(eIdx, 7f)),
-                    GfxMath.Lerp(_p.ColorMin[3], _p.ColorMax[3], Rnd(eIdx, 8f)));
-                pCol[3] *= ee.Alpha;
-            }
+            var pCol = playbackColor != null ? GfxMath.Clone4(playbackColor) :
+                ResolveBirthColor(eIdx, birth, birthAlpha ?? ee.Alpha);
 
             lin = GfxMath.Add3(lin,
                 GfxMath.Scale3(moveDir, _p.Speed * age + 0.5f * _p.ParAcc * age * age));
@@ -498,7 +778,9 @@ namespace SilverEcho.ForsakenWorld
                 var ct = a.Type;
                 var dist = 0f;
                 if (ct >= 100 && ct <= 104)
-                    dist = a.Vel * (a1 - a0) + 0.5f * a.Acc * (a1 * a1 - a0 * a0);
+                    dist = affectorTravel != null
+                        ? affectorTravel[ai]
+                        : a.Vel * (a1 - a0) + 0.5f * a.Acc * (a1 * a1 - a0 * a0);
 
                 switch (ct)
                 {
@@ -532,6 +814,8 @@ namespace SilverEcho.ForsakenWorld
                         break;
                     case 105:
                     {
+                        if (playbackColor != null)
+                            break;
                         var cd = a.ColorDelta;
                         pCol = GfxMath.ClampColor(GfxMath.Color(
                             pCol[0] + cd[0] * (a1 - a0),
@@ -548,15 +832,18 @@ namespace SilverEcho.ForsakenWorld
                     }
                     case 107:
                     {
-                        var n = GfxKeypointEval.Fbm1d(
-                            a1 * 1000f / Math.Max(1f, a.WaveLen), a.Octaves, a.Persistence);
+                        if (playbackColor != null)
+                            break;
+                        var noiseByte = (int)_affectorNoise[a].Sample(a1 * 1000f);
                         var bc = a.BaseColor;
                         pCol = GfxMath.Color(bc[0], bc[1], bc[2],
-                            GfxMath.Clamp(bc[3] + (n * 2f - 1f) * a.Amplitude / 255f, 0f, 1f));
+                            GfxMath.Clamp(bc[3] + noiseByte / 255f, 0f, 1f));
                         break;
                     }
                     case 108:
                     {
+                        if (playbackColor != null)
+                            break;
                         if (a.StageCount > 0)
                         {
                             var cOut = GfxKeypointEval.StageColor(
@@ -570,9 +857,7 @@ namespace SilverEcho.ForsakenWorld
                         break;
                     }
                     case 109:
-                        pNoise = GfxKeypointEval.Fbm1d(
-                            a1 * 1000f / Math.Max(0.001f, a.WaveLen),
-                            a.Octaves, a.Persistence) * a.Amplitude;
+                        pNoise = _affectorNoise[a].Sample(a1 * 1000f);
                         break;
                     case 110:
                     {
@@ -642,9 +927,61 @@ namespace SilverEcho.ForsakenWorld
             };
         }
 
+        private float[] ResolveBirthColor(float eIdx, VolumeBirth birth, float birthAlpha)
+        {
+            float[] pCol;
+            if (!HasVariableBirthColor)
+            {
+                // GenColor returns the packed color unchanged for equal endpoints.
+                // The current key's alpha is still applied at render time.
+                pCol = GfxMath.Color(_p.ColorMin[0], _p.ColorMin[1], _p.ColorMin[2], _p.ColorMin[3]);
+            }
+            else if (_p.IsUseHSVInterp)
+            {
+                var f = birth?.ColorR ?? Rnd(eIdx, 5f);
+                var hMin = Rgb2Hsv(_p.ColorMin);
+                var hMax = Rgb2Hsv(_p.ColorMax);
+                float hue;
+                if (hMin[0] > hMax[0])
+                    hue = GfxMath.Fmod(hMin[0] * f + (1f + hMax[0]) * (1f - f), 1f);
+                else
+                    hue = hMin[0] * f + hMax[0] * (1f - f);
+                var svY = hMin[1] * f + hMax[1] * (1f - f);
+                var svZ = hMin[2] * f + hMax[2] * (1f - f);
+                var rgb = Hsv2Rgb(GfxMath.Vec3(hue, svY, svZ));
+                pCol = GfxMath.Color(rgb[0], rgb[1], rgb[2],
+                    _p.ColorMin[3] * f + _p.ColorMax[3] * (1f - f));
+            }
+            else if (birth != null)
+            {
+                pCol = GfxMath.Color(
+                    InterpolateColorByte(_p.ColorMin[0], _p.ColorMax[0], birth.ColorR) / 255f,
+                    InterpolateColorByte(_p.ColorMin[1], _p.ColorMax[1], birth.ColorG) / 255f,
+                    InterpolateColorByte(_p.ColorMin[2], _p.ColorMax[2], birth.ColorB) / 255f,
+                    (int)(InterpolateColorByte(_p.ColorMin[3], _p.ColorMax[3], birth.ColorA) * birthAlpha) / 255f);
+            }
+            else
+            {
+                pCol = GfxMath.Color(
+                    GfxMath.Lerp(_p.ColorMin[0], _p.ColorMax[0], Rnd(eIdx, 5f)),
+                    GfxMath.Lerp(_p.ColorMin[1], _p.ColorMax[1], Rnd(eIdx, 6f)),
+                    GfxMath.Lerp(_p.ColorMin[2], _p.ColorMax[2], Rnd(eIdx, 7f)),
+                    GfxMath.Lerp(_p.ColorMin[3], _p.ColorMax[3], Rnd(eIdx, 8f)));
+                pCol[3] *= birthAlpha;
+            }
+            return pCol;
+        }
+
+        private static int InterpolateColorByte(float minimum, float maximum, float portion)
+        {
+            int first = (int)Math.Round(minimum * 255f);
+            int second = (int)Math.Round(maximum * 255f);
+            return (int)(first * (1f - portion) + second * portion);
+        }
+
         private void EmitterInit(
             float eIdx, bool isBind, float[] eeRot, float eeScale, float[] eeWorld, float[] parDir,
-            out float[] pRel, out float[] moveDir, out float[] pRot)
+            out float[] pRel, out float[] moveDir, out float[] pRot, VolumeBirth birth)
         {
             var identity = GfxMath.QuatIdentity();
             var angle = _p.Angle;
@@ -731,7 +1068,11 @@ namespace SilverEcho.ForsakenWorld
                     float[] ellU;
                     moveDir = GfxMath.Vec3Zero();
                     var genDir = true;
-                    if (_p.IsAvgGen)
+                    if (birth != null)
+                    {
+                        ellU = birth.UnitPosition;
+                    }
+                    else if (_p.IsAvgGen)
                     {
                         var aDelta = Tau / Math.Max(1f, _p.AlphaSeg);
                         var bDelta = (float)Math.PI / Math.Max(1f, _p.BetaSeg);
@@ -774,7 +1115,7 @@ namespace SilverEcho.ForsakenWorld
                     }
 
                     if (genDir)
-                        moveDir = GenDirection(eIdx, isBind, eeRot, angle);
+                        moveDir = GenDirection(eIdx, isBind, eeRot, angle, birth);
                     pRel = AreaOffset(ellU, isBind, eeRot, eeScale);
                     pRot = isBind ? identity : parDir;
                     return;
@@ -782,7 +1123,11 @@ namespace SilverEcho.ForsakenWorld
                 case "124":
                 {
                     float[] cylU;
-                    if (_p.IsAvgGen)
+                    if (birth != null)
+                    {
+                        cylU = birth.UnitPosition;
+                    }
+                    else if (_p.IsAvgGen)
                     {
                         var aDelta = Tau / Math.Max(1f, _p.AlphaSeg);
                         var bSeg = (float)Math.Max(1, _p.BetaSeg);
@@ -807,7 +1152,7 @@ namespace SilverEcho.ForsakenWorld
                     }
 
                     pRel = AreaOffset(cylU, isBind, eeRot, eeScale);
-                    moveDir = GenDirection(eIdx, isBind, eeRot, angle);
+                    moveDir = GenDirection(eIdx, isBind, eeRot, angle, birth);
                     pRot = isBind ? identity : parDir;
                     return;
                 }
@@ -885,16 +1230,18 @@ namespace SilverEcho.ForsakenWorld
                 : GfxMath.RotateVec3(parentRot, GfxMath.Scale3(localOff, parentScale));
         }
 
-        private float[] GenDirection(float eIdx, bool isBind, float[] parentRot, float angle)
+        private float[] GenDirection(float eIdx, bool isBind, float[] parentRot, float angle,
+            VolumeBirth birth = null)
         {
             var d = AxisZ;
             if (angle != 0f)
             {
-                var az = Rnd(eIdx, 1f) * Tau;
+                var az = (birth?.DirectionPhase ?? Rnd(eIdx, 1f)) * Tau;
+                var tilt = (birth?.DirectionTilt ?? Rnd(eIdx, 2f)) * angle;
                 d = GfxMath.RotateVec3(
                     GfxMath.QuatFromAxisAngle(
                         GfxMath.Vec3((float)Math.Cos(az), (float)Math.Sin(az), 0f),
-                        Rnd(eIdx, 2f) * angle),
+                        tilt),
                     d);
             }
 
@@ -914,6 +1261,69 @@ namespace SilverEcho.ForsakenWorld
             var up = GfxMath.RotateVec3(
                 GfxMath.QuatFromAxisAngle(d, Rnd(eIdx, 12f) * Tau), CalcVertVec(d));
             return GfxMath.RotateVec3(GfxMath.QuatFromAxisAngle(up, Rnd(eIdx, 13f) * angle), d);
+        }
+
+        internal sealed class ParticleNoise
+        {
+            private readonly float[] values;
+            private readonly int[] wavelengths = new int[16];
+            private readonly int[] offsets = new int[16];
+            private readonly float[] amplitudes = new float[16];
+            private readonly int octaveCount;
+
+            public ParticleNoise(GfxCtrlSpec spec, uint seed)
+            {
+                values = new float[Math.Max(0, spec.NoiseBufferLength)];
+                if (values.Length == 0 || spec.Octaves <= 0 || spec.Octaves > wavelengths.Length ||
+                    spec.WaveLen < 1f)
+                    return;
+
+                uint Next()
+                {
+                    seed = (uint)((16807UL * seed) % 2147483647UL);
+                    return seed;
+                }
+
+                // APerlinNoise1D initializes three channels. The particle controls
+                // sample only channel zero, but the others advance the octave seed.
+                var raw = new float[values.Length];
+                for (int i = 0; i < raw.Length; i++)
+                    raw[i] = ((int)(Next() % 2001) - 1000) / 1000f;
+                for (int i = 0; i < raw.Length; i++)
+                    values[i] = 0.25f * raw[(i + raw.Length - 1) % raw.Length] +
+                        0.5f * raw[i] + 0.25f * raw[(i + 1) % raw.Length];
+                for (int channel = 1; channel < 3; channel++)
+                    for (int i = 0; i < values.Length; i++)
+                        Next();
+
+                int wavelength = (int)spec.WaveLen;
+                float totalAmplitude = 0f;
+                float amplitude = 1f;
+                for (int i = 0; i < spec.Octaves && wavelength > 0; i++, wavelength /= 2)
+                {
+                    wavelengths[i] = wavelength;
+                    offsets[i] = (int)(Next() % 1023);
+                    amplitudes[i] = amplitude;
+                    totalAmplitude += amplitude;
+                    amplitude *= spec.Persistence;
+                    octaveCount++;
+                }
+                for (int i = 0; i < octaveCount; i++)
+                    amplitudes[i] = amplitudes[i] / totalAmplitude * Math.Abs(spec.Amplitude);
+            }
+
+            public float Sample(float timeMs)
+            {
+                float result = 0f;
+                for (int i = 0; i < octaveCount; i++)
+                {
+                    float at = offsets[i] + timeMs / wavelengths[i];
+                    int index = (int)at;
+                    var v = GfxMath.Lerp(values[index % values.Length], values[(index + 1) % values.Length], at - index);
+                    result += amplitudes[i] * Math.Abs(v);
+                }
+                return result;
+            }
         }
 
         private static float[] CurvePoint(float ratio, float[][] pts, float[] ratios, out int seg)

@@ -11,6 +11,7 @@ TEXTURE2D(_Splat0); TEXTURE2D(_Splat1); TEXTURE2D(_Splat2); TEXTURE2D(_Splat3);
 SAMPLER(sampler_Splat0);
 TEXTURE2D(_LayerParams);
 TEXTURE2D(_Lightmap); SAMPLER(sampler_Lightmap);
+TEXTURE2D(_NightLightmap);
 float3 SampleLayer(int index, float2 uv)
 {
     if (index <= 0) return SAMPLE_TEXTURE2D(_Layer0, sampler_Layer0, uv).rgb;
@@ -45,6 +46,7 @@ float SampleOverlay(int layer, float2 uv)
 }
 CBUFFER_START(UnityPerMaterial)
     float _LayerCount, _MinHeight, _UseLightmap, _Brightness;
+    float _UseNightLightmap, _MapDayNight;
 CBUFFER_END
 
 struct Attributes { float4 positionOS : POSITION; float2 uv : TEXCOORD0; };
@@ -77,7 +79,13 @@ half4 Frag(Varyings input) : SV_Target
         float mask = i == 0 ? 1 : SampleOverlay(i, input.uv);
         color = lerp(color, layer, mask);
     }
-    if (_UseLightmap > 0.5) color *= SAMPLE_TEXTURE2D(_Lightmap, sampler_Lightmap, input.uv).rgb * 2;
+    if (_UseLightmap > 0.5)
+    {
+        float3 light = SAMPLE_TEXTURE2D(_Lightmap, sampler_Lightmap, input.uv).rgb;
+        if (_UseNightLightmap > 0.5)
+            light = lerp(light, SAMPLE_TEXTURE2D(_NightLightmap, sampler_Lightmap, input.uv).rgb, saturate(_MapDayNight));
+        color *= light * 2;
+    }
     color = saturate(color * _Brightness);
 #ifndef UNITY_COLORSPACE_GAMMA
     color = SRGBToLinear(color);

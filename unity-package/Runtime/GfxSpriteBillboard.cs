@@ -52,8 +52,8 @@ namespace SilverEcho.ForsakenWorld
         }
 
         /// <summary>
-        /// RotFromView Z-billboard: keep Direction's Z, yaw toward camera
-        /// (create_id_100 vertex remap).
+        /// A3DDecalEx::Fill_Verts_3D keeps Direction's Z as the vertical
+        /// axis. Its increasing U goes opposite Cross(view, vertical).
         /// </summary>
         public static float[] ZAxisBillboard(
             float[] keypointDir, float[] elementPos, float[] cameraPos)
@@ -71,11 +71,10 @@ namespace SilverEcho.ForsakenWorld
 
             targetY = GfxMath.Normalize3(targetY);
             var targetX = GfxMath.Normalize3(GfxMath.Cross3(targetY, newZ));
-            // Godot: X → -target_x, Y → new_z, Z → target_y
             return GfxMath.QuatFromAxes(
-                GfxMath.Neg3(targetX),
+                targetX,
                 newZ,
-                targetY);
+                GfxMath.Neg3(targetY));
         }
     }
 }

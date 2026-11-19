@@ -60,10 +60,17 @@ namespace SilverEcho.ForsakenWorld
             return cfg;
         }
 
-        /// <summary>gfx_parser.gfx_2d_render: <c>str(data.get("2DRender", "0")).strip_edges() == "1"</c>.</summary>
+        internal static int FileVersion(IDictionary<string, string> header) =>
+            GfxPropertyValues.Int(header, "Version", GfxPropertyValues.Int(header, "MOXTVersion", -1));
+
+        // A3DGFXElement::LoadElementFromFile leaves depth testing on before v76.
+        internal static bool ForcesElementDepthTest(int version) => version >= 0 && version < 76;
+
+        /// <summary>A3DGFXEx::Load reads a numeric 2DRender flag starting with v50.</summary>
         public static bool Is2DRender(IDictionary<string, string> header)
         {
-            return (GfxPropertyValues.Get(header, "2DRender", "0") ?? "0").Trim() == "1";
+            var version = FileVersion(header);
+            return (version < 0 || version >= 50) && GfxPropertyValues.Int(header, "2DRender") != 0;
         }
 
         /// <summary>
@@ -87,6 +94,7 @@ namespace SilverEcho.ForsakenWorld
     public sealed class GfxHeaderDriver
     {
         public const float HideAlpha = 0.05f;
+        private const float MinimumTickMs = 2f; // A3DGFXEx.cpp: GFX_MIN_TICK_TIME
         public const int ShakeDirRand = 1;
         public const int ShakeDirUpDown = 2;
         public const int ShakeDirCamera = 3;
@@ -104,6 +112,7 @@ namespace SilverEcho.ForsakenWorld
         public float LoopMs = 3000f;
 
         private float time;
+        private float wallTimeRemainder;
         private float lastLoopT = -1f;
         private bool shaking;
         private int shakeCount;
@@ -127,6 +136,7 @@ namespace SilverEcho.ForsakenWorld
         public void Restart()
         {
             time = 0f;
+            wallTimeRemainder = 0f;
             StopShake();
         }
 
@@ -139,6 +149,7 @@ namespace SilverEcho.ForsakenWorld
         public void PlayerSeek(float realMs)
         {
             time = realMs * ActualSpeed;
+            wallTimeRemainder = 0f;
             StopShake();
         }
 
@@ -166,7 +177,17 @@ namespace SilverEcho.ForsakenWorld
                 return GfxTime;
             }
 
-            var step = (Playing && !TimeManual && !PlayerPaused) ? dtMs * ActualSpeed : 0f;
+            float step = 0f;
+            if (Playing && !TimeManual && !PlayerPaused && dtMs > 0f)
+            {
+                // Unity gives a fractional wall-clock delta. Carry the fraction
+                // until it forms a whole millisecond, the DWORD input to Angelica.
+                float wallTime = dtMs + wallTimeRemainder;
+                float wallTick = (float)Math.Floor(wallTime);
+                wallTimeRemainder = wallTime - wallTick;
+                if (wallTick > 0f)
+                    step = Math.Max(MinimumTickMs, (float)Math.Truncate(wallTick * ActualSpeed));
+            }
             time += step;
             var t = GfxTime;
             if (allowShake)

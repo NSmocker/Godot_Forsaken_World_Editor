@@ -24,7 +24,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         /// <summary>
         /// Generated terrain data lives beside grass/effects/sectors:
         /// Assets/ForsakenWorld/Imported/Maps/&lt;map&gt;/terrains/&lt;sector&gt;.
-        /// Color DDS files stay in the textures folder and are linked, not copied.
+        /// Ground DDS samples are shared across the map as linear, file-oriented textures.
         /// </summary>
         public static string GetOutputFolder(string relativePath) =>
             MapAssetImporter.GetOutputFolder(relativePath) + "/terrains";
@@ -69,8 +69,23 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // Match Godot import_map: warn and skip unreadable subs instead of aborting the map.
                 string relativeDir = (Path.GetDirectoryName(file.RelativePath) ?? "").Replace('\\', '/');
                 EnsureFolder(folder);
-                Progress(showProgress, "Reading ground textures", 0);
-                var textures = ResolveGroundTextures(t, file, index, result.Warnings);
+                var textures = new Texture2D[t.Textures.Length];
+                var resolved = new bool[textures.Length];
+                Texture2D GroundTexture(int textureIndex)
+                {
+                    if (textureIndex < 0 || textureIndex >= textures.Length)
+                    {
+                        result.Warnings.Add("Invalid ground texture index: " + textureIndex);
+                        return null;
+                    }
+                    if (!resolved[textureIndex])
+                    {
+                        textures[textureIndex] = ImportGroundTexture(t.Textures[textureIndex], textureIndex,
+                            file, index, folder, result.Warnings);
+                        resolved[textureIndex] = true;
+                    }
+                    return textures[textureIndex];
+                }
                 var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
                 if (shader == null)
                 {
@@ -118,22 +133,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                         continue;
                     }
 
-                    TerrainLightmap[] lightmaps = null;
-                    if (index.TryResolve(Join(relativeDir, t.Subs[s].Name + ".t2lm"), out var lightFile, out _))
-                    {
-                        try
-                        {
-                            lightmaps = parser.ReadLightmaps(File.ReadAllBytes(lightFile.FullPath), lightFile.RelativePath);
-                        }
-                        catch (Exception e) when (e is InvalidDataException || e is IOException)
-                        {
-                            result.Warnings.Add(t.Subs[s].Name + ": daytime lightmap was not applied (" + e.Message + ")");
-                        }
-                    }
-                    else
-                        result.Warnings.Add(t.Subs[s].Name + ": no daytime lightmap, terrain is unlit.");
-
-                    var sectorObject = BuildSector(t, s, blocks, masks, lightmaps, textures, shader, file.RelativePath, result);
+                    var day = ReadLightmaps(parser, index, relativeDir, t.Subs[s].Name, ".t2lm", result.Warnings);
+                    var night = ReadLightmaps(parser, index, relativeDir, t.Subs[s].Name, ".t2lm1", result.Warnings,
+                        Path.ChangeExtension(blockFile.FullPath, ".t2lm1"));
+                    var sectorObject = BuildSector(t, s, blocks, masks, day, night, GroundTexture, shader, file.RelativePath, result);
                     if (sectorObject == null)
                         continue;
                     sectorObject.transform.SetParent(root.transform, false);
@@ -156,43 +159,63 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        private static Texture2D[] ResolveGroundTextures(
-            TerrainDocument terrain, GameDataFile map, GameDataIndex index, List<string> warnings)
+        private static Texture2D ImportGroundTexture(string name, int textureIndex, GameDataFile map,
+            GameDataIndex index, string folder, List<string> warnings)
         {
-            var textures = new Texture2D[terrain.Textures.Length];
-            PrefetchGroundTextures(terrain, map, index);
-            for (int i = 0; i < terrain.Textures.Length; i++)
+            var project = TerrainTextureBuilder.FindProjectTexture(name);
+            var source = project ?? ResolveTexture(index, map.RelativePath, name);
+            if (source == null)
             {
-                var name = terrain.Textures[i];
-                var project = TerrainTextureBuilder.FindProjectTexture(name);
-                if (project != null)
-                {
-                    var assetPath = AssembledTextureImporter.GetTextureAssetPath(project.RelativePath);
-                    textures[i] = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-                    if (textures[i] != null)
-                        continue;
-                }
-
-                var file = ResolveTexture(index, map.RelativePath, name);
-                if (file == null)
-                {
-                    warnings.Add("Ground texture not found: " + name + " (magenta fallback)");
-                    continue;
-                }
-
-                var imported = AssembledTextureImporter.ImportOrUpdate(file.FullPath, file.RelativePath);
-                textures[i] = imported.Texture;
-                if (textures[i] == null)
-                    warnings.Add((string.IsNullOrEmpty(imported.Error) ? "Ground texture import failed: " + name : imported.Error) +
-                        " (magenta fallback)");
+                warnings.Add("Ground texture not found: " + name);
+                return null;
             }
 
-            return textures;
+            Texture2D texture = null;
+            try
+            {
+                texture = TerrainTextureBuilder.LoadGroundTexture(source, project != null);
+                string directory = folder + "/GroundTextures/" + textureIndex.ToString("D4");
+                EnsureFolder(directory);
+                var saved = Save(texture, directory + "/" + Sanitize(Path.GetFileNameWithoutExtension(name)) + ".asset");
+                texture = null;
+                return saved;
+            }
+            catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
+            {
+                warnings.Add("Ground texture could not be loaded: " + name + " (" + e.Message + ")");
+                return null;
+            }
+            finally
+            {
+                if (texture != null) Object.DestroyImmediate(texture);
+            }
+        }
+
+        private static TerrainLightmap[] ReadLightmaps(TerrainParser parser, GameDataIndex index,
+            string directory, string sector, string extension, List<string> warnings, string siblingPath = null)
+        {
+            string relativePath = Join(directory, sector + extension);
+            // Cached indexes created before T2LM1 support can omit a valid night map.
+            string path = index.TryResolve(relativePath, out var file, out _) ? file.FullPath : siblingPath;
+            if (!File.Exists(path))
+            {
+                if (extension == ".t2lm")
+                    warnings.Add(sector + ": no daytime lightmap, terrain is unlit.");
+                return null;
+            }
+
+            try { return parser.ReadLightmaps(File.ReadAllBytes(path), relativePath); }
+            catch (Exception e) when (e is InvalidDataException || e is IOException)
+            {
+                warnings.Add(sector + extension + ": lightmap was not applied (" + e.Message + ")");
+                return null;
+            }
         }
 
         private static GameObject BuildSector(
             TerrainDocument terrain, int sector, Dictionary<long, TerrainBlock> blocks, TerrainMasks masks,
-            TerrainLightmap[] lightmaps, Texture2D[] textures, Shader shader, string mapRelativePath, Result result)
+            TerrainLightmap[] day, TerrainLightmap[] night, Func<int, Texture2D> groundTexture, Shader shader,
+            string mapRelativePath, Result result)
         {
             int areasPerSide = terrain.AreasPerSubSide;
             int sectorRow = sector / terrain.SubColumns;
@@ -225,8 +248,10 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EnsureFolder(folder);
                 string prefix = folder + "/Area_" + area.ToString("D4");
                 var mesh = Save(BuildMesh(data, "Area_" + area.ToString("D4")), prefix + "_Mesh.asset");
-                var lightmap = lightmaps != null && area < lightmaps.Length ? lightmaps[area] : null;
-                var material = BuildMaterial(terrain, masks, area, sector, textures, shader, prefix, data, lightmap, result.Warnings);
+                var dayMap = day != null && area < day.Length ? day[area] : null;
+                var nightMap = night != null && area < night.Length ? night[area] : null;
+                var material = BuildMaterial(terrain, masks, area, sector, groundTexture, shader, prefix, data,
+                    dayMap, nightMap, result.Warnings);
                 var areaObject = new GameObject("Area_" + area.ToString("D4"));
                 areaObject.AddComponent<MeshFilter>().sharedMesh = mesh;
                 var renderer = areaObject.AddComponent<MeshRenderer>();
@@ -264,8 +289,8 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         private static Material BuildMaterial(TerrainDocument t, TerrainMasks masks, int area, int sub,
-            Texture2D[] textures, Shader shader, string prefix, TerrainMeshData mesh, TerrainLightmap lightmap,
-            List<string> warnings)
+            Func<int, Texture2D> groundTexture, Shader shader, string prefix, TerrainMeshData mesh,
+            TerrainLightmap dayMap, TerrainLightmap nightMap, List<string> warnings)
         {
             var entries = masks.Areas != null && area >= 0 && area < masks.Areas.Length && masks.Areas[area] != null
                 ? masks.Areas[area]
@@ -288,7 +313,6 @@ namespace SilverEcho.ForsakenWorld.Editor
 
             Texture2D parameters = null;
             Texture2D height = null;
-            Texture2D light = null;
             var splats = new Texture2D[4];
             Material mat = null;
             try
@@ -299,40 +323,26 @@ namespace SilverEcho.ForsakenWorld.Editor
                     wrapMode = TextureWrapMode.Clamp,
                     filterMode = FilterMode.Point
                 };
-                int textureSlots = Math.Min(t.Textures.Length, MaxLayers);
                 for (int i = 0; i < entries.Length; i++)
                 {
                     var layer = ResolveLayer(masks, entries[i].LayerIndex);
                     parameters.SetPixel(i, 0, new Color(
-                        ClampTextureIndex(layer.TextureIndex, textureSlots), layer.UScale, layer.VScale, layer.Axis));
+                        i, layer.UScale, layer.VScale, layer.Axis));
                 }
                 parameters.Apply(false, false);
 
                 height = BuildHeightMap(mesh, t.MaskGrid);
                 PackSplats(masks, entries, splats);
-                if (lightmap != null)
-                {
-                    try
-                    {
-                        light = TerrainTextureBuilder.Lightmap(lightmap, prefix + " lightmap");
-                        light.wrapMode = TextureWrapMode.Clamp;
-                        light.filterMode = FilterMode.Bilinear;
-                    }
-                    catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
-                    {
-                        warnings.Add(prefix + ": daytime lightmap was not applied (" + e.Message + ")");
-                        if (light != null) Object.DestroyImmediate(light);
-                        light = null;
-                    }
-                }
-
                 mat = new Material(shader) { name = Path.GetFileName(prefix) };
-                int linked = Math.Min(textures == null ? 0 : textures.Length, MaxLayers);
-                for (int i = 0; i < linked; i++)
-                    if (textures[i] != null)
-                        mat.SetTexture("_Layer" + i, textures[i]);
-                if (textures != null && textures.Length > MaxLayers)
-                    warnings.Add(prefix + ": shader links the first " + MaxLayers + " ground textures.");
+                // Shader slots are local to this mask area. The TRN2 table can have
+                // hundreds of entries, and one texture can be projected on several axes.
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    int textureIndex = ResolveLayer(masks, entries[i].LayerIndex).TextureIndex;
+                    var texture = groundTexture(textureIndex);
+                    if (texture != null)
+                        mat.SetTexture("_Layer" + i, texture);
+                }
                 for (int i = 0; i < splats.Length; i++)
                 {
                     if (splats[i] == null) continue;
@@ -341,17 +351,11 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
                 mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
                 mat.SetTexture("_HeightMap", Save(height, prefix + "_Height.asset")); height = null;
-                if (light != null)
-                {
-                    mat.SetTexture("_Lightmap", Save(light, prefix + "_Lightmap.asset"));
-                    light = null;
-                    mat.SetFloat("_UseLightmap", 1f);
-                }
-                else
-                    mat.SetFloat("_UseLightmap", 0f);
+                SaveLightmap(mat, dayMap, "_Lightmap", "_UseLightmap", prefix, warnings);
+                SaveLightmap(mat, nightMap, "_NightLightmap", "_UseNightLightmap", prefix, warnings);
                 mat.SetFloat("_LayerCount", entries.Length);
                 mat.SetFloat("_MinHeight", t.Subs[sub].MinHeight);
-                mat.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
+                mat.SetFloat("_Brightness", 1f);
                 var saved = Save(mat, prefix + ".mat");
                 mat = null;
                 return saved;
@@ -361,9 +365,33 @@ namespace SilverEcho.ForsakenWorld.Editor
                 if (mat != null) Object.DestroyImmediate(mat);
                 if (parameters != null) Object.DestroyImmediate(parameters);
                 if (height != null) Object.DestroyImmediate(height);
-                if (light != null) Object.DestroyImmediate(light);
                 for (int i = 0; i < splats.Length; i++)
                     if (splats[i] != null) Object.DestroyImmediate(splats[i]);
+            }
+        }
+
+        private static void SaveLightmap(Material material, TerrainLightmap source, string property,
+            string enabledProperty, string prefix, List<string> warnings)
+        {
+            if (source == null) return;
+            Texture2D texture = null;
+            try
+            {
+                texture = TerrainTextureBuilder.Lightmap(source, prefix + property);
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.filterMode = FilterMode.Bilinear;
+                var saved = Save(texture, prefix + property + ".asset");
+                texture = null;
+                material.SetTexture(property, saved);
+                material.SetFloat(enabledProperty, 1f);
+            }
+            catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
+            {
+                warnings.Add(prefix + property + ": lightmap was not applied (" + e.Message + ")");
+            }
+            finally
+            {
+                if (texture != null) Object.DestroyImmediate(texture);
             }
         }
 
@@ -389,8 +417,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             return texture;
         }
 
-        // t2_4layer_batch_14.txt packs four overlay masks as alpha, red, green, blue.
-        // Layer 0 stays opaque, matching angelica_terrain.gdshader.
+        // Unity packs four overlays per texture. Loader B uses an opaque base
+        // and creates the mask textures with only one mip level.
         private static void PackSplats(TerrainMasks masks, TerrainAreaLayer[] entries, Texture2D[] splats)
         {
             int overlayCount = Math.Max(0, entries.Length - 1);
@@ -405,7 +433,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     size = Math.Max(size, ResolveLayer(masks, entries[layer].LayerIndex).MaskSize);
                 }
                 if (size < 1) size = 1;
-                var texture = new Texture2D(size, size, TextureFormat.RGBA32, true, true)
+                var texture = new Texture2D(size, size, TextureFormat.RGBA32, false, true)
                 {
                     name = "Splat" + splat,
                     wrapMode = TextureWrapMode.Clamp,
@@ -434,7 +462,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                         }
                 }
                 texture.SetPixels32(pixels);
-                texture.Apply(true, false);
+                texture.Apply(false, false);
                 splats[splat] = texture;
             }
         }
@@ -462,23 +490,6 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (maps >= 0 && index.TryResolve(normalized.Substring(0, maps + 1) + texture, out var local, out _)) return local;
             return index.TryResolve(texture, out var file, out _, true) ? file : null;
         }
-        private static void PrefetchGroundTextures(TerrainDocument terrain, GameDataFile map, GameDataIndex index)
-        {
-            if (terrain == null || terrain.Textures == null || index == null)
-                return;
-            var files = new List<GameDataFile>();
-            foreach (var texture in terrain.Textures)
-            {
-                if (TerrainTextureBuilder.FindProjectTexture(texture) != null) continue;
-                var file = ResolveTexture(index, map.RelativePath, texture);
-                if (file == null || TextureFileFormat.DetectFile(file.FullPath) == ".dds")
-                    continue;
-                files.Add(file);
-            }
-
-            AssembledTextureImporter.ImportFiles(files);
-        }
-
         private static GameDataFile ResolveRequired(GameDataIndex index, string path)
         {
             if (!index.TryResolve(path, out var file, out var error)) throw new FileNotFoundException(error);
