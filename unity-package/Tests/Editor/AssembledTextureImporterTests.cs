@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using SilverEcho.ForsakenWorld.Editor;
@@ -12,6 +13,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             var temp = Path.Combine(Path.GetTempPath(), "fw-mips-" + System.Guid.NewGuid().ToString("N") + ".dds");
             var relative = "__tests/" + Path.GetFileName(temp);
             var output = AssembledTextureImporter.GetTextureAssetPath(relative, decodedAsset: true);
+            var native = AssembledTextureImporter.GetTextureAssetPath(relative);
             var bytes = DdsHeaderParserTests.BuildDds(8, 8, "DXT1", 2, 40);
             bytes[129] = 0xf8;
             bytes[144] = 0x1f;
@@ -21,6 +23,10 @@ namespace SilverEcho.ForsakenWorld.Tests
             try
             {
                 var header = new DdsHeaderParser().Parse(bytes, relative);
+                var pending = new HashSet<string>();
+                AssembledTextureImporter.StageNativeCopy(temp, relative, false, pending, header);
+                Assert.IsEmpty(pending);
+                Assert.IsFalse(File.Exists(AssembledTextureImporter.AssetPathToAbsolute(native)));
                 var result = AssembledTextureImporter.ImportOrUpdate(temp, relative, header);
                 Assert.IsNotNull(result.Texture, result.Error);
                 Assert.IsTrue(result.UsedDecodedFallback);
@@ -33,6 +39,7 @@ namespace SilverEcho.ForsakenWorld.Tests
             finally
             {
                 UnityEditor.AssetDatabase.DeleteAsset(output);
+                UnityEditor.AssetDatabase.DeleteAsset(native);
                 File.Delete(temp);
             }
         }

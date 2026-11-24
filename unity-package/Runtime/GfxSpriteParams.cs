@@ -28,6 +28,8 @@ namespace SilverEcho.ForsakenWorld
         public bool VReverse;
         public bool UvExchange;
         public bool RotFromView;
+        public bool NoWidthScale;
+        public bool NoHeightScale;
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
@@ -85,6 +87,8 @@ namespace SilverEcho.ForsakenWorld
             p.VReverse = GfxPropertyValues.Bool(properties, "VReverse", false);
             p.UvExchange = GfxPropertyValues.Bool(properties, "UVExchg", false);
             p.RotFromView = GfxPropertyValues.Bool(properties, "RotFromView", false);
+            p.NoWidthScale = GfxPropertyValues.Bool(properties, "NoScale_1", false);
+            p.NoHeightScale = GfxPropertyValues.Bool(properties, "NoScale_2", false);
             p.Warp = GfxPropertyValues.Bool(properties, "Warp", false);
             p.ZEnable = GfxPropertyValues.Bool(properties, "ZEnable", true);
             p.Priority = GfxPropertyValues.Int(properties, "Priority", 0);

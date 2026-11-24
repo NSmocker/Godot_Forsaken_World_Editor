@@ -10,12 +10,13 @@ GfxCppUnityBatchCapture.Run із параметром ids (у C# це позиц
 """
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
 from pathlib import Path
 
-PORT_FILE = Path(r"A:\Github\Unity Native Reader\Library\Pipeline\.unity-pipeline-port")
+PROJECT_DEFAULT = Path("A:/Github/Unity GFX Validation")
 OUT_DEFAULT = Path(r"B:\Git\Godot_Forsaken_World_Editor\.validation\gfx-cpp-unity-check")
 MANIFEST_DEFAULT = OUT_DEFAULT / "manifest.json"
 SCRIPT_FILE = r"B:/Git/Godot_Forsaken_World_Editor/Tools/Validation/GfxParity/GfxCppUnityBatchCapture.cs"
@@ -37,6 +38,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST_DEFAULT)
     parser.add_argument("--out-root", type=Path, default=OUT_DEFAULT)
+    parser.add_argument("--project-path", type=Path,
+                        default=Path(os.environ.get("UNITY_PROJECT_PATH") or PROJECT_DEFAULT))
     parser.add_argument("--batch", type=int, default=15)
     parser.add_argument("--from", dest="first", type=int, default=0)
     parser.add_argument("--to", dest="last", type=int, default=None)
@@ -44,7 +47,8 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="переписати наявні unity-capture.json")
     args = parser.parse_args()
 
-    port_info = json.loads(PORT_FILE.read_text(encoding="utf-8"))
+    descriptor = args.project_path / "Library" / "Pipeline" / ".unity-pipeline-port"
+    port_info = json.loads(descriptor.read_text(encoding="utf-8"))
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     out_root = args.out_root
 
@@ -67,7 +71,7 @@ def main() -> int:
 
     last = args.last if args.last is not None else len(manifest["entries"])
     ready = [(p, i) for p, i in ready if args.first <= p < last]
-    print(f"Unity готовий: {port_info['unityVersion']} порт {port_info['port']}", flush=True)
+    print(f"Unity готовий: {port_info['unityVersion']} порт {port_info['port']} · {args.project_path}", flush=True)
     print(f"ID з C++ артефактами у діапазоні [{args.first};{last}): {len(ready)}", flush=True)
 
     all_results = []
@@ -100,9 +104,15 @@ def main() -> int:
         if response.get("success"):
             result = response.get("result", {})
             inner = result.get("result")
+            records = inner.get("results") if isinstance(inner, dict) else None
+            if not isinstance(records, list) or len(records) != len(ids):
+                error = result.get("error") or "Unity returned an incomplete capture result"
+                details = result.get("diagnostics") or result.get("errorDetails")
+                print(f"  помилка захоплення: {error} / {details}", flush=True)
+                all_results.append({"batch": ids, "error": error, "details": details})
+                continue
             print(f"  ok за {elapsed}s execute={result.get('executeMs')}ms → {json.dumps(inner, ensure_ascii=False)[:300]}", flush=True)
-            if isinstance(inner, dict):
-                all_results.extend(inner.get("results", []))
+            all_results.extend(records)
         else:
             print(f"  помилка команди: {response.get('error')} / {response.get('errorDetails')}", flush=True)
             all_results.append({"batch": ids, "error": response.get("error"), "details": response.get("errorDetails")})

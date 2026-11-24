@@ -38,6 +38,7 @@ namespace SilverEcho.ForsakenWorld
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
+        public int RenderLayer;
         public int SrcBlend;
         public int DestBlend = 6;
         public int ElementIndex = 1;
@@ -97,6 +98,7 @@ namespace SilverEcho.ForsakenWorld
             p.Warp = GfxPropertyValues.Bool(properties, "Warp", false);
             p.ZEnable = GfxPropertyValues.Bool(properties, "ZEnable", true);
             p.Priority = GfxPropertyValues.Int(properties, "Priority", 0);
+            p.RenderLayer = GfxPropertyValues.Int(properties, "RenderLayer", 0);
             p.SrcBlend = GfxPropertyValues.Int(properties, "SrcBlend", 0);
             p.DestBlend = GfxPropertyValues.Int(properties, "DestBlend", 6);
             return p;

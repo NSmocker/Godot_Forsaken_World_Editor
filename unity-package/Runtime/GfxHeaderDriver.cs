@@ -186,7 +186,7 @@ namespace SilverEcho.ForsakenWorld
                 float wallTick = (float)Math.Floor(wallTime);
                 wallTimeRemainder = wallTime - wallTick;
                 if (wallTick > 0f)
-                    step = Math.Max(MinimumTickMs, (float)Math.Truncate(wallTick * ActualSpeed));
+                    step = ScaleTick(wallTick, ActualSpeed);
             }
             time += step;
             var t = GfxTime;
@@ -196,6 +196,10 @@ namespace SilverEcho.ForsakenWorld
                 StopShake();
             return t;
         }
+
+        internal static float ScaleTick(float elapsedMs, float speed) => elapsedMs > 0f
+            ? Math.Max(MinimumTickMs, (float)Math.Truncate(elapsedMs * speed))
+            : 0f;
 
         public float ActualAlpha(float[] gfxWorldPos, float[] cameraWorldPos)
         {

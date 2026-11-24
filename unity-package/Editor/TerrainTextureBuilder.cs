@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -95,17 +97,53 @@ namespace SilverEcho.ForsakenWorld.Editor
             return texture;
         }
 
-        /// <summary>Exact game-relative lookup; never searches by basename or reads the external source.</summary>
+        internal static string[] FindTexturePackageFolders() => AssetDatabase.GetAllAssetPaths()
+            .Where(path => path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) &&
+                (path.EndsWith("/textures.pck", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith("/textures . pck", StringComparison.OrdinalIgnoreCase)) &&
+                AssetDatabase.IsValidFolder(path))
+            .OrderByDescending(path => path.StartsWith(GameDataDropImporter.ImportRoot + "/", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(path => path.Count(c => c == '/'))
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        /// <summary>Mounts the unpacked textures.pck directory at Angelica's Textures/ prefix.</summary>
+        internal static GameDataFile FindPackedTexture(string gamePath, IReadOnlyList<string> packageFolders)
+        {
+            const string mount = "textures/";
+            var relative = NormalizeGamePath(gamePath);
+            if (relative == null || !relative.StartsWith(mount, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var entry = relative.Substring(mount.Length);
+            foreach (var folder in packageFolders)
+            {
+                var assetPath = folder + "/" + entry;
+                var absolute = AngelicaAssetFolders.AssetPathToAbsolute(assetPath);
+                if (File.Exists(absolute))
+                    return new GameDataFile(absolute, relative);
+            }
+            return null;
+        }
+
+        /// <summary>Exact game-relative lookup in the legacy project texture directory.</summary>
         public static GameDataFile FindProjectTexture(string gamePath)
+        {
+            string relative = NormalizeGamePath(gamePath);
+            if (relative == null) return null;
+            string assetPath = AssembledTextureImporter.GetTextureAssetPath(relative);
+            string absolute = AssembledTextureImporter.AssetPathToAbsolute(assetPath);
+            return File.Exists(absolute) ? new GameDataFile(absolute, relative) : null;
+        }
+
+        private static string NormalizeGamePath(string gamePath)
         {
             if (string.IsNullOrWhiteSpace(gamePath)) return null;
             string relative = gamePath.Replace('\\', '/');
             if (Path.IsPathRooted(relative) || relative.Contains(":")) return null;
             foreach (var part in relative.Split('/'))
                 if (part == ".." || part == "." || part.Length == 0) return null;
-            string assetPath = AssembledTextureImporter.GetTextureAssetPath(relative);
-            string absolute = AssembledTextureImporter.AssetPathToAbsolute(assetPath);
-            return File.Exists(absolute) ? new GameDataFile(absolute, relative) : null;
+            return relative;
         }
 
         public static Texture2D LoadProjectTexture(GameDataFile file)
@@ -114,11 +152,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             // copy to avoid Unity import resizing/compression changing those inputs.
             if (TextureFileFormat.DetectFile(file.FullPath) == ".dds")
                 return DecodeDds(File.ReadAllBytes(file.FullPath), file.RelativePath);
-            string path = AssembledTextureImporter.GetTextureAssetPath(file.RelativePath);
+            string path = GetProjectAssetPath(file);
             var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
             if (texture == null) throw new InvalidDataException("Project ground texture is not imported: " + path);
             return CopyFileRows(texture);
         }
+
+        internal static string GetProjectAssetPath(GameDataFile file) =>
+            "Assets/" + Path.GetRelativePath(Application.dataPath, file.FullPath).Replace('\\', '/');
 
         private static Texture2D CopyFileRows(Texture2D source)
         {

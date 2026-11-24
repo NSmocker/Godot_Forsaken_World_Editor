@@ -250,6 +250,19 @@ namespace SilverEcho.ForsakenWorld
             return SelectUnique(suffixMatches, relativePath, out resolved, out error);
         }
 
+        internal string ResolveShaderSource(string relativePath)
+        {
+            if (!TryNormalizeRelativePath(relativePath, out var normalized, out _) ||
+                !normalized.StartsWith("shaders/", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var fullPath = ComposeFullPath(normalized);
+            if (File.Exists(fullPath))
+                return fullPath;
+            fullPath = ComposeFullPath(CanonicalPath(normalized));
+            return File.Exists(fullPath) ? fullPath : null;
+        }
+
         private void IndexFileName(GameDataFile file)
         {
             string name = Path.GetFileName(file.RelativePath);

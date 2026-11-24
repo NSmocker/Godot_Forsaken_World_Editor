@@ -24,6 +24,7 @@ namespace SilverEcho.ForsakenWorld
         public float HalfWidth;
         public float HalfHeight;
         public Color32 Color;
+        public float WarpAlpha;
         public float ScreenAngle;
         public Quaternion Orientation;
         public Vector3 Move;
@@ -58,6 +59,7 @@ namespace SilverEcho.ForsakenWorld
         private bool dirty = true;
         private Vector3[] vertices = Array.Empty<Vector3>();
         private Vector2[] uvs = Array.Empty<Vector2>();
+        private Vector2[] warpStrengths = Array.Empty<Vector2>();
         private Color32[] colors = Array.Empty<Color32>();
         private int[] triangles = Array.Empty<int>();
 
@@ -112,7 +114,8 @@ namespace SilverEcho.ForsakenWorld
         /// A null camera uses a fallback look from (0,0,-1) so edit-mode ticks
         /// still produce a mesh before the first camera render.
         /// </summary>
-        public void Rebuild(Transform space, Camera camera)
+        public void Rebuild(Transform space, Camera camera, bool warp = false,
+            bool matchDirect3D9PixelCenter = false)
         {
             EnsureMesh();
             if (!dirty && camera == null)
@@ -130,16 +133,51 @@ namespace SilverEcho.ForsakenWorld
             {
                 triangles = new int[count * IndicesPerParticle];
             }
+            if (warp && warpStrengths.Length < needed)
+                warpStrengths = new Vector2[needed];
 
             var camPos = camera != null
                 ? camera.transform.position
                 : space.position + space.forward * -10f;
             var camRight = camera != null ? camera.transform.right : space.right;
             var camUp = camera != null ? camera.transform.up : space.up;
+            var pixelCenterOffset = Vector3.zero;
+            var cameraForward = Vector3.zero;
+            bool perspective = false;
+            if (matchDirect3D9PixelCenter && camera != null)
+            {
+                var projection = camera.projectionMatrix;
+                // D3D9 rasterizes both world and XYZRHW vertices at integer pixel centers.
+                // Preserve their coverage in the modern viewport's half-integer centers.
+                pixelCenterOffset = space.InverseTransformVector(
+                    camRight / (camera.scaledPixelWidth * projection.m00) -
+                    camUp / (camera.scaledPixelHeight * projection.m11));
+                perspective = !camera.orthographic;
+                cameraForward = camera.transform.forward;
+            }
 
             for (var i = 0; i < count; i++)
             {
                 var p = particles[i];
+                var v = i * VertsPerParticle;
+                if (warp)
+                {
+                    var strength = new Vector2(p.WarpAlpha, p.WarpAlpha);
+                    if (p.Kind == GfxRuntimeParticleKind.Billboard)
+                    {
+                        strength = Vector2.zero;
+                        if (camera != null)
+                        {
+                            // Fill_Vert_2D uses the unrotated projected half extents.
+                            var world = space.TransformPoint(p.Position);
+                            var projected = camera.WorldToViewportPoint(world);
+                            var extents = camera.WorldToViewportPoint(world +
+                                camRight * p.HalfWidth * space.lossyScale.x + camUp * p.HalfHeight * space.lossyScale.y);
+                            strength = ScreenWarpStrength(new Vector2(extents.x - projected.x, extents.y - projected.y), p.WarpAlpha);
+                        }
+                    }
+                    warpStrengths[v] = warpStrengths[v + 1] = warpStrengths[v + 2] = warpStrengths[v + 3] = strength;
+                }
                 Vector3 axisX;
                 Vector3 axisY;
                 var center = p.Position;
@@ -160,18 +198,41 @@ namespace SilverEcho.ForsakenWorld
                 axisX *= p.HalfWidth;
                 axisY *= p.HalfHeight;
                 center += axisX * p.OrgCoefX + axisY * p.OrgCoefY;
+                if (perspective)
+                {
+                    var depth = Vector3.Dot(space.TransformPoint(center) - camPos, cameraForward);
+                    center += pixelCenterOffset * depth;
+                    if (p.Kind != GfxRuntimeParticleKind.Billboard)
+                    {
+                        // World quad corners can have different clip-space depths.
+                        axisX += pixelCenterOffset * Vector3.Dot(space.TransformVector(axisX), cameraForward);
+                        axisY += pixelCenterOffset * Vector3.Dot(space.TransformVector(axisY), cameraForward);
+                    }
+                }
+                else
+                    center += pixelCenterOffset;
 
-                var v = i * VertsPerParticle;
                 vertices[v] = center - axisX + axisY;
                 vertices[v + 1] = center + axisX + axisY;
                 vertices[v + 2] = center - axisX - axisY;
                 vertices[v + 3] = center + axisX - axisY;
 
                 var uv = p.Uv;
-                uvs[v] = new Vector2(uv.xMin, uv.yMax);
-                uvs[v + 1] = new Vector2(uv.xMax, uv.yMax);
-                uvs[v + 2] = new Vector2(uv.xMin, uv.yMin);
-                uvs[v + 3] = new Vector2(uv.xMax, uv.yMin);
+                if (p.Kind == GfxRuntimeParticleKind.Billboard)
+                {
+                    uvs[v] = new Vector2(uv.xMin, uv.yMax);
+                    uvs[v + 1] = new Vector2(uv.xMax, uv.yMax);
+                    uvs[v + 2] = new Vector2(uv.xMin, uv.yMin);
+                    uvs[v + 3] = new Vector2(uv.xMax, uv.yMin);
+                }
+                else
+                {
+                    // Update_3D assigns U across the height axis and V along the width axis.
+                    uvs[v] = new Vector2(uv.xMin, uv.yMin);
+                    uvs[v + 1] = new Vector2(uv.xMin, uv.yMax);
+                    uvs[v + 2] = new Vector2(uv.xMax, uv.yMin);
+                    uvs[v + 3] = new Vector2(uv.xMax, uv.yMax);
+                }
 
                 colors[v] = colors[v + 1] = colors[v + 2] = colors[v + 3] = p.Color;
 
@@ -193,6 +254,8 @@ namespace SilverEcho.ForsakenWorld
 
             Mesh.SetVertices(vertices, 0, needed);
             Mesh.SetUVs(0, uvs, 0, needed);
+            if (warp)
+                Mesh.SetUVs(1, warpStrengths, 0, needed);
             Mesh.SetColors(colors, 0, needed);
             Mesh.SetTriangles(triangles, 0, count * IndicesPerParticle, 0, false);
             Mesh.RecalculateBounds();
@@ -200,6 +263,17 @@ namespace SilverEcho.ForsakenWorld
             bounds.Expand(0.01f);
             Mesh.bounds = bounds;
             dirty = camera == null && NeedsCamera();
+        }
+
+        internal static Vector2 ScreenWarpStrength(Vector2 projectedHalfExtents, float alpha)
+        {
+            var inverseAlpha = Mathf.Clamp01(1f - 4f * Mathf.Max(
+                projectedHalfExtents.x * projectedHalfExtents.x,
+                projectedHalfExtents.y * projectedHalfExtents.y));
+            if (inverseAlpha < .1f)
+                return -Vector2.one;
+            var strength = projectedHalfExtents * (alpha * inverseAlpha);
+            return new Vector2(Mathf.Clamp(strength.x, 0f, .5f), Mathf.Clamp(strength.y, 0f, .5f));
         }
 
         public void Release()
@@ -224,7 +298,9 @@ namespace SilverEcho.ForsakenWorld
             if (f < 0)
                 f += total;
             var x = f % cols;
-            var y = f / cols;
+            // The file counts atlas rows from the texture's upper edge.
+            // Particle mesh UVs use Unity's lower-left texture origin.
+            var y = rows - 1 - f / cols;
             var su = 1f / cols;
             var sv = 1f / rows;
             return new Rect(x * su, y * sv, su, sv);
@@ -274,9 +350,10 @@ namespace SilverEcho.ForsakenWorld
         {
             var worldPos = space.TransformPoint(localCenter);
             var view = worldPos - camPos;
-            var move = space.TransformVector(localMove);
+            // Fill_Vert_3D points the width axis from the current position to the previous one.
+            var move = space.TransformVector(-localMove);
             if (move.sqrMagnitude < 1e-10f)
-                move = space.TransformVector(Vector3.forward);
+                move = space.TransformVector(Vector3.back);
             move.Normalize();
             var up = Vector3.Cross(view, move);
             if (up.sqrMagnitude < 1e-10f)

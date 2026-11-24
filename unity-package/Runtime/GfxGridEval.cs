@@ -18,7 +18,9 @@ namespace SilverEcho.ForsakenWorld
         public static Sample Evaluate(
             GfxGridParams p,
             float spanMs,
-            float[] kpColor)
+            float[] kpColor,
+            float gfxAlpha = 1f,
+            bool warp = false)
         {
             var sample = new Sample();
             if (p == null || p.VertCount <= 0)
@@ -32,8 +34,8 @@ namespace SilverEcho.ForsakenWorld
             sample.Colors = new float[n * 4];
 
             var kp = kpColor ?? GfxMath.ColorWhite();
-            var kpA255 = kp[3] * 255f;
-            if (kpA255 < 5f)
+            var kpA255 = (float)Math.Floor(GfxMath.Clamp(kp[3] * gfxAlpha, 0f, 1f) * 255f);
+            if (!warp && kpA255 < 5f)
             {
                 sample.Hidden = true;
                 Array.Copy(p.Positions ?? new float[n * 3], sample.Positions, sample.Positions.Length);
@@ -41,7 +43,7 @@ namespace SilverEcho.ForsakenWorld
                 return sample;
             }
 
-            var kd = new[] { kp[0] * 255f, kp[1] * 255f, kp[2] * 255f, kp[3] * 255f };
+            var kd = new[] { kp[0] * 255f, kp[1] * 255f, kp[2] * 255f, kpA255 };
 
             for (var i = 0; i < n; i++)
             {
@@ -70,7 +72,11 @@ namespace SilverEcho.ForsakenWorld
                 sample.Colors[co2] = (float)Math.Floor(cr * kd[0] / 256f) / 255f;
                 sample.Colors[co2 + 1] = (float)Math.Floor(cg * kd[1] / 256f) / 255f;
                 sample.Colors[co2 + 2] = (float)Math.Floor(cb * kd[2] / 256f) / 255f;
-                sample.Colors[co2 + 3] = (float)Math.Floor(ca * kd[3] / 256f) / 255f;
+                // Grid DrawToBuffer passes half of the unquantized key/vertex
+                // alpha as the world-space normal offset coefficient.
+                sample.Colors[co2 + 3] = warp
+                    ? ca / 255f * kp[3] * gfxAlpha * .5f
+                    : (float)Math.Floor(ca * kd[3] / 256f) / 255f;
             }
 
             return sample;

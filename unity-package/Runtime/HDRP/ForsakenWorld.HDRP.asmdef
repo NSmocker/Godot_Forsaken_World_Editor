@@ -1,0 +1,16 @@
+{
+    "name": "ForsakenWorld.HDRP",
+    "rootNamespace": "SilverEcho.ForsakenWorld",
+    "references": [
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.HighDefinition.Runtime"
+    ],
+    "defineConstraints": ["ANGELICA_HDRP_AVAILABLE"],
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "17.0.0",
+            "define": "ANGELICA_HDRP_AVAILABLE"
+        }
+    ]
+}

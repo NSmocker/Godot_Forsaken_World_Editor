@@ -237,6 +237,7 @@ public static class GfxCppUnityBatchCapture {
                 ["id"] = id,
                 ["gfx"] = full,
                 ["unity_version"] = Application.unityVersion,
+                ["unity_project"] = Path.GetFullPath(Path.Combine(Application.dataPath, "..")),
                 ["camera_from_cpp"] = cameraFromCpp,
                 ["camera_position"] = JArray.FromObject(new[] { cam.transform.position.x, cam.transform.position.y, cam.transform.position.z }),
                 ["camera_euler"] = JArray.FromObject(new[] { cam.transform.eulerAngles.x, cam.transform.eulerAngles.y, cam.transform.eulerAngles.z }),

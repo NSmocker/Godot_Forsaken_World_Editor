@@ -7,6 +7,41 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxNativeTrailRegressionTests
     {
         [Test]
+        public void SpeedTrailUsesD3D9PixelCenterOnAnExistingRenderer()
+        {
+            var root = new GameObject("trail");
+            try
+            {
+                var renderer = root.AddComponent<MeshRenderer>();
+                var trail = root.AddComponent<GfxSpeedTrailDriver>();
+                trail.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1 } });
+                trail.IsEndless = true;
+                trail.OnGfxTick(50, 1f);
+
+                var properties = new MaterialPropertyBlock();
+                renderer.GetPropertyBlock(properties);
+                Assert.AreEqual(1f, properties.GetFloat("_GfxGridRaster"));
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
+        [Test]
+        public void SpeedTrailUsesItsAuthoredRenderLayer()
+        {
+            var properties = new Dictionary<string, string> { ["RenderLayer"] = "7" };
+            var parameters = GfxSpeedTrailParamsSerial.FromParams(
+                GfxSpeedTrailParams.FromProperties(properties, "110")).ToParams();
+            var root = new GameObject("trail");
+            try
+            {
+                root.AddComponent<GfxSpeedTrailDriver>().Configure(parameters, Texture2D.whiteTexture, false, null);
+                var material = root.GetComponent<MeshRenderer>().sharedMaterial;
+                Assert.AreEqual(2996, material.renderQueue);
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
+        [Test]
         public void ThreeDimensionalParticleHasOrientedQuadGeometry()
         {
             var go = new GameObject("3d particle");

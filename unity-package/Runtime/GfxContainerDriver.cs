@@ -19,13 +19,13 @@ namespace SilverEcho.ForsakenWorld
         [SerializeField] private GfxContainerParamsSerial paramsSerial = new GfxContainerParamsSerial();
         [SerializeField] private float subGfxSpeed = 1f;
         [SerializeField] private float subGfxScale = 1f;
-        [SerializeField] private bool visualActive = true;
 
         private GfxContainerParams cachedParams;
         [NonSerialized] private Transform subGfx;
         private readonly List<GfxElementDriver> subDrivers = new List<GfxElementDriver>();
-        private readonly List<Renderer> geometries = new List<Renderer>();
-        private float lastAlpha = -1f;
+        private GfxKeypointPlaybackClock playbackClock;
+        private float lastPlaybackTime;
+        private float childPlaybackTime;
 
         public GfxContainerParams Params =>
             cachedParams ?? (cachedParams = paramsSerial.ToParams());
@@ -83,8 +83,7 @@ namespace SilverEcho.ForsakenWorld
         public void PrepareSubGfx()
         {
             subDrivers.Clear();
-            geometries.Clear();
-            lastAlpha = -1f;
+            playbackClock = null;
             if (subGfx == null)
                 return;
             subGfx.localPosition = Vector3.zero;
@@ -95,29 +94,86 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
+            if (playbackClock != null)
+                ResetPlayback();
+            var activeTime = gfxTimeMs;
+            var elementTime = GfxKeypointEval.ElementTime(activeTime, GlobalLoopTime, LocalStartTime,
+                LocalTotalTime, RepeatCount, RepeatDelay);
+            var childTime = GfxContainerEval.SubGfxMs(activeTime, LocalStartTime, LocalTotalTime,
+                GlobalLoopTime, RepeatCount, RepeatDelay, IsEndless, Params.LoopFlag) * ChildSpeed;
+            ApplyTick(gfxTimeMs, alpha, elementTime, IsEndless ||
+                (elementTime >= LocalStartTime && elementTime <= LocalTotalTime), childTime, null, false, null);
+        }
+
+        private float ChildSpeed => Params.PlaySpeed * subGfxSpeed;
+
+        internal void OnGfxPlaybackTick(float gfxTimeMs, float alpha, float step, bool advance,
+            GfxParticleSim.EmissionRandom random)
+        {
+            RestoreRuntimeReferences();
+            var priorTime = gfxTimeMs - step;
+            if (playbackClock == null || Math.Abs(lastPlaybackTime - priorTime) > 0.01f)
+            {
+                ResetPlayback();
+                playbackClock = new GfxKeypointPlaybackClock();
+                if (priorTime > 0f)
+                {
+                    playbackClock.Tick(priorTime, LocalStartTime, LocalTotalTime, RepeatCount, RepeatDelay, IsEndless);
+                    childPlaybackTime = GfxContainerEval.SubGfxMs(priorTime, LocalStartTime,
+                        LocalTotalTime, GlobalLoopTime, RepeatCount, RepeatDelay, IsEndless, Params.LoopFlag) * ChildSpeed;
+                }
+            }
+
+            lastPlaybackTime = gfxTimeMs;
+            var looped = advance && playbackClock.Tick(step, LocalStartTime, LocalTotalTime,
+                RepeatCount, RepeatDelay, IsEndless);
+            if (looped && Params.LoopFlag)
+                ResetChildPlayback();
+
+            // A3DGFXContainer::TickAnimation gives the child the entire tick,
+            // even if this tick just reached the container's start time.
+            var childStep = advance && playbackClock.Active ? GfxHeaderDriver.ScaleTick(step, ChildSpeed) : 0f;
+            childPlaybackTime += childStep;
+            ApplyTick(gfxTimeMs, alpha, playbackClock.TimeMs, playbackClock.Active, childPlaybackTime,
+                childStep, advance, random);
+        }
+
+        internal void ResetPlayback()
+        {
+            playbackClock = null;
+            ResetChildPlayback();
+        }
+
+        private void ResetChildPlayback()
+        {
+            childPlaybackTime = 0f;
+            foreach (var child in subDrivers)
+            {
+                if (child is GfxParticleDriver particle)
+                    particle.ResetParticlePlayback();
+                else if (child is GfxSpriteDriver sprite)
+                    sprite.ResetPlayback();
+                else if (child is GfxContainerDriver container)
+                    container.ResetPlayback();
+                else if (child is GfxGridDriver grid)
+                    grid.ResetPlayback();
+            }
+        }
+
+        private void ApplyTick(float gfxTimeMs, float alpha, float elementTime, bool active, float childTime,
+            float? childStep, bool advance, GfxParticleSim.EmissionRandom random)
+        {
             RestoreRuntimeReferences();
             GfxAlpha = alpha;
             if (TimeManual)
                 TimeMs = gfxTimeMs;
 
-            var p = Params;
-            if (p.IsDummy || subGfx == null)
+            if (Params.IsDummy || subGfx == null)
             {
                 SetVisualActive(false);
                 return;
             }
 
-            var activeTime = TimeManual ? TimeMs : gfxTimeMs;
-            var elementTime = GfxKeypointEval.ElementTime(
-                activeTime,
-                GlobalLoopTime,
-                LocalStartTime,
-                LocalTotalTime,
-                RepeatCount,
-                RepeatDelay);
-
-            var active = IsEndless ||
-                (elementTime >= LocalStartTime && elementTime <= LocalTotalTime);
             var keypoints = GetKeypoints();
             if (!active || keypoints == null || keypoints.Count == 0)
             {
@@ -146,22 +202,12 @@ namespace SilverEcho.ForsakenWorld
             transform.localScale = new Vector3(s, s, s);
 
             var keyAlpha = state.Color != null && state.Color.Length > 3 ? state.Color[3] : 1f;
-            ApplyAlpha(keyAlpha);
+            SetVisualActive(keyAlpha > 0.001f);
 
-            var subMs = GfxContainerEval.SubGfxMs(
-                activeTime,
-                LocalStartTime,
-                LocalTotalTime,
-                GlobalLoopTime,
-                RepeatCount,
-                RepeatDelay,
-                IsEndless,
-                p.LoopFlag) * p.PlaySpeed * subGfxSpeed;
-            PushTime(subMs, alpha * keyAlpha);
-            SetVisualActive(true);
+            PushTime(childTime, alpha * keyAlpha, childStep, advance, random);
         }
 
-        private void PushTime(float ms, float alpha)
+        private void PushTime(float ms, float alpha, float? step, bool advance, GfxParticleSim.EmissionRandom random)
         {
             for (var i = 0; i < subDrivers.Count; i++)
             {
@@ -171,26 +217,22 @@ namespace SilverEcho.ForsakenWorld
                 d.TimeManual = true;
                 d.TimeMs = ms;
                 d.GlobalLoopTime = NoLoopMs;
-                d.OnGfxTick(ms, alpha);
-            }
-        }
-
-        private void ApplyAlpha(float a)
-        {
-            if (Math.Abs(a - lastAlpha) < 0.001f)
-                return;
-            lastAlpha = a;
-            for (var i = 0; i < geometries.Count; i++)
-            {
-                var r = geometries[i];
-                if (r != null)
-                    r.enabled = visualActive && a > 0.001f;
+                if (step.HasValue && d is GfxParticleDriver particle)
+                    particle.OnGfxPlaybackTick(ms, alpha, step.Value, random);
+                else if (step.HasValue && d is GfxSpriteDriver sprite)
+                    sprite.OnGfxPlaybackTick(ms, alpha, step.Value, advance);
+                else if (step.HasValue && d is GfxContainerDriver container)
+                    container.OnGfxPlaybackTick(ms, alpha, step.Value, advance, random);
+                else if (step.HasValue && d is GfxGridDriver grid)
+                    grid.OnGfxPlaybackTick(ms, alpha, step.Value, advance);
+                else
+                    d.OnGfxTick(ms, alpha);
             }
         }
 
         private void CollectPrepared(Transform node)
         {
-            if (node == null)
+            if (node == null || node.GetComponent<GfxDummyParticlesDriver>() != null)
                 return;
 
             var nestedContainer = node.GetComponent<GfxContainerDriver>();
@@ -210,10 +252,6 @@ namespace SilverEcho.ForsakenWorld
                 subDrivers.Add(driver);
             }
 
-            var renderer = node.GetComponent<Renderer>();
-            if (renderer != null)
-                geometries.Add(renderer);
-
             var nestedPlayer = node.GetComponent<GfxPlayer>();
             if (nestedPlayer != null)
             {
@@ -228,15 +266,10 @@ namespace SilverEcho.ForsakenWorld
 
         private void SetVisualActive(bool active)
         {
-            visualActive = active;
-            if (subGfx == null)
-                return;
-            for (var i = 0; i < geometries.Count; i++)
-            {
-                var r = geometries[i];
-                if (r != null)
-                    r.enabled = active && lastAlpha > 0.001f;
-            }
+            // The container gates the whole child GFX. Each child element
+            // still owns its renderer's visibility for its own keypoint clock.
+            if (subGfx != null && subGfx.gameObject.activeSelf != active)
+                subGfx.gameObject.SetActive(active);
         }
 
         private void ClearSub()
@@ -247,7 +280,6 @@ namespace SilverEcho.ForsakenWorld
                 subGfx = null;
             }
             subDrivers.Clear();
-            geometries.Clear();
         }
 
         private void OnDestroy()
@@ -255,7 +287,6 @@ namespace SilverEcho.ForsakenWorld
             // Removing the component must not delete the user's nested hierarchy.
             subGfx = null;
             subDrivers.Clear();
-            geometries.Clear();
         }
     }
 }

@@ -8,6 +8,57 @@ namespace SilverEcho.ForsakenWorld.Tests
     public sealed class GfxSpriteTests
     {
         [Test]
+        public void WarpDecalUsesBothViewportDimensionsAndNativeSizeCutoff()
+        {
+            var root = new GameObject("warp camera");
+            var target = new RenderTexture(800, 400, 0);
+            try
+            {
+                var camera = root.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 2f;
+                camera.targetTexture = target;
+                camera.aspect = 2f;
+
+                var center = Vector3.forward * 3f;
+                var strength = GfxSpriteDriver.ProjectWarpDecal(camera, center, new Vector2(.8f, .8f), .5f);
+                Assert.AreEqual(.042f, strength.x, 1e-6f);
+                Assert.AreEqual(.084f, strength.y, 1e-6f);
+                Assert.AreEqual(-Vector2.one, GfxSpriteDriver.ProjectWarpDecal(camera, center, new Vector2(1f, 2f), 1f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(target);
+            }
+        }
+
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void ScreenDecalHonorsIndependentKeyScaleFlags(bool noWidthScale, bool noHeightScale)
+        {
+            var properties = new Dictionary<string, string>
+            {
+                ["NoScale_1"] = noWidthScale ? "1" : "0",
+                ["NoScale_2"] = noHeightScale ? "1" : "0"
+            };
+            var parameters = GfxSpriteParamsSerial.FromParams(GfxSpriteParams.FromProperties(properties, "101")).ToParams();
+            var root = new GameObject("decal");
+            try
+            {
+                var driver = root.AddComponent<GfxSpriteDriver>();
+                driver.Configure(parameters, Texture2D.whiteTexture, false, null);
+                driver.SetKeypoints(new[] { new GfxKeypointSpec { TimeSpan = -1, Scale = 2f } });
+                driver.IsEndless = true;
+                driver.OnGfxTick(50f, 1f);
+
+                Assert.AreEqual(noWidthScale ? 1f : 2f, root.transform.localScale.x);
+                Assert.AreEqual(noHeightScale ? 1f : 2f, root.transform.localScale.y);
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
+        [Test]
         public void AtlasPlaybackAdvancesOneCellPerActiveTickAndFreezesAtExactLimit()
         {
             var parameters = new GfxSpriteParams { TexCol = 3, TexRow = 2, TexInterval = 30, TexAnimMaxTime = 100 };

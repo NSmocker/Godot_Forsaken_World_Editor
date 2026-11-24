@@ -111,6 +111,56 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.IsFalse(driver.transform.GetChild(1).gameObject.activeSelf);
         }
 
+        [Test]
+        public void DummyContainersRetainTheirClockWhenAnotherParticleExpires()
+        {
+            var root = new GameObject("GFX");
+            try
+            {
+                var parentPlayer = root.AddComponent<GfxPlayer>();
+                var dummy = new GameObject("container");
+                dummy.transform.SetParent(root.transform, false);
+                var template = new GameObject("sub GFX");
+                template.AddComponent<GfxPlayer>();
+                var marker = new GameObject("child effect element");
+                marker.transform.SetParent(template.transform, false);
+                marker.AddComponent<GfxElementStub>();
+                dummy.AddComponent<GfxContainerDriver>().Configure(
+                    new GfxContainerParams { ElementName = "container", IsDummy = true, PlaySpeed = .6f },
+                    template, 1f, 1f, null);
+                var emitter = new GameObject("emitter");
+                emitter.transform.SetParent(root.transform, false);
+                var host = new GameObject(GfxDummyParticlesDriver.NodeName);
+                host.transform.SetParent(emitter.transform, false);
+                var driver = host.AddComponent<GfxDummyParticlesDriver>();
+                driver.ForceNodes = true;
+                driver.Configure("container", 2);
+                var first = new GfxParticleSlot { Alive = true, PlaybackId = 1 };
+                var second = new GfxParticleSlot { Alive = true, PlaybackId = 2 };
+                var third = new GfxParticleSlot { Alive = true, PlaybackId = 3 };
+                var random = new GfxParticleSim.EmissionRandom(1);
+
+                driver.Tick(new[] { first, second }, 1f, false, 50f, random);
+                var firstCopy = host.transform.GetChild(0).GetComponentInChildren<GfxPlayer>();
+                var secondCopy = host.transform.GetChild(1).GetComponentInChildren<GfxPlayer>();
+                Assert.AreEqual(30f, firstCopy.TimeMs);
+                Assert.AreEqual(30f, secondCopy.TimeMs);
+                parentPlayer.TimeManual = true;
+                parentPlayer.TimeMs = 500f;
+                parentPlayer.Tick(0f);
+                Assert.AreEqual(30f, firstCopy.GetComponentInChildren<GfxElementStub>().TimeMs,
+                    "The enclosing player must leave the pooled child's clock alone.");
+
+                driver.Tick(new[] { second, third }, 1f, false, 50f, random);
+                Assert.AreEqual(30f, firstCopy.TimeMs, "The reused copy restarts for the new particle.");
+                Assert.AreEqual(60f, secondCopy.TimeMs, "The surviving particle keeps its copy.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
 
         [Test]
         public void DummyDriverFallsBackWhenShaderHasNoPerInstanceContract()

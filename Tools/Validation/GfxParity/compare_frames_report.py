@@ -168,7 +168,7 @@ def compare_effect(gfx_dir: Path) -> dict:
         f"- Камера з C++ AABB-підбору: eye {metrics['camera']['eye']}, target {metrics['camera']['target']}, FOV 65°, near/far {metrics['camera']['near']}/{metrics['camera']['far']}; Unity відтворює її точно.",
         f"- Часові точки (внутрішній час GFX, мс): {times}; PlaySpeed=1 у C++. Тривалість за елементами: {effect.get('total_ms')} мс, endless={effect.get('any_endless')}.",
         f"- C++: GFXAngelica2.2Checker --frames-out (exe SHA-256 `{(run.get('exe_sha256') or '')[:16]}…`), оригінальні бібліотеки Angelica.",
-        f"- Unity: {unity_meta.get('unity_version')} (проєкт A:/Github/Unity Native Reader), GfxSceneBuilder.BuildFromFile + GameDataIndex, прев'ю-сцена, керований Camera.main.",
+        f"- Unity: {unity_meta.get('unity_version')} (проєкт {unity_meta.get('unity_project', 'A:/Github/Unity Native Reader')}), GfxSceneBuilder.BuildFromFile + GameDataIndex, прев'ю-сцена, керований Camera.main.",
         "",
         "## Покадрові метрики",
         "",

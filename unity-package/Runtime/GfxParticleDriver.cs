@@ -207,7 +207,11 @@ namespace SilverEcho.ForsakenWorld
             TickParticles(gfxTimeMs, alpha, elapsedMs, emissionRandom);
         }
 
-        internal void ResetParticlePlayback() => sim?.ResetTicks();
+        internal void ResetParticlePlayback()
+        {
+            sim?.ResetTicks();
+            dummyDriver?.ResetPlayback();
+        }
 
         private void TickParticles(float gfxTimeMs, float alpha, float? elapsedMs,
             GfxParticleSim.EmissionRandom emissionRandom = null)
@@ -268,9 +272,23 @@ namespace SilverEcho.ForsakenWorld
             }
             if (!elapsedMs.HasValue)
                 sim.ResetTicks();
+            Action<int> initializeDummy = dummyActive && dummyDriver != null && emissionRandom != null
+                ? index => dummyDriver.InitializePlaybackCopy(index, emissionRandom) : null;
+            GfxParticleEmitterState worldParent = null;
+            if (elapsedMs.HasValue && !Params.IsBind)
+            {
+                var rotation = transform.rotation;
+                var position = transform.position;
+                worldParent = new GfxParticleEmitterState
+                {
+                    Pos = GfxMath.Vec3(position.x, position.y, position.z),
+                    Rot = new[] { rotation.x, rotation.y, rotation.z, rotation.w },
+                    Scale = transform.lossyScale.x
+                };
+            }
             var slots = elapsedMs.HasValue
                 ? sim.Advance(active, elapsedMs.Value, GlobalLoopTime, LocalStartTime, LocalTotalTime,
-                    RepeatCount, RepeatDelay, IsEndless, emissionRandom)
+                    RepeatCount, RepeatDelay, IsEndless, emissionRandom, initializeDummy, worldParent)
                 : sim.Simulate(active, GlobalLoopTime, LocalStartTime, LocalTotalTime,
                     RepeatCount, RepeatDelay, IsEndless);
 
@@ -283,11 +301,28 @@ namespace SilverEcho.ForsakenWorld
             if (!visible)
             {
                 if (dummyActive && dummyDriver != null)
-                    dummyDriver.Tick(Array.Empty<GfxParticleSlot>(), alpha, false);
+                    dummyDriver.Tick(Array.Empty<GfxParticleSlot>(), alpha, false, elapsedMs, emissionRandom);
                 ApplySlots(Array.Empty<GfxParticleSlot>());
                 return;
             }
 
+            if (worldParent != null)
+            {
+                // Absolute Angelica particles retain their birth pose. The Unity mesh
+                // and dummy instances remain under this moving element.
+                var inverseRotation = Quaternion.Inverse(transform.rotation);
+                foreach (var slot in slots)
+                {
+                    if (slot == null || !slot.Alive)
+                        continue;
+                    var pos = transform.InverseTransformPoint(new Vector3(slot.Pos[0], slot.Pos[1], slot.Pos[2]));
+                    var move = transform.InverseTransformVector(new Vector3(slot.Move[0], slot.Move[1], slot.Move[2]));
+                    var rotation = inverseRotation * new Quaternion(slot.Rot[0], slot.Rot[1], slot.Rot[2], slot.Rot[3]);
+                    slot.Pos = GfxMath.Vec3(pos.x, pos.y, pos.z);
+                    slot.Move = GfxMath.Vec3(move.x, move.y, move.z);
+                    slot.Rot = new[] { rotation.x, rotation.y, rotation.z, rotation.w };
+                }
+            }
             if (dummyActive)
             {
                 if (dummyDriver != null)
@@ -295,7 +330,9 @@ namespace SilverEcho.ForsakenWorld
                     dummyDriver.Tick(
                         slots,
                         alpha,
-                        Params != null && Params.Facing);
+                        Params != null && Params.Facing,
+                        elapsedMs,
+                        emissionRandom);
                 }
                 ApplySlots(Array.Empty<GfxParticleSlot>());
             }
@@ -485,7 +522,7 @@ namespace SilverEcho.ForsakenWorld
                         continue;
                     var alpha = s.Color[3] * s.KeyAlpha * GfxAlpha;
                     // Angelica: discard under 5/255
-                    if (alpha * 255f < 5f)
+                    if (!Params.Warp && alpha * 255f < 5f)
                         continue;
 
                     var size = s.Size;
@@ -521,6 +558,7 @@ namespace SilverEcho.ForsakenWorld
                         HalfHeight = h,
                         Color = new Color(
                             s.Color[0], s.Color[1], s.Color[2], alpha * Params.MixAlphaScale),
+                        WarpAlpha = alpha,
                         // Fill_Vert_2D after converting from D3D's Y-down screen.
                         ScreenAngle = s.BillboardAngle,
                         Orientation = orientation,
@@ -536,7 +574,7 @@ namespace SilverEcho.ForsakenWorld
             }
 
             batch.Set(particleBuffer, alive);
-            batch.Rebuild(transform, null);
+            batch.Rebuild(transform, null, Params.Warp);
             if (meshFilter != null && meshFilter.sharedMesh != batch.Mesh)
                 meshFilter.sharedMesh = batch.Mesh;
         }
@@ -545,7 +583,7 @@ namespace SilverEcho.ForsakenWorld
         {
             if (batch.Count == 0)
                 return;
-            batch.Rebuild(transform, Camera.current);
+            batch.Rebuild(transform, Camera.current, Params.Warp, matchDirect3D9PixelCenter: true);
         }
 
         private void SetVisualActive(bool active)

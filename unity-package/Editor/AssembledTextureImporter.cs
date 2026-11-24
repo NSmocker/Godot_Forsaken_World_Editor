@@ -56,22 +56,34 @@ namespace SilverEcho.ForsakenWorld.Editor
         public static ImportResult ImportOrUpdate(
             string sourceFullPath,
             string sourceRelativePath,
-            DdsDocument header = null, bool forceReimport = false)
+            DdsDocument header = null, bool forceReimport = false) =>
+            ImportOrUpdate(sourceFullPath, sourceRelativePath, header, forceReimport, false);
+
+        internal static ImportResult ImportGfxShaderTexture(
+            string sourceFullPath, string sourceRelativePath, DdsDocument header) =>
+            ImportOrUpdate(sourceFullPath, sourceRelativePath, header, false, true);
+
+        private static ImportResult ImportOrUpdate(
+            string sourceFullPath, string sourceRelativePath, DdsDocument header,
+            bool forceReimport, bool encodedSamples)
         {
-            var key = GameDataImportSession.ResourceKey("texture", sourceFullPath, sourceRelativePath);
+            var key = GameDataImportSession.ResourceKey(encodedSamples ? "gfx-shader-texture" : "texture",
+                sourceFullPath, sourceRelativePath);
             // Supplied headers affect fallback decoding; do not alias different policies in a session.
             if (header != null) key += "|" + header.Width + "|" + header.Height + "|" + header.Compression +
                 "|" + header.HeaderByteSize + "|" + header.RgbBitCount + "|" + header.RedMask +
                 "|" + header.GreenMask + "|" + header.BlueMask + "|" + header.AlphaMask +
                 "|" + header.PitchOrLinearSize + "|" + header.HeaderFlags + "|" + header.LikelyUnityNativeImport;
             // Explicit requests must not be satisfied by an earlier session cache entry.
-            if (forceReimport) return ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header, true);
+            if (forceReimport)
+                return ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header, true, encodedSamples);
             return GameDataImportSession.Once(key + "|" + forceReimport,
                 () => ImportOrUpdateCore(sourceFullPath, sourceRelativePath, header,
-                    forceReimport || GameDataImportSession.ForceReimport));
+                    forceReimport || GameDataImportSession.ForceReimport, encodedSamples));
         }
 
-        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath, DdsDocument header, bool forceReimport)
+        private static ImportResult ImportOrUpdateCore(string sourceFullPath, string sourceRelativePath,
+            DdsDocument header, bool forceReimport, bool encodedSamples)
         {
             if (GameDataAssetBatch.IsActive)
                 throw new InvalidOperationException("Prepare uncached texture dependencies before the asset write batch.");
@@ -95,15 +107,18 @@ namespace SilverEcho.ForsakenWorld.Editor
                 header = null;
             }
             var isDds = extension.Equals(".dds", StringComparison.OrdinalIgnoreCase);
-            var preferNative = !isDds || header == null ||
-                (header.LikelyUnityNativeImport && (header.HasCompleteMipChain ||
-                    header.Compression == DdsCompression.UncompressedRgb));
+            var gfxTga = extension.Equals(".tga", StringComparison.OrdinalIgnoreCase) &&
+                (sourceRelativePath ?? string.Empty).Replace('\\', '/').TrimStart('/')
+                    .StartsWith("gfx/textures/", StringComparison.OrdinalIgnoreCase);
+            if (encodedSamples)
+                sourceRelativePath = "GfxEncoded/" + sourceRelativePath;
+            var preferNative = !isDds || PreferNativeDds(header);
 
             if (preferNative)
             {
                 try
                 {
-                    result = ImportNativeFile(sourceFullPath, sourceRelativePath, forceReimport);
+                    result = ImportNativeFile(sourceFullPath, sourceRelativePath, forceReimport, encodedSamples, gfxTga);
                     if (result.Texture != null)
                         return result;
                     if (!isDds)
@@ -125,10 +140,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             if (isDds)
-                return ImportDecodedDds(sourceFullPath, sourceRelativePath, header, result.Error);
+                return ImportDecodedDds(sourceFullPath, sourceRelativePath, header, result.Error, encodedSamples);
 
             return result;
         }
+
+        private static bool PreferNativeDds(DdsDocument header) => header == null ||
+            (header.LikelyUnityNativeImport && (header.HasCompleteMipChain ||
+                header.Compression == DdsCompression.UncompressedRgb));
 
         /// <summary>
         /// Copies changed sources and queues their asset paths. Does not import or load.
@@ -138,7 +157,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             string sourceFullPath,
             string sourceRelativePath,
             bool forceReimport,
-            ISet<string> pending)
+            ISet<string> pending,
+            DdsDocument header = null)
         {
             if (pending == null || string.IsNullOrWhiteSpace(sourceFullPath) || !File.Exists(sourceFullPath))
                 return;
@@ -147,6 +167,9 @@ namespace SilverEcho.ForsakenWorld.Editor
                     "Import texture dependencies before starting the asset write batch.");
 
             sourceRelativePath = ApplyDetectedExtension(sourceFullPath, sourceRelativePath);
+            if (string.Equals(Path.GetExtension(sourceRelativePath), ".dds", StringComparison.OrdinalIgnoreCase) &&
+                !PreferNativeDds(header))
+                return;
             var assetPath = GetTextureAssetPath(sourceRelativePath, decodedAsset: false);
             if (pending.Contains(assetPath))
                 return;
@@ -421,7 +444,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath, bool forceReimport)
+        private static ImportResult ImportNativeFile(string sourceFullPath, string sourceRelativePath,
+            bool forceReimport, bool encodedSamples, bool gfxTga)
         {
             var result = new ImportResult
             {
@@ -439,7 +463,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 AssetDatabase.LoadMainAssetAtPath(result.AssetPath) != null;
             if (!forceReimport && GameDataSourceFiles.SameContent(sourceFullPath, absoluteDest))
             {
-                result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
+                result.Texture = LoadImportedTexture(result.AssetPath, encodedSamples, gfxTga);
                 if (result.Texture != null)
                 {
                     result.Unchanged = true;
@@ -455,7 +479,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             AssetDatabase.ImportAsset(result.AssetPath, ImportAssetOptions.ForceUpdate);
             if (GameDataImportSession.Metrics != null) GameDataImportSession.Metrics.NativeImports++;
 
-            result.Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
+            result.Texture = LoadImportedTexture(result.AssetPath, encodedSamples, gfxTga);
             if (result.Texture == null)
             {
                 result.Error =
@@ -471,11 +495,51 @@ namespace SilverEcho.ForsakenWorld.Editor
             return result;
         }
 
+        private static Texture2D LoadImportedTexture(string assetPath, bool encodedSamples, bool gfxTga)
+        {
+            if (encodedSamples || gfxTga)
+            {
+                var importer = AssetImporter.GetAtPath(assetPath);
+                if (importer is TextureImporter texture)
+                {
+                    bool changed = false;
+                    if (encodedSamples && texture.sRGBTexture)
+                    {
+                        texture.sRGBTexture = false;
+                        changed = true;
+                    }
+                    if (gfxTga && (texture.textureCompression != TextureImporterCompression.Uncompressed ||
+                        texture.filterMode != FilterMode.Trilinear))
+                    {
+                        texture.textureCompression = TextureImporterCompression.Uncompressed;
+                        texture.filterMode = FilterMode.Trilinear;
+                        changed = true;
+                    }
+                    if (changed)
+                        texture.SaveAndReimport();
+                }
+                else if (encodedSamples && importer != null)
+                {
+                    // Unity's native IHV DDS importer exposes its sRGB flag through serialization.
+                    using var settings = new SerializedObject(importer);
+                    var srgb = settings.FindProperty("m_sRGBTexture");
+                    if (srgb != null && srgb.propertyType == SerializedPropertyType.Boolean && srgb.boolValue)
+                    {
+                        srgb.boolValue = false;
+                        settings.ApplyModifiedPropertiesWithoutUndo();
+                        importer.SaveAndReimport();
+                    }
+                }
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+        }
+
         private static ImportResult ImportDecodedDds(
             string sourceFullPath,
             string sourceRelativePath,
             DdsDocument header,
-            string priorError)
+            string priorError,
+            bool encodedSamples)
         {
             var result = new ImportResult
             {
@@ -483,10 +547,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                 AssetPath = GetTextureAssetPath(sourceRelativePath, decodedAsset: true)
             };
 
-            byte[] bytes;
+            Texture2D texture;
             try
             {
-                bytes = File.ReadAllBytes(sourceFullPath);
+                texture = DecodeDdsTexture(File.ReadAllBytes(sourceFullPath), sourceRelativePath, header,
+                    out var decodeError, encodedSamples);
+                if (texture == null)
+                {
+                    result.Error = CombineErrors(priorError, decodeError);
+                    return result;
+                }
             }
             catch (Exception exception)
             {
@@ -494,64 +564,6 @@ namespace SilverEcho.ForsakenWorld.Editor
                 return result;
             }
 
-            if (header == null)
-            {
-                try
-                {
-                    header = new DdsHeaderParser().Parse(bytes, sourceRelativePath);
-                }
-                catch (Exception exception)
-                {
-                    result.Error = CombineErrors(priorError, exception.Message);
-                    return result;
-                }
-            }
-
-            byte[] rgba;
-            string decodeError;
-            if (!DdsDxtDecoder.TryDecodeTopMipRgba(bytes, header, out rgba, out decodeError))
-            {
-                result.Error = CombineErrors(priorError, decodeError ?? "DDS decode failed.");
-                return result;
-            }
-
-            FlipDdsRows(rgba, header.Width, header.Height);
-            var texture = CreateRgbaTexture(header.Width, header.Height, rgba, sourceRelativePath);
-            if (header.MipMapCount > 1 && (header.Compression == DdsCompression.Dxt1 ||
-                header.Compression == DdsCompression.Dxt3 || header.Compression == DdsCompression.Dxt5))
-            {
-                if (header.MipMapCount > header.ExpectedFullMipChainCount)
-                {
-                    UnityEngine.Object.DestroyImmediate(texture);
-                    result.Error = CombineErrors(priorError, "DDS mip count exceeds its dimensions.");
-                    return result;
-                }
-                // D3DX keeps the DDS mip levels. A top-level-only fallback aliases
-                // when the original particle texture is minified.
-                var mips = new byte[header.MipMapCount][];
-                mips[0] = rgba;
-                for (int mip = 1; mip < mips.Length; mip++)
-                    if (!DdsDxtDecoder.TryDecodeMipRgba(bytes, header, mip, out mips[mip], out decodeError))
-                    {
-                        UnityEngine.Object.DestroyImmediate(texture);
-                        result.Error = CombineErrors(priorError, decodeError);
-                        return result;
-                    }
-                var mipTexture = new Texture2D(header.Width, header.Height, TextureFormat.RGBA32, mips.Length, false)
-                {
-                    name = texture.name,
-                    filterMode = FilterMode.Trilinear
-                };
-                mipTexture.SetPixelData(rgba, 0);
-                for (int mip = 1; mip < mips.Length; mip++)
-                {
-                    FlipDdsRows(mips[mip], Math.Max(1, header.Width >> mip), Math.Max(1, header.Height >> mip));
-                    mipTexture.SetPixelData(mips[mip], mip);
-                }
-                mipTexture.Apply(false, false);
-                UnityEngine.Object.DestroyImmediate(texture);
-                texture = mipTexture;
-            }
             var existing = AssetDatabase.LoadMainAssetAtPath(result.AssetPath);
             if (existing != null)
             {
@@ -590,6 +602,46 @@ namespace SilverEcho.ForsakenWorld.Editor
             return result;
         }
 
+        internal static Texture2D DecodeDdsTexture(byte[] bytes, string sourceRelativePath, DdsDocument header,
+            out string error, bool encodedSamples = false)
+        {
+            header ??= new DdsHeaderParser().Parse(bytes, sourceRelativePath);
+            if (!DdsDxtDecoder.TryDecodeTopMipRgba(bytes, header, out var rgba, out error))
+            {
+                error ??= "DDS decode failed.";
+                return null;
+            }
+
+            FlipDdsRows(rgba, header.Width, header.Height);
+            int mipCount = header.Compression == DdsCompression.Dxt1 || header.Compression == DdsCompression.Dxt3 ||
+                header.Compression == DdsCompression.Dxt5 ? header.MipMapCount : 1;
+            if (mipCount > header.ExpectedFullMipChainCount)
+            {
+                error = "DDS mip count exceeds its dimensions.";
+                return null;
+            }
+
+            // D3DX keeps the DDS mip levels, including partial chains.
+            var mips = new byte[mipCount][];
+            mips[0] = rgba;
+            for (int mip = 1; mip < mipCount; mip++)
+            {
+                if (!DdsDxtDecoder.TryDecodeMipRgba(bytes, header, mip, out mips[mip], out error))
+                    return null;
+                FlipDdsRows(mips[mip], Math.Max(1, header.Width >> mip), Math.Max(1, header.Height >> mip));
+            }
+
+            var texture = new Texture2D(header.Width, header.Height, TextureFormat.RGBA32, mipCount, encodedSamples)
+            {
+                name = Sanitize(Path.GetFileNameWithoutExtension((sourceRelativePath ?? "texture").Replace('\\', '/'))),
+                filterMode = mipCount > 1 ? FilterMode.Trilinear : FilterMode.Bilinear
+            };
+            for (int mip = 0; mip < mipCount; mip++)
+                texture.SetPixelData(mips[mip], mip);
+            texture.Apply(false, false);
+            return texture;
+        }
+
         private static void FlipDdsRows(byte[] rgba, int width, int height)
         {
             // DDS file row zero is the top, while Unity uploads from the bottom row.
@@ -603,27 +655,6 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Buffer.BlockCopy(rgba, bottom, rgba, top, stride);
                 Buffer.BlockCopy(row, 0, rgba, bottom, stride);
             }
-        }
-
-        private static Texture2D CreateRgbaTexture(
-            int width,
-            int height,
-            byte[] rgba,
-            string sourceRelativePath)
-        {
-            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            texture.name = Sanitize(Path.GetFileNameWithoutExtension(
-                (sourceRelativePath ?? "texture").Replace('\\', '/')));
-            var colors = new Color32[width * height];
-            for (var i = 0; i < colors.Length; i++)
-            {
-                var o = i * 4;
-                colors[i] = new Color32(rgba[o], rgba[o + 1], rgba[o + 2], rgba[o + 3]);
-            }
-
-            texture.SetPixels32(colors);
-            texture.Apply(false, false);
-            return texture;
         }
 
         public static string AssetPathToAbsolute(string assetPath)

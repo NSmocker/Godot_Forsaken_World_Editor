@@ -131,5 +131,82 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(100f, childDriver.TimeMs, 0.01f);
             Assert.AreEqual(GfxContainerDriver.NoLoopMs, childDriver.GlobalLoopTime, 0.01f);
         }
+
+        [Test]
+        public void ContainerKeepsEndedChildHiddenAndHidesTheWholeSubtreeWhenItEnds()
+        {
+            var root = new GameObject("container");
+            try
+            {
+                var container = root.AddComponent<GfxContainerDriver>();
+                var childRoot = new GameObject("child GFX");
+                var spriteObject = new GameObject("finite decal");
+                spriteObject.transform.SetParent(childRoot.transform, false);
+                var sprite = spriteObject.AddComponent<GfxSpriteDriver>();
+                sprite.LocalStartTime = 50f;
+                sprite.LocalTotalTime = 150f;
+                sprite.RepeatCount = 1;
+                sprite.SetKeypoints(new List<GfxKeypointSpec> { new GfxKeypointSpec { TimeSpan = 100f } });
+                container.LocalTotalTime = 400f;
+                container.GlobalLoopTime = 3000f;
+                container.RepeatCount = 1;
+                container.SetKeypoints(new List<GfxKeypointSpec> { new GfxKeypointSpec { TimeSpan = 400f } });
+                container.Configure(new GfxContainerParams(), childRoot, 1f, 1f, null);
+
+                container.OnGfxTick(25f, 1f);
+                var renderer = spriteObject.GetComponent<Renderer>();
+                Assert.IsFalse(renderer.enabled, "The child start time has not elapsed.");
+                container.OnGfxTick(75f, 1f);
+                Assert.IsTrue(renderer.enabled);
+                container.OnGfxTick(250f, 1f);
+                Assert.IsTrue(childRoot.activeInHierarchy);
+                Assert.IsFalse(renderer.enabled, "The child has ended inside the active container.");
+                container.OnGfxTick(500f, 1f);
+                Assert.IsFalse(childRoot.activeInHierarchy);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [TestCase(false, 150f)]
+        [TestCase(true, 50f)]
+        public void PlaybackPassesWholeTickAtStartAndHonorsChildRestart(bool loop, float timeAtRepeat)
+        {
+            var root = new GameObject("container");
+            try
+            {
+                var container = root.AddComponent<GfxContainerDriver>();
+                var childRoot = new GameObject("child GFX");
+                var child = childRoot.AddComponent<GfxElementStub>();
+                container.LocalStartTime = 100f;
+                container.LocalTotalTime = 200f;
+                container.GlobalLoopTime = 1000f;
+                container.RepeatCount = 2;
+                container.SetKeypoints(new List<GfxKeypointSpec> { new GfxKeypointSpec { TimeSpan = 100f } });
+                container.Configure(new GfxContainerParams { LoopFlag = loop }, childRoot, 1f, 1f, null);
+                var random = new GfxParticleSim.EmissionRandom(1);
+
+                container.OnGfxPlaybackTick(50f, 1f, 50f, true, random);
+                Assert.IsFalse(childRoot.activeInHierarchy);
+                Assert.AreEqual(0f, child.TimeMs);
+                container.OnGfxPlaybackTick(100f, 1f, 50f, true, random);
+                Assert.IsTrue(childRoot.activeInHierarchy);
+                Assert.AreEqual(50f, child.TimeMs);
+                container.OnGfxPlaybackTick(150f, 1f, 50f, true, random);
+                Assert.AreEqual(100f, child.TimeMs);
+                container.OnGfxPlaybackTick(200f, 1f, 50f, true, random);
+                Assert.AreEqual(timeAtRepeat, child.TimeMs);
+                container.OnGfxPlaybackTick(250f, 1f, 50f, true, random);
+                container.OnGfxPlaybackTick(300f, 1f, 50f, true, random);
+                Assert.IsFalse(childRoot.activeInHierarchy);
+                Assert.AreEqual(timeAtRepeat + 50f, child.TimeMs);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
     }
 }

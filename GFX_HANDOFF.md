@@ -1,6 +1,156 @@
 # Передача роботи GFX
 
-Оновлено 2026-11-19. Поточна ціль розбіжності силуету кожного GFX — до 15%. Активний лише GFX-00028. Перед початком читати [AGENTS.md](AGENTS.md).
+Оновлено 2026-11-23. Поріг закриття кожного GFX — строго менше 20%. Перед початком читати [AGENTS.md](AGENTS.md).
+
+## HDRP Terrain, 2026-11-23
+
+- `Forsaken World/HDRP/Angelica Terrain` переведено на проходи HDRP Lit. Ассерт `State comes from an incompatible keyword space` / `Actual: nullptr` ішов з jobified renderer, бо програма була unsupported: 76 texture parameters при ліміті пристрою 64. 48 окремих albedo/normal/roughness замінено на три `Texture2DArray`. Індивідуальні властивості `_LayerN` лишились для матеріалів. `AngelicaTerrainHdrpDrawGuard` пакує лише вже завантажені матеріали і не сканує AssetDatabase. У `PW Snow Story` після перезапуску (PID 32996) 16 чанків з масивами малюються, консоль без цього ассерта (0 errors). Масиви зараз до 512 px, тож щільність текселів нижча за оригінал. UV шарів більше не зсуваються з камерою: object position береться з camera-relative `positionRWS`, без `GetAbsolutePositionWS`. Normal і roughness беруться з того самого індексу шару, що й `_NormalN` / `_RoughnessN`, і з тим самим UV. Маска кожного overlay-шару тепер ще й окремий чорно-білий PNG `*_LayerNN_Mask.png` поруч із матеріалом; правка PNG перепаковується в `_Splat`. Меню `Tools/Angelica 2.x/Export Terrain Layer Masks`. PNG також призначається в слот `_LayerMaskN` матеріалу і видно в інспекторі шару; без цього призначення файл лежав лише поруч і не був прив’язаний. Пензель: `Tools/Angelica 2.x/Terrain Mask Painter`. Штрих пише в `_Splat` через `Apply()` і не імпортує PNG; файл пишеться лише кнопкою Save PNG. HDRP terrain читає albedo, normal і roughness прямими посиланнями на `_LayerN` / `_NormalN` / `_RoughnessN`. Копії Texture2DArray більше не збираються. Сірий чанк був `Area_0009` без `_LayerArray`: runtime-масив DontSave губився, а підпис текстур лишався і блокував повторне пакування. Тепер відсутній масив збирається знову, і збій одного матеріалу не зупиняє решту. Пакувальник оновлює зріз, коли текстуру шару змінюють. На `Area_0005`/`Area_0009` зрізи збігаються з призначеними картами; сила 0 піднімається до shader default 1, інакше призначена карта не впливає. Збірку HDRP цим проходом не перевіряли: пакувальник у Editor. Статуси GFX-реєстру не змінювались. Відкритий GFX лишається №54.
+
+## Окремий запит 2026-11-22: синхронізація шейдерів HDRP
+
+- Зіставлено шість пар з поточним checkout URP. Armor Reflect, LitModel, Water і Terrain уже мали ті самі властивості матеріалів та колірні формули. HDRP Sprite і Trail отримали проходи `AngelicaGfxEncoded` та `AngelicaGfxWarp`, актуальні параметри Warp і логіку Grid/Dissolve з URP. HDRP-зміни не враховано як перевірку будь-якого ID у GFX-реєстрі.
+- `Runtime/HDRP/AngelicaGfxBlendCustomPass.cs` збирається за наявності HDRP 17+. Додати його в глобальний Custom Pass Volume з точкою **Before Post Process**, увімкнути Custom Pass і вимкнути MSAA у Frame Settings, призначити окремі шари для звичайних GFX та Warp і виключити ці шари з Camera Culling Mask. Custom Pass сам включить їх у власний culling та прив'яже буфери. Для sRGB-змішування призначити `AngelicaGfxTransfer.shader`. Для HDR-буфера за замовчуванням застосовується лінійне змішування. Опція **Use Sdr Compositing** вмикає 8-бітне змішування й обмежує колір сцени діапазоном SDR. Warp читає копію сцени після групи GFX. Звичайний ForwardOnly потребує camera color в `_CameraOpaqueTexture` для Warp.
+- `python -X utf8 .validation/hdrp-shader-sync/check_sources.py` підтвердив властивості всіх шести пар і теги проходів GFX. Unity 6000.0.60f1 з HDRP 17.0.3, Core/URP 17.0.4 зібрала `ForsakenWorld.HDRP.dll`. Перший пакетний запуск не пройшов ліцензування, наступний вичерпав час першого імпорту. Повтор із кешем, `-batchmode -nographics -runTests -testPlatform EditMode -testFilter SilverEcho.ForsakenWorld.Tests.AngelicaHdrpShaderTests`, дав 8/8 зелених тестів. [XML](.validation/hdrp-shader-sync/results.xml) та [лог](.validation/hdrp-shader-sync/unity-cached.log). Запуски завершено. Наступна HDRP-перевірка — кадри звичайних Sprite/Trail, Grid/Dissolve та Warp поверх завершених GFX із налаштованим Custom Pass. HDRP Build не запускався.
+
+## PW Snow Story, HDRP Editor
+
+- У проєкті `A:/Github/RE-PerfectWorldSource/PW Snow Story` перенесено 16 469 матеріалів із `Assets/PW/Imported` на HDRP. У 15 741 матеріалі Angelica змінено лише GUID шейдера. У 728 HDRP Lit перевірено збереження базових і емісійних текстур, масштабу та зсуву. [Звірка всіх файлів](.validation/pw-snow-hdrp/texture-verification.txt), резервна копія `.validation/pw-snow-hdrp/materials-before-20261122-160348.zip`.
+- Збережено `Assets/PW/Snow Story HDRP Sector Test.unity` з префабами 0036, 0037 і 0038, камерою та світлом. HDRP Scene View відображає всі три сектори. Серед 5138 призначених матеріалів на 3185 рендерах Unity не знайшла URP або непідтримуваних шейдерів. [Звіт сцени](.validation/pw-snow-hdrp/result.txt). Початкове створення additively з порожньої `Untitled` відхилила Unity. Повтор створив тестову сцену в Single, тимчасовий скрипт видалено. Редактор залишено відкритим на тестовій сцені. Статуси GFX-реєстру не змінено.
+
+## PW Snow Story, текстури BMD
+
+- BmdAssetImporter v4 знаходить розпаковані `building.pck` / `bulding.pck` під `Assets`, підставляє повний відносний шлях до текстури та зберігає пріоритет явних remap і локальних шляхів. Unity EditMode — 9/9 тестів, [XML](.validation/hdrp-shader-sync/bmd-results.xml).
+- Після відновлення з крашу Mono перевірено записи про завершення імпорту всіх 72 694 BMD у двох журналах. `a26/1/litmodel_979.bmd` отримав Unity default asset після крашу та був точково переімпортований. Зараз його головний asset — GameObject, а прапорець `CollideOnly=1` у джерелі пояснює, чому матеріалів немає. Контрольні моделі 3518 і 1989 тепер посилаються на чотири DDS з `building.pck`. [Аудит](.validation/pw-snow-bmd/post-restart-audit.txt), [перевірка матеріалів](.validation/pw-snow-bmd/live-probe.txt).
+- Залишилося 21 відсутнє посилання (17 DDS, 3 PSD і один `水.sdr.tga`, який оригінальний `A3DTextureMan::LoadTextureFromFile` трактує як шейдер). За очікуваними шляхами файлів у building.pck немає. [Перелік із моделями](.validation/pw-snow-bmd/unresolved-references.tsv). Складено [попереднє зіставлення PNG _sora](.validation/pw-snow-bmd/sora-texture-candidates.tsv). PNG-заміни не застосовано. Тимчасовий скрипт перевірки видалено, Unity залишено відкритою в сцені «Основа».
+
+## Відкритий №54
+
+- `npc/四兽二级塔朱雀_柱子.gfx`. Повні силуети 8,33% і 9,15%, Grid Warp 2,73%, але фенікс візуально перевернутий. Ізоляція емітера `0x40` дала 90,38% на 26 парах, пік 95,08%. [Звіт, команди і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00054/REPORT.md).
+- `3DParticle=1`, `Facing=1`, `IsBind=1`, швидкість і прискорення нульові. Нативний `A3DEllipsoidEmitter::InitParticle` починає зі збереженого `m_vMoveDir`. `A3DParticleSystemEx::Fill_Vert_3D` підставляє цей напрямок за нульового зміщення. Unity `GfxRuntimeParticleBatch.StretchAxes` застосовує мінус і до початкового `Move`. Наступний крок — окремий напрямок для Facing з історією `TriggerAffectors`, тести на старт і зупинку, повтор №54 та регресії №38 і Dummy. Для №54 пакет не правився.
+- Призупинено за проханням користувача при залишку близько 15% 5-годинного вікна. Unity GFX Validation PID 22552 / порт 7800. Перевірити фактичний залишок перед продовженням.
+
+## Закритий №53
+
+- Самостійний рух зі швидкістю 2 од./с, PlaySpeed 0,6, 50 мс wall tick і 30 мс GFX tick. Чорне 7,55%, кольорове 9,14%, по 58 пар. Пік кольорової серії 44,83% на 29 пікселях появи. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00053/REPORT.md).
+
+## Закритий №52
+
+- Повний політ 0,56% на чорному і 0,67% на кольоровому, по 59 пар. Належні два Dummy-емітери `0x30` в ізоляції дали 0,61% і 0,70%, по 58 пар. Перша спроба `0x8` показала порожній шаблон, виправлено маску. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00052/REPORT.md).
+
+## Закритий №51
+
+- Влучання з масштабом 3, спалах, вибух та згасання до 3 с. 1,27% і 1,58% на 82 парах, три TL Warp в ізоляції 3,17% на 74 парах. Діє правка №50. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00051/REPORT.md).
+
+## Закритий №50
+
+- Повний ефект 1,06% на чорному, 1,16% на кольоровому, 75-мс спалах 1,16%. TL Warp ID 101 отримав силу за проєктованими розмірами й альфою, контроль NoScale і півпіксель. Обидва Warp в ізоляції 1,91% на 41 парі з лінійним stage 1. Checker під час простої ізоляції успадковував point, а `DoGlow`/`DoSharpen` в оригіналі задають linear. Опції обгортки `-LinearWarpSource`, `-NativeWarpTrace`; для point лишено окремий діагностичний артефакт. Grok 4.7 звірив формули частинок, локально звірені позиції, розміри, альфа. 68/68 тестів, регресія №37 3,00%, фінальна консоль без помилок. [Звіт, команди й кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00050/REPORT.md).
+
+## Закритий №49
+
+- Самостійний прямолінійний рух +Z 3 од./с, авторський масштаб 4, 8,38% на чорному і 9,20% на кольоровому, по 58 пар. Пік 100% відповідає трьом пікселям появи на 100 мс. Штатний рух у двох Dummy перевірено у №48. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00049/REPORT.md).
+
+## Закритий №48
+
+- Повний ефект 5,44% на чорному, 6,59% на кольоровому. Два емітери, що використовують спільний Dummy ID 200, окремо дали 9,12% і 6,30%. По 58 видимих пар в усіх серіях. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00048/REPORT.md).
+
+## Закритий №47
+
+- `GfxSpeedTrailDriver` вмикає наявний півпіксельний зсув D3D9 для світових вершин ID 110. Після діагностичного `-TrailPixelCenter` та звичайного імпорту зафіксовано на чорному 19,20% → 8,81%, на кольоровому 23,39% → 12,70%, по 58 пар. Максимум 30,59% при появі на 100 мс. Кольорові регресії №42 11,72%, №44 4,36%, №46 11,21%. 20/20 адресних тестів. Grok 4.7 для UV та кольору не повернув висновку, завершено лише цей процес. [Звіт, тести й кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00047/REPORT.md).
+
+## Закритий №46
+
+- Повний прямий політ 1,91% на чорному та 2,67% на кольоровому, по 59 пар. Ізольований №47 у штатному контейнері 14,77% та 18,82%, по 58 пар. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00046/REPORT.md).
+
+## Закритий №45
+
+- Повний ефект 0,78% на чорному та 0,70% на кольоровому, по 40 пар. Ізольовані сітки й повтор UV до 22 с 0,44% на 49 парах. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00045/REPORT.md).
+
+## Закритий №44
+
+- Повний прямолінійний політ 1,41% на чорному й 1,40% на кольоровому тлі, по 59 пар. Ізоляція вкладеного ефекту 13,89% та 17,21%, по 38 пар, максимуми 41,38% і 36,08%. Дочірній ефект з PlaySpeed 0,6 закінчується з кореневим ключем на 2000 мс. Правок пакета не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00044/REPORT.md).
+
+## Закритий №43
+
+- Повний ефект 0,58% на чорному та 0,62% на кольоровому тлі, по 40 пар. Ізольовані сітки з повтором UV до 22 секунд 0,23% на 49 парах. Змін пакета для №43 не знадобилося. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00043/REPORT.md).
+
+## Закритий №42
+
+- Прямолінійний політ +Z і +X, 6 од./с, до 2950 мс. Повний ефект 2,06% на чорному, 2,77% на кольоровому, 2,76% з повернутим польотом, по 59 пар. Вкладений ефект 14,26% на чорному та 18,65% на кольоровому, по 58 пар. Найбільший пік вкладеного ефекту 33,77% при появі. Grok 4.7 через OpenCode і локальна перевірка підтвердили масштаб контейнера 3 × 2 × 2. Змін пакета для №42 не знадобилось. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00042/REPORT.md).
+
+## Закритий №41
+
+- Повний ефект 0,49% на чорному та 0,65% на кольоровому, по 40 видимих пар. Ізоляція сіток з іншим ракурсом і повтором UV до 22 с дала 0,25% на 51 парі. Змін Unity-пакета для №41 не знадобилось. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00041/REPORT.md).
+
+## Закритий №40
+
+- `npc/四兽一级塔朱雀_技能飞行.gfx`, прямолінійний політ за режимом з `gfx/sgc/四兽一级塔朱雀.sgc`. Повний ефект 43,15% → 1,41% на чорному, 43,27% → 1,42% на кольоровому, 1,43% при повороті польоту на 90°. По 59 видимих пар. Ізольовані частинки 0,92% і вкладені сліди 13,44%, максимум 41,38% на першій видимій парі, 38 пар. Перевірено до 2950 мс польоту та завершення ключа контейнера на 2000 мс. Влучання використовує окремий GFX і виходить за умови захоплення №40. [Звіт, джерела, команди й кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00040/REPORT.md).
+- `GfxParticleSim.cs` і `GfxParticleDriver.cs` зберігають unbound частинки у світових координатах і розподіляють народження вздовж шляху емітера. `GfxSpeedTrailParams.cs` і `GfxSpeedTrailDriver.cs` зберігають `RenderLayer` ID 110, RGB MAE чорного 5,26 → 1,75. `GfxSceneBuilder.cs` і `AssembledTextureImporter.cs` пропускають нативний імпорт для DDS, позначених заголовком для декодування. 120 фінальних кадрів бітово ідентичні захопленню до правки імпорту. 79/79 адресних тестів, 0 помилок при останніх захопленнях, №38 і №34 пройшли регресії.
+- Обгортки checker та Unity приймають контрольований рух `-RootVelocity`. Відсутність цього параметра спричинила помилку в першій спробі нерухомої регресії, обробку опціонального параметра виправлено. Grok 4.7 звірив активні тіки сліду, зафіксував окремі сценарії з прив'язками та старінням поза видимим вікном. [Лог Grok](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00040/grok-trail-nov22.jsonl).
+
+## Закритий №39
+
+- `npc/四兽一级塔朱雀_塔身.gfx` пройшов 0,62% на чорному та 0,69% на кольоровому, по 40 пар. Ізольовані Grid 0,19% на 40 парах і 0,22% на 51 парі в розширеній серії з повтором UV біля 10 і 20 с. Змін пакета не знадобилося. [Звіт, команди й кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00039/REPORT.md).
+
+## Закритий №38
+
+- `npc/喷火战车_转轮灰.gfx`. Ізольовані іскри 41,92% → 1,17% на 48 фінальних видимих парах, максимум 14,29%. Повний ефект 1,14% на чорному і 1,80% на кольоровому, по 40 пар. `GfxRuntimeParticles.cs` відтворює 3D UV та напрямок Facing з `A3DParticleSystemEx::Update_3D/Fill_Vert_3D`, а також півпіксель D3D9 для 3D-квадів. Проба лише геометрії й UV дала 43,24%. `Invoke-GfxCapture.ps1` приймає `-ParticleTrace` для порівняння з нативним логом.
+- Grok 4.7 через OpenCode завершив звірку осей Facing в ізольованих умовах. Ізольоване захоплення не покриває історію нульового руху або паралельність напрямку погляду. 42/42 `GfxParticleTests`. Регресії №32 15,34%, №34 5,36% на чорному й 1,89% на кольоровому. [Звіт, команди, кадри й логи](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00038/REPORT.md).
+
+## Закритий №37
+
+- Самостійний №37 зі штатним TL Warp пройшов 2,24% на чорному й 2,99% на кольоровому, по 50 видимих пар. Режим URP Editor, нерухомий корінь, seed 1, від появи до усталеного горіння на 5000 мс. Змін пакета не знадобилося. [Звіт, кадри й команди](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00037/REPORT.md).
+
+## Закритий №36
+
+- Самостійний №36 з DummyEle та вкладеним №35 пройшов 14,11% на чорному на 15 парах, максимум 59,70%, і 3,33% на кольоровому на 16 парах, максимум 41,67%. Коротка чорна серія дала 13,69% на семи парах при тих самих тиках. Змін пакета не знадобилося. Grok 4.7 завершив аналіз Dummy. Локальна звірка підтвердила, що тік уже враховує `SubGfxSpeed`. Сценарії з нестандартним масштабом, зміщенням та альфою записано для відповідних ефектів. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00036/REPORT.md).
+
+## Закритий №35
+
+- При PlaySpeed 2,5 і wall tick 20 мс отримано 11,31% на 14 видимих парах на чорному, максимум 60% на п’яти пікселях. На кольоровому тлі 0,84% на 35 парах, максимум 1,89%. Пакет не потребував додаткових змін після №34. Параметр wall tick перенесено в обгортки захоплення, нативний runtime не змінено. Grok 4.7 звірив правило незалежних серій. [Звіт, команди й кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00035/REPORT.md).
+
+- №35 `npc/喷火战车_复活_子001.gfx` відтворено самостійно в `A:/Github/Unity GFX Validation` URP Editor. SHA256 `92989c5f2b77ef2419e5593fc92c78081b825946b7b6df8515f218426838d20c`. По 27 знятих пар, 512², seed 1, нерухомий корінь, камера (5, 8, 13) → (0, 0.5, 0), нативний world Warp, PlaySpeed 2,5, 50 мс wall tick / 125 мс GFX tick. Кольорове тло 0,95% на 14 видимих парах, максимум 1,89%. Чорне тло 17,09% на 6 видимих парах, максимум 60%. Імпорт без заглушок і попереджень. [Кольорова серія](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00035/baseline-panel/comparison.json), [чорна серія](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00035/baseline-black/comparison.json).
+
+## Закритий №34
+
+- Закрито у URP Editor з нативним world Warp. Звичайний імпорт пакета дає **17,63%** на чорному тлі (11 видимих пар, максимум 40,18%) і **9,15%** на кольоровому (22 пари, максимум 66,73%). 61/61 адресний тест. [Звіт і кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00034/REPORT.md).
+- Відтворено нативний знак вертикальних координат для Warp на перевернутій Unity-проєкції, порядок реєстрації прозорих слотів в одному GFX, імпорт DDS для шейдера розчинення з вибіркою вихідних значень і GFX TGA без Unity-компресії. Нативний порядок використовує групи сумісних звичайних слотів і окрему реєстрацію кожного екземпляра шейдера. Спільний порядок між незалежними коренями та інші pipeline/build режими ще потребують перевірки.
+- Остаточні регресії після перенесення в пакет. №28 на чорному 2,33%, передній панелі 9,84%, задній панелі 2,33%, по 16 видимих пар. №32 — 16,26% на 19 парах, №33 — 6,81% на 19. Артефакти `final34-warp-*` та `after-34-materials`.
+- Після звірки `A3DGridDecalEx::Load` виправлено читання hex ARGB вершин із `%x`, включно з нульовою альфою `ffffff`. У трасі вкладеного Warp перші вершини, UV і час були узгоджені, коефіцієнти до правки відрізнялися до 0,39. Додано трилінійні слоти Grid і адресацію за `TileMode` / Warp. `AngelicaGfxBlendFeature` робить Warp на копії SDR-буфера перед декодуванням. У shader world і TL Warp вибірка буфера враховує цілі піксельні центри D3D9. 60/60 адресних тестів Grid, частинок, Dummy і контейнерів.
+- Регресії після змін підтвердили №28 на чорному 3,07%, передній панелі 10,35%, задній панелі 3,03%, по 16 видимих пар. №32 — 16,53%, №33 — 6,81%. Дані `after34-warp-*` та `after-34-grid` в окремих папках реєстру.
+- Траса `WARPSAMPLER` встановила, що stage 1 на всьому ефекті linear, а при ізоляції Warp point, хоча mip-семплер нормалі trilinear в обох. Пробне сортування з `RENDERSLOT` дало 71,28% на чорному, без Warp 28,49%. Еталон зі звичайним порядком Unity без Warp 43,46%, лише Dummy без Warp 20,08%. Ці проби зберігаються в `.validation`. Наступний крок — звірити одну копію Warp на панелі, щоб відокремити семплінг від перезапису кількома Warp.
+
+- За запитом користувача створено окремий `A:/Github/Unity GFX Validation` на Unity 6000.0.60f1, URP 17.0.4, Linear, Direct3D 11. Маніфест містить живе посилання на `unity-package`, Pipeline 0.10.0-exp.1 і Test Framework. Валідаційний runner приймає `--project-path`, PowerShell-обгортка `-ProjectPath`. Налаштування PC URP з локального шаблону ідентичні попередньому проєкту за SHA256. Для роботи з GFX використовувати новий редактор, не запускати перезавантаження в проєкті карти.
+- №34 відкрито. На чорному тлі 99,26% при дуже слабкому сигналі, кольорове тло з рідним world Warp дає 46,09% на 22 парах. [Базові кадри](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00034/colored-native-warp/comparison-full.png). Перенесено raw blend, alpha, UV, RotFromView і world Warp для сіток. Перша спроба повтору `grid-render` в старому проєкті перервалася через реімпорт карти.
+- За `A3DParticleSystemEx::ApplyDummy`, `A3DGFXContainer::DummyTick` та нативним журналом `native-dummy-trace/checker.log` у першому тіці народження зовнішній child отримує 30 мс, внутрішній 75 мс. Unity `GfxDummyParticlesDriver` отримав послідовний тік і стабільну ідентичність копії на життя частинки. Тест стабільності слота й два тести Grid додано. Потрібні компіляція та захоплення в новому проєкті. Grok 4.7 аналізував відмінність тіку DummyEle, Mimo Flash — Grid slot; обидва завершилися, логи у `GFX-00034/baseline`.
+- У новому проєкті перевірено окремого власника тіку для створених Dummy, авторський PlaySpeed вкладених контейнерів, споживання CRT під час створення дочірніх екземплярів і передавання часу та UV до Grid. Кольоровий фон із Warp пройшов 46,39% → 42,93% → 40,08% → 19,70% → 16,77%. Останні два кроки відповідають створенню Dummy за правилами CRT й перенесенню шейдера розчинення. 59/59 адресних тестів у URP Editor.
+- `A3DGFXElement::InitBaseData/ApplyPixelShader` і `g_GfxApplyPixelShaderConsts` пояснюють завантаження `.sdr`, другу текстуру, початкові значення констант, signed інтервали й повтори. `GfxSceneBuilder`, `GameDataIndex`, `GfxGridDriver`, `GfxGridParams` та обидва trail-шейдери підтримують `dissolve_edgealpha.txt` і маску. На чорному тлі з Warp 93,06% → 84,83% (11 пар, максимум 97,37%). На кольоровому 16,77% (22 пари, 19 <20%, максимум 68,43% на 200 мс). [Звіт №34](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00034/REPORT.md).
+- Контроль на чорному при RGB > 0 дав 10,13% на 17 парах. Офіційна метрика проходу використовує RGB > 10, де різниця яскравості всередині слабкого силуету ще помітна. Проби сортування за ієрархією (85,64%) та лінійної маски (84,28%) лишилися діагностичними. Grok 4.7 звірив порядок слотів C++. Він залежить від обходу `abase::hash_map`, тоді як Unity використовує `CommonTransparent`. Unity 6000.0.60f1 працює в окремому редакторі, PID 19236, порт 7800. Діагностика обгортки checker з `GFX_AUDIT_VISIBLE_ROOT` фільтрує видимість кореневих елементів після тіку й відновлює її після рендеру.
+
+- №33 закрито у URP Editor, 78,92% → 52,04% → 36,66% → 6,81%, 19/19 видимих пар до 20%, максимум 17,86%. Виправлено подвійний зсув емітера ID 125, порядок рядків атласу, різницю центрів пікселя для TL та додано encoded прохід слідів URP. 35/35 тестів частинок пройшли. [Звіт](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00033/REPORT.md).
+- Регресія №32 дала 16,22%, 17/19 видимих пар <20%, залишилися дрібні іскри на 2300 мс. У №31 повторено 5,51% і 5,14% на чорному й кольоровому тлі відповідно, усі 34 пари до 20%. [№32](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00032/after-33/comparison.json), [№31 чорне](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00031/particle-regression-black/comparison.json), [№31 кольорове](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00031/particle-regression-plate/comparison.json).
+- Зсув 3D Grid для центрів пікселів D3D9 зменшив розбіжність ізольованого розчинення 60,80% → 45,45%, повний ефект на цьому проміжному етапі 84,09% на чорному та 16,61% на кольоровому. [Чорне тло](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00034/grid-raster-black-unmasked/comparison.json), [кольорове тло](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00034/grid-raster-panel-unmasked/comparison.json).
+- `-VisibleRoot` і `-VisibleGrandchild` у `pass-32-onward/Invoke-GfxCapture.ps1` відділяють шари в обох рендерах після симуляції. Маска `0x02/0x01` відповідає розчиненню, `0x02/0x02` дочірньому Warp, `0x02/0x0c` іншим сіткам. Траса `embedded-dissolve-trace` підтвердила час, alpha та масштаб перших вкладених копій. Наступний крок — звірити вершини, UV, warp-коефіцієнти та стани семплера для двох рендерів. №35 лишається наступним окремим ефектом у черзі.
+
+## Робочі записи №32–33
+
+- №32 закрито у перевірених умовах після 37,97% → 24,02% → 20,97% → 20,42% → 18,53%. 19 видимих пар, 16 нижче 20%, максимум 96,98% на дрібних іскрах при 2300 мс. [Підсумок, команди й докази](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00032/REPORT.md).
+- №33 є вкладеною залежністю №32. Перша іскра C++ (0,523824; 0; −0,460160), Unity (0,388618; 0; 0,321178), різниця дорівнювала першій точці власної кривої ID 125. Розмір, packed RGB і кут збігалися. Прибрано друге застосування кривої з `extraEmitterCtrls`, після чого збіглися координати. Повтор після переміщення початку атласу, SDR сліду та корекції центрів пікселів зменшив залишкову різницю форми й кольору.
+
+## Робочі записи №32
+
+- `npc/喷火战车_回城术_吟唱.gfx` має чотири вкладені контейнери ID 200. У першій серії 37,97% середньої розбіжності на 19 видимих парах, максимум 99,97%. У Unity відпрацьовані дочірні декалі лишалися ввімкненими. [Кадри C++/Unity](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00032/baseline/comparison-full.png), [метрика](.validation/gfx-cpp-unity-check/pass-32-onward/GFX-00032/baseline/comparison.json).
+- `A3DGFXContainer::Render` пропускає цілу дочірню ієрархію за `CanRender`; дочірні елементи окремо перевіряють свої ключі. У `GfxContainerDriver` замінено перезапис `Renderer.enabled` на видимість дочірньої ієрархії. Додано `ContainerKeepsEndedChildHiddenAndHidesTheWholeSubtreeWhenItEnds`. Компіляція Unity 6000.0.60f1 успішна. Після domain reload перше повторне захоплення повернуло 504, а тестовий запит перевищив 12 с, поки редактор переімпортував префаби карти.
+- Grok 4.7 дослідив часовий зсув вкладених GFX, Mimo Flash підтвердив конфлікт власників видимості. Обидва аналізували короткі дозволені фрагменти C++/Unity. Автоперевірка відхилила окремий запит із даними ассета до Mimo; аналіз ассета виконується локально. Логи агентів у `baseline/*.jsonl`. Наступне після імпорту — повтор `Invoke-GfxCapture.ps1` з новим тегом, `test run` для `GfxContainerTests`, далі відокремити таймери та кільце за потреби. До №33 переходити після закриття №32.
+- Після імпорту `child-visibility-retry` дав 24,02% і 6/6 тестів. На наступній правці штатного тіку контейнера `child-clock` дав 20,97% і 8/8 тестів. Дочірній ефект отримує повний тік при вході в активний інтервал, під час паузи тік відсутній, `LoopFlag` перезапускає дочірній час. Діагностична копія checker `audit-checker` додає вибір видимих елементів, `KEY`, `CHILD`, `CPAR`; першу помилку C2662 виправлено в самій обгортці. Еталони в `native-clock`, `native-children`, `native-root-decal`, `native-curve-clock`; пакет не використовує ізольовані дані для рендеру.
+- Залишок №32 зосередився на 2000–2300 мс. За `A3DPointEmitter::InitParticle`, `A3DCurveEmitter::InitParticle` і `A3DParticleSystemEx::InitParticle` портовано спільний CRT для ID 120/125 і випадкову початкову клітинку атласу. `CalcParticlesUV` крокує максимум на одну клітинку за тік. `TriggerAffectors` і `ScaleChange::Process` застосовують повний тік у включних межах. Після перенесення масштабу пройшли 31/31 тестів.
+
+## Завершений прохід №28–31
+
+- №28 закрито в URP Editor із `AngelicaGfxBlendFeature`, seed 1, SDR, Direct3D 11, 512². На передній площині 21,70% → 19,28%, на чорному 6,49%, на задній площині 6,43%. По 15 пар на сценарій. Окремі кадри передньої площини до 34,04%. Окрема копія checker виконує TL і 3D гілки `CECFullGlowRender::DoWarps` з оригінальними PS 1.4 і `DrawToBuffer`. №28 фактично використовує TL. Змінено shader sprite, Renderer Feature, particle driver/material/batch і адресний тест. Один новий тест і 27 тестів попередньої компіляції пройшли. [Звіт](.validation/gfx-cpp-unity-check/pass-28-30/GFX-00028/nov21-native-warp/REPORT.md).
+- №29 закрито в URP Editor, seed 1, PlaySpeed 0,5, 14 видимих пар. `GfxParticleSim` тепер бере дві вибірки з CRT потоку для неусередненого поверхневого еліпсоїда за `A3DEllipsoidEmitter::GenSurface` і спрямовує рух усередину. 39,21% → 11,11%, максимум 24,60%. 29/29 тестів `GfxParticleTests` пройшли. [Звіт](.validation/gfx-cpp-unity-check/pass-28-30/GFX-00029/nov21-shared-surface-v2/REPORT.md).
+- №30 закрито в URP Editor, seed 1, PlaySpeed 1. Середня розбіжність 2,55%, максимальна 3,55%, 17/17 видимих пар <20%. [Звіт](.validation/gfx-cpp-unity-check/pass-28-30/GFX-00030/nov21-seeded/REPORT.md).
+- №31 закрито в URP Editor, seed 1, PlaySpeed 2, нерухомий корінь. 9,33% на чорному тлі та 8,94% із кольоровою площиною для звичайних емітерів та TL Warp. У кожній серії 17 видимих пар, 16/17 <20%. Найбільша різниця під час появи на 100 мс. Лічильники всіх емітерів збіглися у 104/104 перевірок, обидва рушії очистили пул до 3800 мс. [Звіт](.validation/gfx-cpp-unity-check/pass-28-30/GFX-00031/REPORT.md).
+- Grok 4.7 і Mimo Flash через OpenCode завершили адресну звірку Warp для №28. Логи в `GFX-00028/nov21-agents` під каталогом проходу. Захоплення №28–31 завершені. Наступний за чергою №32 `npc/喷火战车_回城术_吟唱.gfx`. Unity 6000.0.60f1, порт 7800, сцена `Assets/GfxParityAuditEvidence/Roundtrip.unity`.
 
 ## Частинки №8268 і №7160
 
@@ -222,3 +372,40 @@ Probe-скрипти: `C:/Users/sinch/AppData/Local/Temp/opencode/ecm_probe.cs`,
 - Контрольні ассети імпортовано окремо від наявних префабів карти. Наступний імпорт сектора 36 у FW Data Browser оновить робочі матеріали. Для покадрової звірки ще потрібен кадр оригінального клієнта з відомою камерою та часом доби. GFX-реєстр не змінено. Unity PID 25348, порт 7800, готова. Субагенти не запускалися.
 
 - Уточнення після перевірки користувачем: відкритий був `Sector_0035` (`world_36`), усі 16 матеріалів мали `_MapDayNight=1`, але `_UseNightLightmap=0`. Старий індекс може не містити `.t2lm1`; імпортер тепер у цьому випадку перевіряє файл поруч із T2BK. Регресія зі штучно застарілим індексом 1/1 Passed (`live-night-regression.json`). У робочому Unity-проєкті підключено нічні карти у 16 матеріалах `world_36`. Перший запуск підключив одну карту й зупинився на перевірці property block. Після тесту сектор був відсутній у відкритій сцені, тому решту 15 карт і застосування Night перевірено на preview-екземплярі робочого `Sector_0035.prefab`, без збереження сцени (`repair-live-night-final.json`).
+
+## Окремий запит 2026-11-23: заміна DDS текстур на покращені Sora PNG у PW Snow Story
+
+- У `A:/Github/RE-PerfectWorldSource/PW Snow Story/Assets/PW/Imported` завершено заміну 674 DDS asset-копій на PNG з 366 унікальних `_sora.png` джерел; старі DDS і їх `.meta` видалені. Старі GUID збережені у відповідних PNG `.meta`, щоб посилання Unity лишилися чинними. Для 60 PNG, що не мали альфа-каналу, перед заміною відновлено альфу з відповідного DDS. П'ять невідповідних/непевних Sora-кандидатів залишили без змін.
+- Unity-скрипт завершився зі звітом `Replaced DDS: 674`, `Unique enhanced sources: 366`, `GUID/type/removal failures: 0`; `Temp/CodexSnowSora.run` після запуску відсутній. Повторна перевірка `.validation/pw-snow-sora/verify.py` пройшла: `Asset bytes, GUIDs and old file removal verified: 674 of 674`.
+- План відповідностей: `.validation/pw-snow-sora/replacement-plan.tsv`; повна резервна копія старих DDS та `.meta`: `.validation/pw-snow-sora/original-dds-and-meta.zip`; звіти: `.validation/pw-snow-sora/result.txt`, `.validation/pw-snow-sora/file-verification.txt`. Зміни коду BMD importer та тест DDS→PNG описані у попередній передачі; ізольовані тести пройшли 10/10 (`.validation/hdrp-shader-sync/bmd-png-results.xml`).
+- Тимчасовий `Assets/Editor/CodexSnowSoraMigration.cs` і його `.meta` видалені з робочого Unity-проєкту після завершення. На фінальній перевірці Unity не працював; імпорт завершився до формування `result.txt` зі статусом `Done.`.
+- Наступний крок для цього запиту: жодного. Резервна копія збережена у workspace для відкату за потреби.
+
+## Запит 2026-11-23: terrain має приймати тіні (HDRP/URP)
+
+- Змінено `unity-package/Runtime/Shaders/AngelicaTerrain.shader`: матеріальна галочка `[Toggle] _ReceiveShadows` (увімкнена за замовчуванням), URP main-light shadow variants і множення кольору на `GetMainLight(...).shadowAttenuation`.
+- Змінено `unity-package/Runtime/Shaders/AngelicaTerrainHdrp.shader` та `AngelicaTerrainHdrp.hlsl`: така сама властивість і приймання тіні від directional light HDRP через `HDShadowContext`/`GetDirectionalShadowAttenuation`; локальні terrain координати UV збережені окремо від world position для shadow lookup.
+- `unity-package/Editor/TerrainAssetImporter.cs`: нові terrain MeshRenderer явно створюються з `receiveShadows = true`; `shadowCastingMode = Off` лишається, бо воно керує відкиданням тіней самою землею, а не їх прийманням.
+- Проєкт `A:/Github/RE-PerfectWorldSource/PW Snow Story` відкритий у Unity 6000.0.60f1, пакет підключений як локальний `file:`. Unity CLI `console_status` показав `compiling=false`, `compilationFailed=false`, але `get_shader_properties` для обох terrain shader повернув застарілий список без `_ReceiveShadows`. Спроба змусити `AssetDatabase.Refresh(ForceUpdate)` через `unity command eval` завершилася `400 Bad Request: Main thread operation timed out after 5000ms`. `unity status --until-ready` знову показав `ready`, але це не доводить завершення імпорту шейдерів. Console містить один попередній сторонній error `No command named 'editor status'`; shader compilation error не було підтверджено.
+- Перевірено статично: `git diff --check` без помилок форматування. Unity-тести не запускалися. **Не підтверджено:** що Unity переімпортував HLSL і що shader компілюється/віддає тінь у сцені. Наступний крок — після усунення завислої main-thread операції вручну reimport/перезапустити імпорт terrain shader, перевірити наявність `_ReceiveShadows` у `get_shader_properties`, і лише тоді перевірити фактичну тінь у HDRP та URP. Відкриту перевірку не позначати завершеною.
+
+### Follow-up 2026-11-23: HDRP terrain pink shader fixed
+
+- Живий Editor-консоль `PW Snow Story` показала 2 помилки terrain HDRP: відсутній `PUNCTUAL_FILTER_ALGORITHM` у `HDShadowAlgorithms.hlsl(67)` і дубль `_ViewMatrix` з URP Core + HDRP `ShaderVariablesGlobal.hlsl(15)`. HDRP terrain тепер використовує Core/HDRP includes без URP Core, shadow includes виключені з Depth pass, а HDRP shadow-filter keywords задані для ForwardOnly pass.
+- Після змін нових помилок `Forsaken World/HDRP/Angelica Terrain` не з’явилося. Editor: `compiling=false`, `compilationFailed=false`. `get_shader_properties` повернув 33 shader properties, включно з `_ReceiveShadows`; `get_material_properties` для `Assets/PW/Imported/Maps/world_5af11d45e112/terrains/world_21/Area_0002.mat` підтвердив цей float зі значенням 1.
+- У буфері Console залишилися попередні записи помилок (вони датовані до виправлення і не були очищені): серед них HDRP/Lit compilation out-of-memory та помилки terrain до виправлення. Build/tests і кадр після виправлення не запускалися, тому візуальне зникнення рожевого кольору не підтверджено кадром.
+
+## Запит 2026-11-23: зручний менеджер шарів для mesh-terrain
+
+- Додано `unity-package/Editor/TerrainLayerShaderGUI.cs` (+ `.meta`) і вказано цей `CustomEditor` у URP `AngelicaTerrain.shader` та HDRP `AngelicaTerrainHdrp.shader`. Inspector має лічильник/слайдер 1–16, кнопки додати/прибрати останній шар, згортані картки, Albedo, Mask Override, Normal Map + Normal Strength, Roughness Map + Roughness Strength, проєкцію/UV Scale для вручну доданих шарів, а також lightmap/shadows/brightness. Нагадування в UI: Normal map імпортувати як Normal Map; grayscale roughness — з sRGB вимкненим.
+- Обидва шейдери отримали per-layer texture slots та обчислення normal/specular; нативні шари зберігають імпортовані projection/splat masks, додаткові шари керуються окремою Mask Override і UV projection. Фіксована місткість — 16 шарів, як і в поточному імпортері terrain.
+- `TerrainAssetImporter.cs` зберігає вручну додані шари та їхні маски/карти/сили між повторними імпортами, не замінюючи ігровий Albedo у нативних слотах. HDRP `UnityPerMaterial` CBUFFER перенесено перед функціями, які читають його поля.
+- `git diff --check` для файлів цього запиту пройшов. Тести не запускалися. У Unity Console було зафіксовано помилки шейдера попередньої ітерації о 13:30; після останнього CBUFFER-патчу post-fix snapshot Console/recompile не вдалося отримати через затримку main thread. `unity status` востаннє показував Editor `ready`, але HDRP shader compilation після останньої правки НЕ підтверджена. Є попередні HDRP/Lit out-of-memory повідомлення; це також не верифіковано як пов'язане з цією зміною.
+- Наступний крок: відкрити/переімпортувати обидва terrain shaders у Unity, перевірити актуальні Console записи й на матеріалі з кожного pipeline підтвердити відображення полів Inspector. Візуальне змішування шарів, силу normal/roughness і збереження додаткових шарів після reimport ще не перевірено.
+
+### Follow-up 2026-11-23: прибрано перевищення texture binding limit у Terrain
+
+- Цей follow-up supersedes попередній UI опис про окремий `Mask Override`. Видалено 16 масочних 2D bindings у URP і HDRP. Імпортовані шари й далі читають штатні packed splat maps. Для вручну доданого шару покриття береться з альфа-каналу Albedo; Inspector показує `Albedo (Alpha = Mask)`. `_HasAlbedoN` відрізняє непризначену текстуру від white fallback. Імпортер виставляє прапорець для native texture та копіює його разом із доданим шаром під час повторного імпорту.
+- Збережено 16 слотів Albedo, Normal і Roughness, обидва strength слайдери та max 16 шарів. Статично пораховано унікальні HLSL bindings: URP 56, HDRP 55 (до фіксу Unity показував 72/71; пристрій повідомляє ліміт 64). `git diff --check` пройшов. Тести не запускалися.
+- Відкритий `PW Snow Story` (`6000.0.60f1`, PID 31160, локальний пакет із цього checkout) через `get_shader_properties` ще віддав старі `_LayerMask`/`_UseMaskOverride`, отже Unity не підхопив новий опис shader properties. CLI `Assets/Refresh` завершився без відповіді приблизно за 10 секунд; його не повторювали. Попередній `console_status` (cursor 2011, compilationFailed=false, compiling=false) був до спроби refresh, тому успішне HDRP перекомпілювання та зникнення попередження в Console НЕ підтверджені. Не очищав Console.
+- Наступний крок: коли Editor відповідає, переімпортувати обидва shader assets і перевірити актуальні properties та нові Console записи від cursor 2011; за потреби перезапустити сам Editor лише якщо користувач готовий закрити його стан. Тепер вручну додані шари мають використовувати альфу Albedo як маску.

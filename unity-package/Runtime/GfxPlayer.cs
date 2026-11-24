@@ -36,6 +36,7 @@ namespace SilverEcho.ForsakenWorld
         private Camera shakeCamera;
         private bool hasShake;
         private GfxParticleSim.EmissionRandom particleRandom;
+        private GfxRenderSlotOrder renderSlotOrder;
         private int activeParticleSeed;
         private float lastParticleTime;
 
@@ -180,7 +181,7 @@ namespace SilverEcho.ForsakenWorld
             driver.Restart();
             timeMs = 0f;
             ResetParticlePlayback();
-            ResetSpritePlayback();
+            ResetElementPlayback();
             ClearShake();
         }
 
@@ -190,7 +191,7 @@ namespace SilverEcho.ForsakenWorld
             driver.PlayerSeek(realMs);
             timeMs = driver.GfxTime;
             ResetParticlePlayback();
-            ResetSpritePlayback();
+            ResetElementPlayback();
             ClearShake();
         }
 
@@ -207,7 +208,11 @@ namespace SilverEcho.ForsakenWorld
             return driver.PlayerLengthMs();
         }
 
-        public void MarkHierarchyDirty() => hierarchyDirty = true;
+        public void MarkHierarchyDirty()
+        {
+            hierarchyDirty = true;
+            renderSlotOrder = null;
+        }
 
         public void OnEnable()
         {
@@ -239,12 +244,25 @@ namespace SilverEcho.ForsakenWorld
             TickInternal(0f, gfxStepMs);
         }
 
-        private void TickInternal(float dtMs, float? recordedGfxStepMs)
+        internal void TickEmbeddedFrame(float gfxTimeMs, float gfxStepMs, GfxParticleSim.EmissionRandom random)
+        {
+            TimeMs = gfxTimeMs;
+            TickInternal(0f, gfxStepMs, random);
+        }
+
+        private void TickInternal(float dtMs, float? recordedGfxStepMs,
+            GfxParticleSim.EmissionRandom sharedRandom = null)
         {
             EnsureDriver();
             SyncDriverFields();
             if (hierarchyDirty)
                 RefreshElements();
+            if (renderSlotOrder == null &&
+                (transform.parent == null || transform.parent.GetComponentInParent<GfxPlayer>(true) == null))
+            {
+                renderSlotOrder = new GfxRenderSlotOrder();
+                renderSlotOrder.RegisterInitial(transform);
+            }
 
             var cam = Camera.main;
             float[] gfxPos = null;
@@ -270,7 +288,7 @@ namespace SilverEcho.ForsakenWorld
             var t = driver.Tick(dtMs, gfxPos, camPos, camFwd, allowShake && cam != null, out shake);
             float? particleStep = recordedGfxStepMs ?? (timeManual ? (float?)null : Math.Max(0f, t - priorTime));
             timeMs = t;
-            if (particleStep.HasValue)
+            if (particleStep.HasValue && sharedRandom == null)
             {
                 if (particleRandom == null || activeParticleSeed != particleSeed || t < lastParticleTime)
                 {
@@ -298,13 +316,18 @@ namespace SilverEcho.ForsakenWorld
                     continue;
                 element.TimeManual = true;
                 if (particleStep.HasValue && element is GfxParticleDriver particle)
-                    particle.OnGfxPlaybackTick(t, a, particleStep.Value, particleRandom);
+                    particle.OnGfxPlaybackTick(t, a, particleStep.Value, sharedRandom ?? particleRandom);
                 else if (particleStep.HasValue && element is GfxSpriteDriver sprite)
                     sprite.OnGfxPlaybackTick(t, a, particleStep.Value, advanceSprite);
+                else if (particleStep.HasValue && element is GfxContainerDriver container)
+                    container.OnGfxPlaybackTick(t, a, particleStep.Value, advanceSprite, sharedRandom ?? particleRandom);
+                else if (particleStep.HasValue && element is GfxGridDriver grid)
+                    grid.OnGfxPlaybackTick(t, a, particleStep.Value, advanceSprite);
                 else
                     element.OnGfxTick(t, a);
             }
 
+            renderSlotOrder?.Apply(transform);
             ApplyShake(cam, shake);
         }
 
@@ -316,11 +339,17 @@ namespace SilverEcho.ForsakenWorld
                     particle.ResetParticlePlayback();
         }
 
-        private void ResetSpritePlayback()
+        private void ResetElementPlayback()
         {
             foreach (var element in elements)
+            {
                 if (element is GfxSpriteDriver sprite)
                     sprite.ResetPlayback();
+                else if (element is GfxContainerDriver container)
+                    container.ResetPlayback();
+                else if (element is GfxGridDriver grid)
+                    grid.ResetPlayback();
+            }
         }
 
         private void ApplyFace(float[] gfxPos, float[] camPos)
@@ -429,6 +458,9 @@ namespace SilverEcho.ForsakenWorld
                 {
                     var child = node.GetChild(i);
                     if (child == null || child.gameObject == null)
+                        continue;
+                    // A DummyEle copy is advanced only by the particle that owns it.
+                    if (child.GetComponent<GfxDummyParticlesDriver>() != null)
                         continue;
                     var driverComp = child.gameObject.GetComponent<GfxElementDriver>();
                     if (driverComp != null)

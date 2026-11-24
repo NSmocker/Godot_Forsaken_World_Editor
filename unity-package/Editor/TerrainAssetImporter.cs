@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
@@ -19,6 +20,20 @@ namespace SilverEcho.ForsakenWorld.Editor
             public int Areas, HiddenAreas;
             public long Vertices, Triangles;
             public readonly List<string> Warnings = new List<string>();
+        }
+
+        private readonly struct GroundTextureBinding
+        {
+            internal readonly Texture2D Texture;
+            internal readonly bool FlipV;
+            internal readonly bool IsSrgb;
+
+            internal GroundTextureBinding(Texture2D texture, bool flipV = false, bool isSrgb = false)
+            {
+                Texture = texture;
+                FlipV = flipV;
+                IsSrgb = isSrgb;
+            }
         }
 
         /// <summary>
@@ -69,28 +84,30 @@ namespace SilverEcho.ForsakenWorld.Editor
                 // Match Godot import_map: warn and skip unreadable subs instead of aborting the map.
                 string relativeDir = (Path.GetDirectoryName(file.RelativePath) ?? "").Replace('\\', '/');
                 EnsureFolder(folder);
-                var textures = new Texture2D[t.Textures.Length];
+                var texturePackages = TerrainTextureBuilder.FindTexturePackageFolders();
+                var textures = new GroundTextureBinding[t.Textures.Length];
                 var resolved = new bool[textures.Length];
-                Texture2D GroundTexture(int textureIndex)
-                {
-                    if (textureIndex < 0 || textureIndex >= textures.Length)
-                    {
-                        result.Warnings.Add("Invalid ground texture index: " + textureIndex);
-                        return null;
-                    }
-                    if (!resolved[textureIndex])
-                    {
-                        textures[textureIndex] = ImportGroundTexture(t.Textures[textureIndex], textureIndex,
-                            file, index, folder, result.Warnings);
-                        resolved[textureIndex] = true;
-                    }
-                    return textures[textureIndex];
-                }
                 var shader = AngelicaRenderPipeline.Find(HdrpShaderName, ShaderName);
                 if (shader == null)
                 {
                     result.Warnings.Add("Terrain shader '" + ShaderName + "' was not found.");
                     shader = Shader.Find("Hidden/InternalErrorShader");
+                }
+                GroundTextureBinding GroundTexture(int textureIndex)
+                {
+                    if (textureIndex < 0 || textureIndex >= textures.Length)
+                    {
+                        result.Warnings.Add("Invalid ground texture index: " + textureIndex);
+                        return default;
+                    }
+                    if (!resolved[textureIndex])
+                    {
+                        textures[textureIndex] = ImportGroundTexture(t.Textures[textureIndex], textureIndex,
+                            file, index, texturePackages, folder, shader != null && shader.name == HdrpShaderName,
+                            result.Warnings);
+                        resolved[textureIndex] = true;
+                    }
+                    return textures[textureIndex];
                 }
                 root = new GameObject(file.Name + "_Terrain");
                 int sectorCount = selectedSectors?.Count ?? t.Subs.Length;
@@ -159,15 +176,48 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        private static Texture2D ImportGroundTexture(string name, int textureIndex, GameDataFile map,
-            GameDataIndex index, string folder, List<string> warnings)
+        private static GroundTextureBinding ImportGroundTexture(string name, int textureIndex, GameDataFile map,
+            GameDataIndex index, string[] texturePackages, string folder, bool direct, List<string> warnings)
         {
-            var project = TerrainTextureBuilder.FindProjectTexture(name);
+            var packed = TerrainTextureBuilder.FindPackedTexture(name, texturePackages);
+            var project = packed ?? TerrainTextureBuilder.FindProjectTexture(name);
+            if (project != null && (packed != null || direct))
+            {
+                var linked = AssetDatabase.LoadAssetAtPath<Texture2D>(TerrainTextureBuilder.GetProjectAssetPath(project));
+                if (linked != null)
+                {
+                    // Unity's native DDS importer keeps file row zero at V=0.
+                    // TextureImporter images use Unity's bottom-up convention.
+                    bool flipV = !Path.GetExtension(project.FullPath).Equals(".dds", StringComparison.OrdinalIgnoreCase);
+                    return new GroundTextureBinding(linked, flipV, GraphicsFormatUtility.IsSRGBFormat(linked.graphicsFormat));
+                }
+            }
+
             var source = project ?? ResolveTexture(index, map.RelativePath, name);
             if (source == null)
             {
                 warnings.Add("Ground texture not found: " + name);
-                return null;
+                return default;
+            }
+
+            if (direct)
+            {
+                DdsDocument header = null;
+                try
+                {
+                    if (TextureFileFormat.DetectFile(source.FullPath) == ".dds")
+                        header = new DdsHeaderParser().ParseFile(source.FullPath);
+                    var imported = AssembledTextureImporter.ImportOrUpdate(source.FullPath, source.RelativePath, header);
+                    if (imported.Texture != null)
+                        return new GroundTextureBinding(imported.Texture, !imported.UsedNativeDds,
+                            GraphicsFormatUtility.IsSRGBFormat(imported.Texture.graphicsFormat));
+                    warnings.Add("Ground texture could not be loaded: " + name + " (" + imported.Error + ")");
+                }
+                catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
+                {
+                    warnings.Add("Ground texture could not be loaded: " + name + " (" + e.Message + ")");
+                }
+                return default;
             }
 
             Texture2D texture = null;
@@ -178,12 +228,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 EnsureFolder(directory);
                 var saved = Save(texture, directory + "/" + Sanitize(Path.GetFileNameWithoutExtension(name)) + ".asset");
                 texture = null;
-                return saved;
+                return new GroundTextureBinding(saved);
             }
             catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
             {
                 warnings.Add("Ground texture could not be loaded: " + name + " (" + e.Message + ")");
-                return null;
+                return default;
             }
             finally
             {
@@ -214,7 +264,7 @@ namespace SilverEcho.ForsakenWorld.Editor
 
         private static GameObject BuildSector(
             TerrainDocument terrain, int sector, Dictionary<long, TerrainBlock> blocks, TerrainMasks masks,
-            TerrainLightmap[] day, TerrainLightmap[] night, Func<int, Texture2D> groundTexture, Shader shader,
+            TerrainLightmap[] day, TerrainLightmap[] night, Func<int, GroundTextureBinding> groundTexture, Shader shader,
             string mapRelativePath, Result result)
         {
             int areasPerSide = terrain.AreasPerSubSide;
@@ -257,6 +307,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 var renderer = areaObject.AddComponent<MeshRenderer>();
                 renderer.sharedMaterial = material;
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = true;
                 areaObject.transform.SetParent(sectorObject.transform, false);
                 result.Vertices += mesh.vertexCount;
                 result.Triangles += data.Indices.Length / 3;
@@ -289,7 +340,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         }
 
         private static Material BuildMaterial(TerrainDocument t, TerrainMasks masks, int area, int sub,
-            Func<int, Texture2D> groundTexture, Shader shader, string prefix, TerrainMeshData mesh,
+            Func<int, GroundTextureBinding> groundTexture, Shader shader, string prefix, TerrainMeshData mesh,
             TerrainLightmap dayMap, TerrainLightmap nightMap, List<string> warnings)
         {
             var entries = masks.Areas != null && area >= 0 && area < masks.Areas.Length && masks.Areas[area] != null
@@ -311,52 +362,110 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (shader == null)
                 throw new InvalidOperationException("No shader for material.");
 
+            string materialPath = prefix + ".mat";
+            var previousMaterial = GameDataAssetBatch.Load(materialPath) as Material;
+            bool direct = shader.name == HdrpShaderName && shader.FindPropertyIndex(TerrainMaskImages.DirectLayersProperty) >= 0;
+            if (direct && TerrainMaskImages.UsesDirectLayers(previousMaterial))
+            {
+                AngelicaTerrainLayerBindings.Apply(previousMaterial);
+                return previousMaterial;
+            }
+
             Texture2D parameters = null;
             Texture2D height = null;
             var splats = new Texture2D[4];
             Material mat = null;
             try
             {
-                parameters = new Texture2D(MaxLayers, 1, TextureFormat.RGBAFloat, false, true)
+                if (!direct)
                 {
-                    name = "Parameters",
-                    wrapMode = TextureWrapMode.Clamp,
-                    filterMode = FilterMode.Point
-                };
+                    parameters = new Texture2D(MaxLayers, 1, TextureFormat.RGBAFloat, false, true)
+                    {
+                        name = "Parameters",
+                        wrapMode = TextureWrapMode.Clamp,
+                        filterMode = FilterMode.Point
+                    };
+                    for (int i = 0; i < entries.Length; i++)
+                    {
+                        var layer = ResolveLayer(masks, entries[i].LayerIndex);
+                        parameters.SetPixel(i, 0, new Color(i, layer.UScale, layer.VScale, layer.Axis));
+                    }
+                    parameters.Apply(false, false);
+                    height = BuildHeightMap(mesh, t.MaskGrid);
+                    PackSplats(masks, entries, splats);
+                    TerrainMaskImages.Publish(prefix, masks, entries, splats);
+                }
+                int previousSourceCount = previousMaterial != null && previousMaterial.HasProperty("_SourceLayerCount")
+                    ? Mathf.Clamp(Mathf.RoundToInt(previousMaterial.GetFloat("_SourceLayerCount")), 0, MaxLayers)
+                    : 0;
+                int previousLayerCount = previousMaterial != null && previousMaterial.HasProperty("_LayerCount")
+                    ? Mathf.Clamp(Mathf.RoundToInt(previousMaterial.GetFloat("_LayerCount")), 1, MaxLayers)
+                    : entries.Length;
+                bool hasLayerCountOverride = previousSourceCount > 0 && previousLayerCount != previousSourceCount;
+                int layerCount = hasLayerCountOverride ? previousLayerCount : entries.Length;
+                mat = new Material(shader) { name = Path.GetFileName(prefix) };
+                if (direct)
+                {
+                    mat.SetFloat(TerrainMaskImages.DirectLayersProperty, 1f);
+                    for (int i = 1; i < entries.Length; i++)
+                    {
+                        string property = TerrainMaskImages.MaskProperty(i);
+                        var mask = previousMaterial != null && previousMaterial.HasProperty(property)
+                            ? previousMaterial.GetTexture(property) : null;
+                        mat.SetTexture(property, mask != null ? mask : TerrainMaskImages.ImportDirectMask(prefix, masks, entries, i));
+                    }
+                }
+                // Shader slots are local to this mask area. The TRN2 table can have
+                // hundreds of entries, and one texture can be projected on several axes.
+                int flipLayers = 0;
+                int srgbLayers = 0;
                 for (int i = 0; i < entries.Length; i++)
                 {
                     var layer = ResolveLayer(masks, entries[i].LayerIndex);
-                    parameters.SetPixel(i, 0, new Color(
-                        i, layer.UScale, layer.VScale, layer.Axis));
+                    int textureIndex = layer.TextureIndex;
+                    var binding = groundTexture(textureIndex);
+                    mat.SetVector("_LayerMapping" + i, new Vector4(layer.UScale, layer.VScale, layer.Axis, 0f));
+                    mat.SetFloat("_HasAlbedo" + i, binding.Texture != null ? 1f : 0f);
+                    if (binding.Texture == null) continue;
+                    mat.SetTexture("_Layer" + i, binding.Texture);
+                    if (binding.FlipV) flipLayers |= 1 << i;
+                    if (binding.IsSrgb) srgbLayers |= 1 << i;
                 }
-                parameters.Apply(false, false);
-
-                height = BuildHeightMap(mesh, t.MaskGrid);
-                PackSplats(masks, entries, splats);
-                mat = new Material(shader) { name = Path.GetFileName(prefix) };
-                // Shader slots are local to this mask area. The TRN2 table can have
-                // hundreds of entries, and one texture can be projected on several axes.
-                for (int i = 0; i < entries.Length; i++)
-                {
-                    int textureIndex = ResolveLayer(masks, entries[i].LayerIndex).TextureIndex;
-                    var texture = groundTexture(textureIndex);
-                    if (texture != null)
-                        mat.SetTexture("_Layer" + i, texture);
-                }
+                mat.SetFloat("_FlipLayers", flipLayers);
+                mat.SetFloat("_SrgbLayers", srgbLayers);
                 for (int i = 0; i < splats.Length; i++)
                 {
                     if (splats[i] == null) continue;
                     mat.SetTexture("_Splat" + i, Save(splats[i], prefix + "_Splat" + i + ".asset"));
                     splats[i] = null;
                 }
-                mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
-                mat.SetTexture("_HeightMap", Save(height, prefix + "_Height.asset")); height = null;
+                if (!direct)
+                {
+                    mat.SetTexture("_LayerParams", Save(parameters, prefix + "_Parameters.asset")); parameters = null;
+                    mat.SetTexture("_HeightMap", Save(height, prefix + "_Height.asset")); height = null;
+                }
                 SaveLightmap(mat, dayMap, "_Lightmap", "_UseLightmap", prefix, warnings);
                 SaveLightmap(mat, nightMap, "_NightLightmap", "_UseNightLightmap", prefix, warnings);
-                mat.SetFloat("_LayerCount", entries.Length);
+                mat.SetFloat("_LayerCount", layerCount);
+                mat.SetFloat("_SourceLayerCount", entries.Length);
+                if (previousMaterial != null)
+                {
+                    int preserveSourceSlots = Math.Min(entries.Length,
+                        previousSourceCount > 0 ? previousSourceCount : entries.Length);
+                    for (int i = 0; i < preserveSourceSlots; i++)
+                        CopyLayerMaterialSettings(previousMaterial, mat, i, i, false);
+
+                    int previousExtraCount = previousSourceCount > 0
+                        ? Math.Max(0, previousLayerCount - previousSourceCount)
+                        : 0;
+                    int extraCount = Math.Min(Math.Max(0, layerCount - entries.Length), previousExtraCount);
+                    for (int i = 0; i < extraCount; i++)
+                        CopyLayerMaterialSettings(previousMaterial, mat, previousSourceCount + i, entries.Length + i, true);
+                }
                 mat.SetFloat("_MinHeight", t.Subs[sub].MinHeight);
                 mat.SetFloat("_Brightness", 1f);
-                var saved = Save(mat, prefix + ".mat");
+                if (direct) AngelicaTerrainLayerBindings.Apply(mat);
+                var saved = Save(mat, materialPath);
                 mat = null;
                 return saved;
             }
@@ -368,6 +477,40 @@ namespace SilverEcho.ForsakenWorld.Editor
                 for (int i = 0; i < splats.Length; i++)
                     if (splats[i] != null) Object.DestroyImmediate(splats[i]);
             }
+        }
+
+        private static void CopyLayerMaterialSettings(Material source, Material destination, int sourceIndex,
+            int destinationIndex, bool copyAlbedo)
+        {
+            string sourceSuffix = sourceIndex.ToString();
+            string destinationSuffix = destinationIndex.ToString();
+            if (copyAlbedo)
+            {
+                CopyTexture(source, destination, "_Layer" + sourceSuffix, "_Layer" + destinationSuffix);
+                CopyFloat(source, destination, "_HasAlbedo" + sourceSuffix, "_HasAlbedo" + destinationSuffix);
+            }
+            CopyTexture(source, destination, "_Normal" + sourceSuffix, "_Normal" + destinationSuffix);
+            CopyTexture(source, destination, "_Roughness" + sourceSuffix, "_Roughness" + destinationSuffix);
+            CopyFloat(source, destination, "_HasNormal" + sourceSuffix, "_HasNormal" + destinationSuffix);
+            CopyFloat(source, destination, "_HasRoughness" + sourceSuffix, "_HasRoughness" + destinationSuffix);
+            CopyFloat(source, destination, "_NormalStrength" + sourceSuffix, "_NormalStrength" + destinationSuffix);
+            CopyFloat(source, destination, "_RoughnessStrength" + sourceSuffix, "_RoughnessStrength" + destinationSuffix);
+            if (copyAlbedo && source.HasProperty("_LayerMapping" + sourceSuffix) &&
+                destination.HasProperty("_LayerMapping" + destinationSuffix))
+                destination.SetVector("_LayerMapping" + destinationSuffix,
+                    source.GetVector("_LayerMapping" + sourceSuffix));
+        }
+
+        private static void CopyTexture(Material source, Material destination, string from, string to)
+        {
+            if (source.HasProperty(from) && destination.HasProperty(to))
+                destination.SetTexture(to, source.GetTexture(from));
+        }
+
+        private static void CopyFloat(Material source, Material destination, string from, string to)
+        {
+            if (source.HasProperty(from) && destination.HasProperty(to))
+                destination.SetFloat(to, source.GetFloat(from));
         }
 
         private static void SaveLightmap(Material material, TerrainLightmap source, string property,

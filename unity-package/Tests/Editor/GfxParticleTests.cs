@@ -7,6 +7,35 @@ namespace SilverEcho.ForsakenWorld.Tests
 {
     public sealed class GfxParticleTests
     {
+        [Test]
+        public void ScreenWarpStrengthUsesUnrotatedHalfExtentsAndFade()
+        {
+            var strength = GfxRuntimeParticleBatch.ScreenWarpStrength(new Vector2(.25f, .125f), .8f);
+            Assert.AreEqual(.15f, strength.x, 1e-6f);
+            Assert.AreEqual(.075f, strength.y, 1e-6f);
+            Assert.AreEqual(-Vector2.one, GfxRuntimeParticleBatch.ScreenWarpStrength(new Vector2(.48f, .1f), 1f));
+        }
+
+        [Test]
+        public void UnboundPlaybackRetainsBirthPositionAndSpreadsNewBirthsAlongEmitterTravel()
+        {
+            var parameters = new GfxParticleParams
+            {
+                SystemId = "120", IsBind = false, EmissionRate = 20f,
+                TTL = 2f, Speed = 0f
+            };
+            var sim = new GfxParticleSim(parameters, null, null);
+            var origin = new GfxParticleEmitterState { Pos = GfxMath.Vec3Zero() };
+            var moved = new GfxParticleEmitterState { Pos = GfxMath.Vec3(10f, 0f, 0f) };
+            var first = sim.Advance(100f, 100f, 0f, 0f, 0f, 1, 0f, true, null, worldParent: origin);
+            Assert.AreEqual(2, first.Length);
+
+            var second = sim.Advance(200f, 100f, 0f, 0f, 0f, 1, 0f, true, null, worldParent: moved);
+            Assert.AreEqual(4, second.Length);
+            CollectionAssert.AreEqual(new[] { 0f, 0f, 5f, 10f },
+                System.Array.ConvertAll(second, particle => particle.Pos[0]));
+        }
+
         private const string PointGfx =
             "MOXTVersion: 92\n" +
             "DedaultScale: 1\n" +
@@ -292,6 +321,22 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void SurfaceEllipsoidsConsumeTwoDirectionSamplesAndKeepTheSharedSequence()
+        {
+            var random = new GfxParticleSim.EmissionRandom(1);
+            GfxParticleSlot Birth(bool surface) => new GfxParticleSim(new GfxParticleParams
+            {
+                SystemId = "123", IsSurface = surface, IsBind = true, EmissionRate = 20f,
+                Quota = 1, AreaSize = GfxMath.Vec3(2f, 2f, 2f), ScaleMin = 0f, ScaleMax = 1f, Angle = .5f
+            }, null, null).Advance(50f, 50f, 0f, 0f, 0f, 1, 0f, true, random)[0];
+
+            var surface = Birth(true);
+            Assert.AreEqual(1f, GfxMath.Length3(surface.Pos), 0.000001f);
+            Assert.AreEqual(-1f, GfxMath.Dot3(surface.Pos, surface.Move), 0.000001f);
+            Assert.AreEqual(.5850093f, Birth(false).Size, 0.000001f);
+        }
+
+        [Test]
         public void CylinderBirthConsumesTheSameCrtStreamAsTheNextEllipsoid()
         {
             var random = new GfxParticleSim.EmissionRandom(1);
@@ -310,6 +355,187 @@ namespace SilverEcho.ForsakenWorld.Tests
             Assert.AreEqual(-0.24423963f, ellipsoid.Pos[0], 0.000001f);
             Assert.AreEqual(0.06332591f, ellipsoid.Pos[1], 0.000001f);
             Assert.AreEqual(0.14236885f, ellipsoid.Pos[2], 0.000001f);
+        }
+
+        [Test]
+        public void PointAndCurveShareCrtSamplesAndCurveAtlasAdvancesOncePerTick()
+        {
+            var random = new GfxParticleSim.EmissionRandom(1);
+            var white = GfxMath.ColorWhite();
+            var point = new GfxParticleSim(new GfxParticleParams
+            {
+                SystemId = "120", Quota = 1, EmissionRate = 20f, ScaleMin = 0f, RotMax = 1f,
+                ColorMin = white, ColorMax = white
+            }, null, null);
+            var pointSlot = point.Advance(50f, 50f, 0f, 0f, 0f, 1, 0f, true, random)[0];
+            Assert.AreEqual(41f / 32767f, pointSlot.Size, 0.000001f);
+            Assert.AreEqual(18467f / 32767f, pointSlot.BillboardAngle, 0.000001f);
+
+            var curve = new GfxParticleSim(new GfxParticleParams
+            {
+                SystemId = "125", Quota = 1, EmissionRate = 20f, ScaleMin = 0f, RotMax = 1f,
+                ColorMin = white, ColorMax = white, InitRandomTexture = true, IsUseParUV = true,
+                TexCol = 4, TexRow = 4, TexInterval = 75f,
+                CurvePoints = new[] { GfxMath.Vec3Zero(), GfxMath.Vec3(1f, 0f, 0f) },
+                CurveRatios = new[] { 0f, 1f }
+            }, null, null);
+            var curveSlot = curve.Advance(160f, 160f, 0f, 0f, 0f, 1, 0f, true, random)[0];
+            Assert.AreEqual(6334f / 32767f, curveSlot.Size, 0.000001f);
+            Assert.AreEqual(26500f / 32767f, curveSlot.BillboardAngle, 0.000001f);
+            Assert.AreEqual(19169f / 32767f, curveSlot.Pos[0], 0.000001f);
+            Assert.AreEqual(9f, curveSlot.Frame);
+            Assert.AreEqual(10f, curve.Advance(170f, 10f, 0f, 0f, 0f, 1, 0f, true, random)[0].Frame);
+            Assert.AreEqual(29358, random.NextInt());
+        }
+
+        [Test]
+        public void ParticleScaleAffectorsApplyTheWholeTickAtTheirSharedBoundary()
+        {
+            var sim = new GfxParticleSim(new GfxParticleParams { Quota = 1, EmissionRate = 20f }, null, new[]
+            {
+                new GfxCtrlSpec { Type = 106, Start = 0f, End = .3f, ScaleChange = new[] { -1.5f, .01f, 9999f } },
+                new GfxCtrlSpec { Type = 106, Start = .3f, End = -1f, ScaleChange = new[] { -3f, .01f, 9999f } }
+            });
+            GfxParticleSlot[] slots = null;
+            for (int tick = 1; tick <= 8; tick++)
+                slots = sim.Advance(tick * 50f, 50f, 0f, 0f, 0f, 1, 0f, true);
+            Assert.AreEqual(.1f, slots[0].Size, 0.000001f);
+        }
+
+        [Test]
+        public void DummyCopyInitializationUsesBirthOrderAndRecyclesExpiredPoolIndices()
+        {
+            var parameters = new GfxParticleParams
+            {
+                SystemId = "120", DummyEle = "child", EmissionRate = 40f, TTL = .1f,
+                ScaleMin = 0f, ScaleMax = 1f, ColorMin = GfxMath.ColorWhite(), ColorMax = GfxMath.ColorWhite()
+            };
+            var random = new GfxParticleSim.EmissionRandom(1);
+            var initialized = new List<int>();
+            var sim = new GfxParticleSim(parameters, null, null);
+
+            GfxParticleSlot[] Tick(float time) => sim.Advance(time, 50f, 0f, 0f, 0f, 1, 0f, true, random,
+                index =>
+                {
+                    initialized.Add(index);
+                    random.NextInt();
+                });
+            var slots = Tick(50f);
+            Assert.AreEqual(41f / 32767f, slots[0].Size, 0.000001f);
+            Assert.AreEqual(26500f / 32767f, slots[1].Size, 0.000001f);
+            Tick(100f);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2, 3 }, initialized);
+            Tick(150f);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2, 3, 4, 0 }, initialized);
+        }
+
+        [Test]
+        public void CurveEmitterDoesNotOffsetBirthsByItsOwnCurveController()
+        {
+            var path = GfxCurvePath.GenPath(new[] { GfxMath.Vec3(2f, 0f, 0f),
+                GfxMath.Vec3(3f, 0f, 0f), GfxMath.Vec3(4f, 0f, 0f) });
+            var sim = new GfxParticleSim(new GfxParticleParams
+            {
+                SystemId = "125", IsBind = true, EmissionRate = 20f, Quota = 1,
+                CurvePoints = path.Points, CurveRatios = path.Ratios
+            }, null, null, new[] { new GfxCtrlSpec { Type = 110, CurvePath = path } });
+
+            var slot = sim.Advance(50f, 50f, 0f, 0f, 0f, 1, 0f, true, new GfxParticleSim.EmissionRandom(1))[0];
+            Assert.That(slot.Pos[0], Is.InRange(2f, 4f));
+            Assert.AreEqual(0f, sim.EmitterState(.05f).Pos[0]);
+        }
+
+        [Test]
+        public void ParticleAtlasFrameCountsRowsFromTheUpperEdge()
+        {
+            Assert.AreEqual(new Rect(0f, .75f, .5f, .25f), GfxRuntimeParticleBatch.FrameUv(0, 2, 4));
+            Assert.AreEqual(new Rect(.5f, .25f, .5f, .25f), GfxRuntimeParticleBatch.FrameUv(5, 2, 4));
+            Assert.AreEqual(new Rect(.5f, 0f, .5f, .25f), GfxRuntimeParticleBatch.FrameUv(-1, 2, 4));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void WorldParticleUsesNativeQuadCornersAndTextureCoordinates(bool facing)
+        {
+            var root = new GameObject("particle space");
+            var batch = new GfxRuntimeParticleBatch();
+            try
+            {
+                var particle = new GfxRenderedParticle
+                {
+                    Kind = facing ? GfxRuntimeParticleKind.Stretch : GfxRuntimeParticleKind.Oriented,
+                    Orientation = Quaternion.identity,
+                    Move = Vector3.right,
+                    HalfWidth = 2f,
+                    HalfHeight = 1f,
+                    OrgCoefX = .5f,
+                    OrgCoefY = -.5f,
+                    Uv = new Rect(.25f, .5f, .25f, .5f)
+                };
+                batch.Set(new[] { particle }, 1);
+                batch.Rebuild(root.transform, null);
+
+                var vertices = batch.Mesh.vertices;
+                var sign = facing ? -1f : 1f;
+                Assert.AreEqual(new Vector3(-1f, .5f, 0f) * sign, vertices[0]);
+                Assert.AreEqual(new Vector3(3f, .5f, 0f) * sign, vertices[1]);
+                Assert.AreEqual(new Vector3(-1f, -1.5f, 0f) * sign, vertices[2]);
+                Assert.AreEqual(new Vector3(3f, -1.5f, 0f) * sign, vertices[3]);
+                CollectionAssert.AreEqual(new[]
+                {
+                    new Vector2(.25f, .5f), new Vector2(.25f, 1f),
+                    new Vector2(.5f, .5f), new Vector2(.5f, 1f)
+                }, batch.Mesh.uv);
+            }
+            finally
+            {
+                batch.Release();
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [TestCase(false, GfxRuntimeParticleKind.Billboard)]
+        [TestCase(true, GfxRuntimeParticleKind.Billboard)]
+        [TestCase(false, GfxRuntimeParticleKind.Oriented)]
+        [TestCase(true, GfxRuntimeParticleKind.Oriented)]
+        [TestCase(false, GfxRuntimeParticleKind.Stretch)]
+        [TestCase(true, GfxRuntimeParticleKind.Stretch)]
+        public void ParticleUsesDirect3D9PixelCenter(bool orthographic, GfxRuntimeParticleKind kind)
+        {
+            var root = new GameObject("particle space");
+            var cameraObject = new GameObject("camera");
+            var target = new RenderTexture(512, 256, 0);
+            var batch = new GfxRuntimeParticleBatch();
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.targetTexture = target;
+                camera.orthographic = orthographic;
+                var particle = new GfxRenderedParticle
+                {
+                    Kind = kind, Position = new Vector3(1f, 0f, 4f),
+                    Orientation = Quaternion.Euler(0f, 30f, 0f), Move = new Vector3(1f, 0f, 1f),
+                    HalfWidth = .2f, HalfHeight = .3f
+                };
+                batch.Set(new[] { particle }, 1);
+                batch.Rebuild(root.transform, camera);
+                var unshifted = batch.Mesh.vertices;
+                batch.Rebuild(root.transform, camera, matchDirect3D9PixelCenter: true);
+                var vertices = batch.Mesh.vertices;
+                for (var i = 0; i < vertices.Length; i++)
+                {
+                    var delta = camera.WorldToScreenPoint(vertices[i]) - camera.WorldToScreenPoint(unshifted[i]);
+                    Assert.AreEqual(.5f, delta.x, .0001f);
+                    Assert.AreEqual(-.5f, delta.y, .0001f);
+                }
+            }
+            finally
+            {
+                batch.Release();
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(root);
+            }
         }
 
         [Test]

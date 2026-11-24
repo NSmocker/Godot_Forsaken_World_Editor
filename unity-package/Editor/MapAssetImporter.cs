@@ -1544,7 +1544,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                                     string.IsNullOrEmpty(chunk.TextureName) ? moxRelative : chunk.TextureName))
                             };
                             material.SetFloat("_AlphaRef", BuildingAssetImporter.DefaultAlphaRef);
-                            material.SetFloat("_Brightness", BuildingAssetImporter.DefaultBrightness);
+                            material.SetFloat("_Brightness", 1f);
                             if (material.HasProperty("_Cull"))
                                 material.SetFloat("_Cull", (float)CullMode.Off);
                             GameDataFile textureFile;

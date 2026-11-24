@@ -152,6 +152,49 @@ namespace SilverEcho.ForsakenWorld.Tests
         public void ProjectGroundTextureLookupRejectsNonRelativePaths(string path)
         {
             Assert.IsNull(TerrainTextureBuilder.FindProjectTexture(path));
+            Assert.IsNull(TerrainTextureBuilder.FindPackedTexture(path, Array.Empty<string>()));
+        }
+
+        [TestCase("textures.pck")]
+        [TestCase("textures . pck")]
+        public void GroundMaterialLinksExactPackedTextureWithoutCopyingIt(string folderName)
+        {
+            string fixture = "Assets/" + mapFile.Name;
+            string relative = "Textures/Maps/" + mapFile.Name + "/ground.dds";
+            string asset = fixture + "/" + folderName + "/" + relative.Substring("Textures/".Length);
+            string wrongDirectory = fixture + "/" + folderName + "/ground.dds";
+            string legacy = AssembledTextureImporter.GetTextureAssetPath(relative);
+            var dds = DdsHeaderParserTests.BuildDds(4, 4, "DXT1", 1, 8);
+            dds[129] = 248;
+            try
+            {
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(legacy), dds);
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(wrongDirectory), dds);
+                WriteFile(AngelicaAssetFolders.AssetPathToAbsolute(asset), dds);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                WriteFile(Path.Combine(sourceRoot, relative), new byte[] { 0 });
+                File.WriteAllBytes(mapFile.FullPath, TerrainParserTests.BuildTrn2(
+                    width: 4, length: 4, subRows: 2, subColumns: 2, textures: 1, textureName: relative.Replace('/', '\\')));
+                index.Scan();
+
+                var graph = new GameDataDependencyGraph(index, decoder);
+                graph.AddRoot(mapFile.FullPath);
+                Assert.IsFalse(graph.ImportOrder.Any(node => node.File.Extension == "dds"));
+                Assert.IsFalse(graph.Roots.Single().Warnings.Any(w => w.Contains("Ground texture")));
+
+                var result = TerrainAssetImporter.Import(mapFile, index, decoder, false, selectedSectorIndices: new[] { 0 });
+                Assert.IsFalse(result.Warnings.Any(w => w.Contains("Ground texture")), string.Join("\n", result.Warnings));
+                var terrain = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabPath);
+                var material = terrain.GetComponentInChildren<MeshRenderer>().sharedMaterial;
+                Assert.AreEqual(asset, AssetDatabase.GetAssetPath(material.GetTexture("_Layer0")));
+                Assert.IsFalse(AssetDatabase.IsValidFolder(TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath) + "/GroundTextures"));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TerrainAssetImporter.GetOutputFolder(mapFile.RelativePath));
+                AssetDatabase.DeleteAsset(fixture);
+                AssetDatabase.DeleteAsset(Path.GetDirectoryName(legacy).Replace('\\', '/'));
+            }
         }
 
         [TestCase(false)]

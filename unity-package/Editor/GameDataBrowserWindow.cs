@@ -1472,7 +1472,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
 
             EditorGUILayout.HelpBox(
-                "Import terrain Prefab writes mesh, splat, height and lightmap assets under " +
+                "Import terrain Prefab writes mesh, splat, height, lightmap and one grayscale PNG mask per overlay layer under " +
                 "Assets/ForsakenWorld/Imported/Maps/<map>/terrains/<sector>. Color textures stay linked to the imported DDS files. Import map Prefab also places " +
                 ".ecbsd-listed buildings, water, lights, ECModels, sounds, and GFX placeholders " +
                 "under Assets/ForsakenWorld/Imported/Maps (Godot import_map parity).",

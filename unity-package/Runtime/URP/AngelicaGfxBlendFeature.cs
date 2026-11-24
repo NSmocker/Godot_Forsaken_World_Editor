@@ -8,14 +8,16 @@ using UnityEngine.Rendering.Universal;
 namespace SilverEcho.ForsakenWorld
 {
     /// <summary>
-    /// Draws non-warp GFX sprites in the same encoded RGB space as Angelica's
+    /// Draws non-warp GFX in the same encoded RGB space as Angelica's
     /// SDR framebuffer. Assign them to layers reserved for this pass and remove
     /// those layers from the Universal Renderer asset's Transparent Layer Mask.
     /// </summary>
     public sealed class AngelicaGfxBlendFeature : ScriptableRendererFeature
     {
-        [Tooltip("Layers containing only non-warp Angelica GFX sprites and particles.")]
+        [Tooltip("Layers containing only non-warp Angelica GFX sprites, particles and trails.")]
         public LayerMask effectLayers;
+        [Tooltip("Separate layers for Warp particles. Remove them from the renderer's Transparent Layer Mask too.")]
+        public LayerMask warpLayers;
         [Tooltip("Assign the package's Angelica GFX Transfer shader for build inclusion.")]
         [SerializeField] private Shader transferShader;
         private Material transfer;
@@ -31,10 +33,13 @@ namespace SilverEcho.ForsakenWorld
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            if (effectLayers.value == 0 || (renderingData.cameraData.camera.cullingMask & effectLayers.value) == 0)
+            int visible = renderingData.cameraData.camera.cullingMask;
+            int effects = effectLayers.value & visible;
+            int warps = warpLayers.value & visible & ~effects;
+            if ((effects | warps) == 0)
                 return;
 
-            pass.Setup(effectLayers, transfer);
+            pass.Setup(effects, warps, transfer);
             renderer.EnqueuePass(pass);
         }
 
@@ -44,19 +49,23 @@ namespace SilverEcho.ForsakenWorld
         {
             private static readonly ShaderTagId EncodedTag = new ShaderTagId("AngelicaGfxEncoded");
             private static readonly ShaderTagId LinearTag = new ShaderTagId("SRPDefaultUnlit");
-            private FilteringSettings filter;
+            private static readonly ShaderTagId WarpTag = new ShaderTagId("AngelicaGfxWarp");
+            private static readonly int WarpSourceId = Shader.PropertyToID("_AngelicaGfxWarpSource");
+            private int effectLayers, warpLayers;
             private Material transfer;
 
             private sealed class DrawData
             {
                 public RendererListHandle Draws;
+                public TextureHandle WarpSource;
             }
 
-            public void Setup(LayerMask layers, Material material)
+            public void Setup(int effects, int warps, Material material)
             {
-                filter = new FilteringSettings(RenderQueueRange.transparent, layers);
+                effectLayers = effects;
+                warpLayers = warps;
                 transfer = material;
-                requiresIntermediateTexture = material != null;
+                requiresIntermediateTexture = material != null || warps != 0;
             }
 
             public override void RecordRenderGraph(RenderGraph graph, ContextContainer frameData)
@@ -70,13 +79,12 @@ namespace SilverEcho.ForsakenWorld
 
                 // An 8-bit buffer is the Angelica SDR destination. Keep the
                 // normal scene-linear shader when the camera needs HDR or MSAA.
-                bool encoded = transfer != null && !camera.isHdrEnabled &&
-                    !resources.isActiveTargetBackBuffer && depth.IsValid() &&
+                bool canCopyColor = !resources.isActiveTargetBackBuffer && depth.IsValid() &&
                     graph.GetTextureDesc(color).msaaSamples == MSAASamples.None &&
                     graph.GetTextureDesc(depth).msaaSamples == MSAASamples.None;
+                bool encoded = effectLayers != 0 && transfer != null && !camera.isHdrEnabled && canCopyColor;
                 var drawing = RenderingUtils.CreateDrawingSettings(encoded ? EncodedTag : LinearTag,
                     rendering, camera, lights, SortingCriteria.CommonTransparent);
-                var list = graph.CreateRendererList(new RendererListParams(rendering.cullResults, drawing, filter));
 
                 var target = color;
                 if (encoded)
@@ -89,8 +97,12 @@ namespace SilverEcho.ForsakenWorld
                     Transfer(graph, color, target, 0, "Encode Angelica GFX background");
                 }
 
-                using (var builder = graph.AddRasterRenderPass<DrawData>("Draw Angelica GFX group", out var data))
+                int regularLayers = canCopyColor ? effectLayers : effectLayers | warpLayers;
+                if (regularLayers != 0)
                 {
+                    var filter = new FilteringSettings(RenderQueueRange.transparent, regularLayers);
+                    var list = graph.CreateRendererList(new RendererListParams(rendering.cullResults, drawing, filter));
+                    using var builder = graph.AddRasterRenderPass<DrawData>("Draw Angelica GFX group", out var data);
                     data.Draws = list;
                     builder.UseRendererList(list);
                     builder.SetRenderAttachment(target, 0, AccessFlags.ReadWrite);
@@ -98,6 +110,33 @@ namespace SilverEcho.ForsakenWorld
                         builder.SetRenderAttachmentDepth(depth, AccessFlags.ReadWrite);
                     builder.SetRenderFunc(static (DrawData draw, RasterGraphContext context) =>
                         context.cmd.DrawRendererList(draw.Draws));
+                }
+
+                if (warpLayers != 0 && canCopyColor)
+                {
+                    // EndGlow snapshots the encoded SDR scene and completed GFX before DoWarps.
+                    var desc = graph.GetTextureDesc(target);
+                    desc.name = "Angelica GFX warp source";
+                    desc.clearBuffer = false;
+                    var source = graph.CreateTexture(desc);
+                    graph.AddCopyPass(target, source, passName: "Copy Angelica GFX warp source");
+
+                    var warpDraws = RenderingUtils.CreateDrawingSettings(WarpTag,
+                        rendering, camera, lights, SortingCriteria.CommonTransparent);
+                    var filter = new FilteringSettings(RenderQueueRange.transparent, warpLayers);
+                    using var builder = graph.AddRasterRenderPass<DrawData>("Draw Angelica particle warps", out var data);
+                    data.Draws = graph.CreateRendererList(new RendererListParams(rendering.cullResults, warpDraws, filter));
+                    data.WarpSource = source;
+                    builder.UseRendererList(data.Draws);
+                    builder.UseTexture(source, AccessFlags.Read);
+                    builder.SetRenderAttachment(target, 0, AccessFlags.ReadWrite);
+                    builder.SetRenderAttachmentDepth(depth, AccessFlags.Read);
+                    builder.AllowGlobalStateModification(true);
+                    builder.SetRenderFunc(static (DrawData draw, RasterGraphContext context) =>
+                    {
+                        context.cmd.SetGlobalTexture(WarpSourceId, draw.WarpSource);
+                        context.cmd.DrawRendererList(draw.Draws);
+                    });
                 }
 
                 if (encoded)
@@ -116,6 +155,7 @@ namespace SilverEcho.ForsakenWorld
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
                 var drawing = CreateDrawingSettings(LinearTag, ref renderingData, SortingCriteria.CommonTransparent);
+                var filter = new FilteringSettings(RenderQueueRange.transparent, effectLayers | warpLayers);
                 var parameters = new RendererListParams(renderingData.cullResults, drawing, filter);
                 using var commands = new CommandBuffer { name = "Draw Angelica GFX group" };
                 commands.DrawRendererList(context.CreateRendererList(ref parameters));

@@ -17,7 +17,8 @@ namespace SilverEcho.ForsakenWorld
             public int TriCount;
         }
 
-        public static BuildResult Build(GfxGridParams p, float[] positions, float[] colors)
+        public static BuildResult Build(GfxGridParams p, float[] positions, float[] colors,
+            GfxSpriteUvState? textureFrame = null)
         {
             var result = new BuildResult();
             if (p == null || p.W < 2 || p.H < 2)
@@ -34,6 +35,7 @@ namespace SilverEcho.ForsakenWorld
             var uvs = new Vector2[n];
             var denomU = Math.Max(1, w - 1);
             var denomV = Math.Max(1, h - 1);
+            var frame = textureFrame ?? GfxSpriteUvState.Identity;
             for (var r = 0; r < h; r++)
             {
                 for (var c = 0; c < w; c++)
@@ -54,13 +56,15 @@ namespace SilverEcho.ForsakenWorld
                     var v = (float)r / denomV;
                     if (p.UReverse) u = 1f - u;
                     if (p.VReverse) v = 1f - v;
+                    u = u * frame.ScaleU + frame.OffsetU;
+                    v = v * frame.ScaleV + frame.OffsetV;
                     if (p.UVExchg)
                     {
                         var tmp = u;
                         u = v;
                         v = tmp;
                     }
-                    uvs[i] = new Vector2(u, v);
+                    uvs[i] = new Vector2(u, 1f - v);
                 }
             }
 

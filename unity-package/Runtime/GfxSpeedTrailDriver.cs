@@ -12,6 +12,8 @@ namespace SilverEcho.ForsakenWorld
     [ExecuteAlways]
     public sealed class GfxSpeedTrailDriver : GfxElementDriver
     {
+        private static readonly int PixelCenterId = Shader.PropertyToID("_GfxGridRaster");
+
         [SerializeField] private GfxSpeedTrailParamsSerial paramsSerial =
             new GfxSpeedTrailParamsSerial();
         [SerializeField] private bool visualActive = true;
@@ -50,6 +52,7 @@ namespace SilverEcho.ForsakenWorld
                 trailParams.ZEnable,
                 gfx2dRender,
                 texture);
+            runtimeMaterial.renderQueue = AngelicaRenderPipeline.GfxTransparentQueue(trailParams.RenderLayer);
             meshRenderer.sharedMaterial = runtimeMaterial;
             meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
@@ -186,6 +189,12 @@ namespace SilverEcho.ForsakenWorld
                 meshRenderer = gameObject.GetComponent<MeshRenderer>();
                 if (meshRenderer == null)
                     meshRenderer = gameObject.AddComponent<MeshRenderer>();
+
+                // ID 110 submits world vertices to the same D3D9 rasterizer as grid decals.
+                var properties = new MaterialPropertyBlock();
+                meshRenderer.GetPropertyBlock(properties);
+                properties.SetFloat(PixelCenterId, 1f);
+                meshRenderer.SetPropertyBlock(properties);
             }
         }
     }
@@ -218,6 +227,7 @@ namespace SilverEcho.ForsakenWorld
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
+        public int RenderLayer;
         public int SrcBlend;
         public int DestBlend = 6;
         public int ElementIndex = 1;
@@ -252,6 +262,7 @@ namespace SilverEcho.ForsakenWorld
                 Warp = Warp,
                 ZEnable = ZEnable,
                 Priority = Priority,
+                RenderLayer = RenderLayer,
                 SrcBlend = SrcBlend,
                 DestBlend = DestBlend,
                 ElementIndex = ElementIndex,
@@ -292,6 +303,7 @@ namespace SilverEcho.ForsakenWorld
                 Warp = p.Warp,
                 ZEnable = p.ZEnable,
                 Priority = p.Priority,
+                RenderLayer = p.RenderLayer,
                 SrcBlend = p.SrcBlend,
                 DestBlend = p.DestBlend,
                 ElementIndex = p.ElementIndex,

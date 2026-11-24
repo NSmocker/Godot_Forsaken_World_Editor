@@ -30,6 +30,18 @@ namespace SilverEcho.ForsakenWorld
         private MeshRenderer meshRenderer;
         [NonSerialized] private Mesh runtimeMesh;
         private Material runtimeMaterial;
+        private GfxSpriteParams renderSettings;
+        private GfxKeypointPlaybackClock playbackClock;
+        private GfxSpriteTexturePlayback texturePlayback;
+        private GfxKeypointColorPlayback colorPlayback;
+        private float previousPlaybackTime;
+        private float shaderTime;
+        private MaterialPropertyBlock shaderProperties;
+        private static readonly int GridRasterId = Shader.PropertyToID("_GfxGridRaster");
+        private static readonly int GridTextureModeId = Shader.PropertyToID("_GfxGridTextureMode");
+        private static readonly int DissolveParametersId = Shader.PropertyToID("_GfxDissolveParameters");
+        [SerializeField] private GfxGridPixelConstant dissolveThreshold;
+        [SerializeField] private GfxGridPixelConstant dissolveEdge;
 
         public GfxGridParams Params => cachedParams;
         public Mesh RuntimeMesh => runtimeMesh;
@@ -52,14 +64,24 @@ namespace SilverEcho.ForsakenWorld
             gridW = gridParams.W;
             gridH = gridParams.H;
             SystemId = gridParams.SystemId;
+            renderSettings = gridParams.RenderSettings?.ToParams() ?? new GfxSpriteParams();
 
             EnsureComponents();
             runtimeMaterial = GfxTrailMaterialFactory.Create(
                 is2D ? "GridDecal2D" : "GridDecal",
                 additive: false,
-                zEnable: !gfx2dRender,
+                zEnable: renderSettings.ZEnable,
                 gfx2dRender,
                 texture);
+            GfxBlendFactors.ApplySlot(runtimeMaterial, renderSettings.SrcBlend, renderSettings.DestBlend,
+                renderSettings.ZEnable && !gfx2dRender, renderSettings.RenderLayer);
+            if (!is2D && renderSettings.Warp)
+            {
+                GfxWarpMaterial.Apply(runtimeMaterial, true);
+                if (runtimeMaterial.HasProperty("_WarpNormalIsSRGB") && texture != null)
+                    runtimeMaterial.SetFloat("_WarpNormalIsSRGB",
+                        UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat) ? 1f : 0f);
+            }
             meshRenderer.sharedMaterial = runtimeMaterial;
             meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
@@ -84,14 +106,10 @@ namespace SilverEcho.ForsakenWorld
 
         public override void OnGfxTick(float gfxTimeMs, float alpha)
         {
-            EnsureComponents();
-            GfxAlpha = alpha;
-            if (TimeManual)
-                TimeMs = gfxTimeMs;
-
-            var active = TimeManual ? TimeMs : gfxTimeMs;
+            ResetPlayback();
+            EnsureRenderSettings();
             var elementTime = GfxKeypointEval.ElementTime(
-                active,
+                gfxTimeMs,
                 GlobalLoopTime,
                 LocalStartTime,
                 LocalTotalTime,
@@ -100,6 +118,89 @@ namespace SilverEcho.ForsakenWorld
 
             var windowActive = IsEndless ||
                 (elementTime >= LocalStartTime && elementTime <= LocalTotalTime);
+            shaderTime = Math.Max(0f, elementTime - LocalStartTime);
+            ApplyVisual(gfxTimeMs, alpha, elementTime, windowActive,
+                GfxSpriteUvEval.Evaluate(renderSettings, Math.Max(0f, elementTime - LocalStartTime)));
+        }
+
+        internal void ResetPlayback()
+        {
+            playbackClock = null;
+            shaderTime = 0f;
+        }
+
+        internal void ConfigureDissolve(Texture diffuse, Texture mask,
+            GfxGridPixelConstant threshold, GfxGridPixelConstant edge)
+        {
+            dissolveThreshold = threshold;
+            dissolveEdge = edge;
+            if (runtimeMaterial == null || !runtimeMaterial.HasProperty("_GfxDissolve"))
+                return;
+            runtimeMaterial.SetFloat("_GfxDissolve", 1f);
+            if (diffuse != null)
+            {
+                runtimeMaterial.SetTexture("_BaseMap", diffuse);
+                runtimeMaterial.SetFloat("_GfxDissolveBaseIsRaw", IsSrgb(diffuse) ? 0f : 1f);
+            }
+            runtimeMaterial.SetTexture("_GfxDissolveMask", mask);
+            runtimeMaterial.SetFloat("_GfxDissolveMaskIsSRGB", IsSrgb(mask) ? 1f : 0f);
+
+            static bool IsSrgb(Texture texture) =>
+                UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat);
+        }
+
+        internal void OnGfxPlaybackTick(float gfxTimeMs, float alpha, float elapsedMs, bool advance)
+        {
+            EnsureRenderSettings();
+            if (playbackClock == null || Math.Abs(previousPlaybackTime - (gfxTimeMs - elapsedMs)) > 0.01f)
+            {
+                playbackClock = new GfxKeypointPlaybackClock();
+                texturePlayback = new GfxSpriteTexturePlayback();
+                colorPlayback = GfxKeypointColorPlayback.Create(GetKeypoints());
+                shaderTime = 0f;
+            }
+            previousPlaybackTime = gfxTimeMs;
+            var wasActive = playbackClock.Active;
+            var looped = advance && playbackClock.Tick(elapsedMs, LocalStartTime, LocalTotalTime,
+                RepeatCount, RepeatDelay, IsEndless);
+            if (looped)
+            {
+                if (renderSettings.ResetLoopEnd)
+                {
+                    shaderTime = 0f;
+                    texturePlayback.ResumeLoop();
+                }
+                colorPlayback?.Restart();
+            }
+            var span = Math.Max(0f, playbackClock.TimeMs - LocalStartTime);
+            if (advance && playbackClock.Active)
+            {
+                shaderTime += elapsedMs;
+                colorPlayback?.Tick(span, wasActive && !looped ? elapsedMs : span);
+            }
+            var uv = texturePlayback.Tick(renderSettings, elapsedMs, advance && playbackClock.Active);
+            ApplyVisual(gfxTimeMs, alpha, playbackClock.TimeMs, playbackClock.Active, uv, colorPlayback?.Color);
+        }
+
+        private void EnsureRenderSettings()
+        {
+            if (renderSettings != null)
+                return;
+            var source = RestoreAnimationSource();
+            renderSettings = cachedParams?.RenderSettings?.ToParams() ??
+                GfxSpriteParams.FromProperties(source?.Properties, SystemId);
+            if (cachedParams != null && source != null)
+                cachedParams.Colors = GfxGridParams.ReadVertexColors(source.Properties, cachedParams.VertCount);
+            renderSettings.UReverse = renderSettings.VReverse = renderSettings.UvExchange = false;
+        }
+
+        private void ApplyVisual(float gfxTimeMs, float alpha, float elementTime, bool windowActive,
+            GfxSpriteUvState uv, float[] playbackColor = null)
+        {
+            EnsureComponents();
+            GfxAlpha = alpha;
+            if (TimeManual)
+                TimeMs = gfxTimeMs;
             var keypoints = GetKeypoints();
             if (!windowActive || keypoints == null || keypoints.Count == 0 ||
                 cachedParams == null || cachedParams.W < 2 || cachedParams.H < 2)
@@ -108,21 +209,31 @@ namespace SilverEcho.ForsakenWorld
                 return;
             }
 
-            var state = GfxKeypointEval.Evaluate(
-                keypoints, Math.Max(0f, elementTime - LocalStartTime));
+            var span = Math.Max(0f, elementTime - LocalStartTime);
+            var state = GfxKeypointEval.Evaluate(keypoints, span);
             var sample = GfxGridEval.Evaluate(
                 cachedParams,
-                Math.Max(0f, elementTime - LocalStartTime),
-                state.Color);
+                span,
+                playbackColor ?? state.Color,
+                alpha,
+                !is2D && renderSettings.Warp);
             if (sample.Hidden)
             {
                 SetVisualActive(false);
                 return;
             }
 
-            var built = GfxGridMesh.Build(cachedParams, sample.Positions, sample.Colors);
+            var built = GfxGridMesh.Build(cachedParams, sample.Positions, sample.Colors, uv);
             ApplyMesh(built.Mesh);
             ApplyTransform(state);
+            shaderProperties ??= new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(shaderProperties);
+            shaderProperties.SetFloat(GridRasterId, is2D ? 0f : 1f);
+            shaderProperties.SetFloat(GridTextureModeId, renderSettings.TileMode ? 2f : 1f);
+            if (dissolveThreshold != null && dissolveEdge != null)
+                shaderProperties.SetVector(DissolveParametersId,
+                    new Vector4(dissolveThreshold.Evaluate(shaderTime), dissolveEdge.Evaluate(shaderTime), 0f, 0f));
+            meshRenderer.SetPropertyBlock(shaderProperties);
             SetVisualActive(true);
         }
 
@@ -132,28 +243,6 @@ namespace SilverEcho.ForsakenWorld
             var dir = state.Dir ?? GfxMath.QuatIdentity();
             if (!is2D && Math.Abs(state.Rad) > 0.000001f)
                 dir = GfxMath.MulQuat(dir, GfxMath.QuatFromAxisAngle(GfxMath.Vec3(0f, 0f, 1f), state.Rad));
-
-            if (!is2D && rotFromView)
-            {
-                // Approximate RotFromView: face camera when available.
-                var cam = Camera.main;
-                if (cam != null && cam.transform != null)
-                {
-                    var toCam = GfxMath.Sub3(
-                        new[] { cam.transform.position.x, cam.transform.position.y, cam.transform.position.z },
-                        pos);
-                    if (GfxMath.Length3(toCam) > 0.0001f)
-                    {
-                        var z = GfxMath.Normalize3(toCam);
-                        var up = GfxMath.Vec3(0f, 1f, 0f);
-                        var x = GfxMath.Normalize3(GfxMath.Cross3(up, z));
-                        if (GfxMath.Length3(x) < 0.0001f)
-                            x = GfxMath.Vec3(1f, 0f, 0f);
-                        var y = GfxMath.Cross3(z, x);
-                        dir = GfxMath.QuatFromAxes(x, y, z);
-                    }
-                }
-            }
 
             if (is2D)
             {
@@ -168,6 +257,15 @@ namespace SilverEcho.ForsakenWorld
 
             transform.localPosition = new Vector3(pos[0], pos[1], pos[2]);
             transform.localRotation = new Quaternion(dir[0], dir[1], dir[2], dir[3]);
+            if (!is2D && rotFromView && Camera.main is Camera camera)
+            {
+                // Fill_Verts_3D keeps the animated Z axis and turns the
+                // remaining axes toward the camera around that axis.
+                var axis = transform.forward;
+                var across = Vector3.Cross(transform.position - camera.transform.position, axis);
+                if (across.sqrMagnitude > 1e-12f)
+                    transform.rotation = Quaternion.LookRotation(Vector3.Cross(axis, across), -axis);
+            }
             var s = (!is2D && affByScl) ? state.Scale : 1f;
             if (Math.Abs(s) < 0.000001f)
                 s = 0.000001f;

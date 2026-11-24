@@ -38,6 +38,12 @@ namespace SilverEcho.ForsakenWorld
         private bool useInstancing;
         private readonly System.Collections.Generic.List<GfxDummyInstancedBatch> batches =
             new System.Collections.Generic.List<GfxDummyInstancedBatch>();
+        private readonly Dictionary<long, Slot> playbackSlots = new Dictionary<long, Slot>();
+        private readonly HashSet<long> liveParticles = new HashSet<long>();
+        private readonly Queue<Slot> freeSlots = new Queue<Slot>();
+        private readonly HashSet<int> initializedCopies = new HashSet<int>();
+        private GfxParticleSim.EmissionRandom initializationRandom;
+        private int randomDrawsPerCopy;
 
         [Serializable]
         private sealed class Slot
@@ -45,6 +51,8 @@ namespace SilverEcho.ForsakenWorld
             public GameObject Node;
             public GfxPlayer Gfx;
             public Transform GfxTransform;
+            [NonSerialized] public long ParticleId;
+            [NonSerialized] public float GfxTimeMs;
         }
 
         public string DummyElementName
@@ -85,7 +93,28 @@ namespace SilverEcho.ForsakenWorld
             Rebuild();
         }
 
-        public void Tick(GfxParticleSlot[] parts, float gfxAlpha, bool facing)
+        internal void InitializePlaybackCopy(int poolIndex, GfxParticleSim.EmissionRandom random)
+        {
+            EnsureBuilt();
+            if (initializationRandom != random)
+            {
+                initializationRandom = random;
+                initializedCopies.Clear();
+            }
+            if (kind != Kind.Container || !initializedCopies.Add(poolIndex))
+                return;
+            // The resource is already available via the dummy template.
+            // A3DGFXEx::Clone still calls the constructor, which seeds its
+            // render counter from CRT rand before any later emitter births.
+            for (int i = 0; i < randomDrawsPerCopy; i++)
+                random.NextInt();
+        }
+
+        public void Tick(GfxParticleSlot[] parts, float gfxAlpha, bool facing) =>
+            Tick(parts, gfxAlpha, facing, null, null);
+
+        internal void Tick(GfxParticleSlot[] parts, float gfxAlpha, bool facing, float? elapsedMs,
+            GfxParticleSim.EmissionRandom random)
         {
             EnsureBuilt();
             if (kind == Kind.None)
@@ -105,6 +134,15 @@ namespace SilverEcho.ForsakenWorld
                 parentScale = ls.x;
             }
 
+            if (elapsedMs.HasValue && kind == Kind.Container)
+            {
+                TickContainerSlots(parts ?? Array.Empty<GfxParticleSlot>(), gfxAlpha, facing, parentScale,
+                    elapsedMs.Value, random);
+                return;
+            }
+
+            if (playbackSlots.Count != 0)
+                ResetPlayback();
             for (var i = 0; i < slots.Count; i++)
             {
                 var s = slots[i];
@@ -118,58 +156,103 @@ namespace SilverEcho.ForsakenWorld
                     continue;
                 }
 
-                if (s.Node != null && !s.Node.activeSelf)
-                    s.Node.SetActive(true);
-
-                if (kind == Kind.Static)
-                    continue;
-
-                var ageMs = p.Age * 1000f * playSpeed;
-                if (s.Gfx != null)
-                {
-                    s.Gfx.TimeManual = true;
-                    s.Gfx.TimeMs = ageMs;
-                    s.Gfx.PlayerPaused = false;
-                    var a = Mathf.Clamp01(p.Color[3] * p.KeyAlpha * gfxAlpha);
-                    s.Gfx.Alpha = a;
-                    // The emitter owns the slot clock; do not also tick it via Update.
-                    s.Gfx.enabled = false;
-                }
-
-                var size = p.Size;
-                Quaternion rot;
-                float scale;
-                if (facing)
-                {
-                    rot = BuildFacing(p.Move);
-                    scale = size * p.KeyScale;
-                }
-                else
-                {
-                    rot = Quat(p.Rot);
-                    scale = p.Bind ? size * p.KeyScale : size;
-                }
-
-                var pos = new Vector3(p.Pos[0], p.Pos[1], p.Pos[2]);
-                if (kind == Kind.Container)
-                {
-                    s.Node.transform.localPosition = pos;
-                    s.Node.transform.localRotation = rot;
-                    s.Node.transform.localScale = Vector3.one;
-                    var sGfx = size * subScale;
-                    if (!useGScale && Math.Abs(parentScale) > 0.000001f)
-                        sGfx /= parentScale;
-                    if (s.GfxTransform != null)
-                        s.GfxTransform.localScale = Vector3.one * sGfx;
-                }
-                else
-                {
-                    s.Node.transform.localPosition = pos;
-                    s.Node.transform.localRotation = rot;
-                    s.Node.transform.localScale = Vector3.one * scale;
-                }
-                if (s.Gfx != null) s.Gfx.Tick(0f);
+                ApplySlot(s, p, gfxAlpha, facing, parentScale, null, null);
             }
+        }
+
+        private void TickContainerSlots(GfxParticleSlot[] parts, float gfxAlpha, bool facing, float parentScale,
+            float elapsedMs, GfxParticleSim.EmissionRandom random)
+        {
+            liveParticles.Clear();
+            foreach (var particle in parts)
+                if (particle != null && particle.Alive)
+                    liveParticles.Add(particle.PlaybackId);
+
+            freeSlots.Clear();
+            foreach (var slot in slots)
+            {
+                if (slot.ParticleId != 0 && liveParticles.Contains(slot.ParticleId))
+                    continue;
+                playbackSlots.Remove(slot.ParticleId);
+                slot.ParticleId = 0;
+                if (slot.Node != null && slot.Node.activeSelf)
+                    slot.Node.SetActive(false);
+                freeSlots.Enqueue(slot);
+            }
+
+            var step = GfxHeaderDriver.ScaleTick(elapsedMs, playSpeed);
+            // The native particle list advances each live copy in emission order.
+            foreach (var particle in parts)
+            {
+                if (particle == null || !particle.Alive || particle.PlaybackId == 0)
+                    continue;
+                if (!playbackSlots.TryGetValue(particle.PlaybackId, out var slot))
+                {
+                    if (freeSlots.Count == 0)
+                        continue;
+                    slot = freeSlots.Dequeue();
+                    slot.ParticleId = particle.PlaybackId;
+                    slot.GfxTimeMs = 0f;
+                    slot.Gfx?.Restart();
+                    playbackSlots.Add(slot.ParticleId, slot);
+                }
+                slot.GfxTimeMs += step;
+                ApplySlot(slot, particle, gfxAlpha, facing, parentScale, step, random);
+            }
+        }
+
+        private void ApplySlot(Slot slot, GfxParticleSlot particle, float gfxAlpha, bool facing, float parentScale,
+            float? stepMs, GfxParticleSim.EmissionRandom random)
+        {
+            var node = slot.Node;
+            if (node == null)
+                return;
+            if (!node.activeSelf)
+                node.SetActive(true);
+            if (kind == Kind.Static)
+                return;
+
+            node.transform.localPosition = new Vector3(particle.Pos[0], particle.Pos[1], particle.Pos[2]);
+            node.transform.localRotation = facing ? BuildFacing(particle.Move) : Quat(particle.Rot);
+            if (kind == Kind.Container)
+            {
+                node.transform.localScale = Vector3.one;
+                var scale = particle.Size * subScale;
+                if (!useGScale && Math.Abs(parentScale) > 0.000001f)
+                    scale /= parentScale;
+                if (slot.GfxTransform != null)
+                    slot.GfxTransform.localScale = Vector3.one * scale;
+            }
+            else
+                node.transform.localScale = Vector3.one * (facing || particle.Bind
+                    ? particle.Size * particle.KeyScale : particle.Size);
+
+            var gfx = slot.Gfx;
+            if (gfx == null)
+                return;
+            gfx.TimeManual = true;
+            gfx.PlayerPaused = false;
+            var alphaByte = Mathf.Floor(Mathf.Clamp01(particle.Color[3] * particle.KeyAlpha * gfxAlpha) * 255f);
+            gfx.Alpha = alphaByte / 255f;
+            gfx.enabled = false;
+            if (stepMs.HasValue)
+                gfx.TickEmbeddedFrame(slot.GfxTimeMs, stepMs.Value, random);
+            else
+            {
+                gfx.TimeMs = particle.Age * 1000f * playSpeed;
+                gfx.Tick(0f);
+            }
+        }
+
+        internal void ResetPlayback()
+        {
+            foreach (var slot in slots)
+            {
+                slot.ParticleId = 0;
+                if (slot.Node != null && slot.Node.activeSelf)
+                    slot.Node.SetActive(false);
+            }
+            playbackSlots.Clear();
         }
 
         private void Rebuild()
@@ -177,6 +260,7 @@ namespace SilverEcho.ForsakenWorld
             ClearSlots();
             built = true;
             kind = Kind.None;
+            randomDrawsPerCopy = 0;
             buildError = null;
             if (string.IsNullOrEmpty(dummyElementName) || poolSize <= 0)
             {
@@ -206,7 +290,7 @@ namespace SilverEcho.ForsakenWorld
                 kind = Kind.Container;
                 subScale = container.SubGfxScale;
                 useGScale = container.Params != null && container.Params.DummyUseGScale;
-                playSpeed = container.Params != null ? container.Params.PlaySpeed : 1f;
+                playSpeed = container.Params.PlaySpeed * container.SubGfxSpeed;
                 var sub = dummy.transform.Find(GfxContainerDriver.SubGfxNodeName);
                 templateGo = sub != null ? sub.gameObject : null;
                 if (templateGo == null)
@@ -215,6 +299,7 @@ namespace SilverEcho.ForsakenWorld
                     kind = Kind.None;
                     return;
                 }
+                randomDrawsPerCopy = CountContainerCopies(templateGo.transform);
             }
             else
             {
@@ -295,6 +380,9 @@ namespace SilverEcho.ForsakenWorld
 
         private void ClearSlots()
         {
+            playbackSlots.Clear();
+            initializedCopies.Clear();
+            initializationRandom = null;
             for (var i = 0; i < slots.Count; i++)
             {
                 var s = slots[i];
@@ -304,6 +392,18 @@ namespace SilverEcho.ForsakenWorld
             slots.Clear();
             batches.Clear();
             useInstancing = false;
+        }
+
+        private static int CountContainerCopies(Transform gfxRoot)
+        {
+            int count = 1;
+            for (int i = 0; i < gfxRoot.childCount; i++)
+            {
+                if (gfxRoot.GetChild(i).TryGetComponent<GfxContainerDriver>(out var container) &&
+                    container.SubGfx != null)
+                    count += CountContainerCopies(container.SubGfx);
+            }
+            return count;
         }
 
         private void TickInstances(GfxParticleSlot[] parts, float gfxAlpha, bool facing)

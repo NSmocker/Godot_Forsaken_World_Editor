@@ -170,7 +170,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 }
                 else if (el.SystemId == "210" || el.SystemId == "211")
                 {
-                    driver = AttachGrid(el, elementGo, texResolver, gfx2d, result.Warnings);
+                    driver = AttachGrid(el, elementGo, index, texResolver, gfx2d, result.Warnings);
                 }
                 else if (el.SystemId == "220")
                 {
@@ -608,7 +608,8 @@ namespace SilverEcho.ForsakenWorld.Editor
             string texFile,
             string systemId,
             GfxTextureResolver texResolver,
-            List<string> warnings)
+            List<string> warnings,
+            bool encodedSamples = false)
         {
             Texture texture = null;
             if (texResolver == null || string.IsNullOrEmpty(texFile))
@@ -619,10 +620,11 @@ namespace SilverEcho.ForsakenWorld.Editor
             {
                 try
                 {
-                    var imported = AssembledTextureImporter.ImportOrUpdate(
-                        resolved.Resource.File.FullPath,
-                        resolved.RequestedRelativePath,
-                        resolved.DdsHeader);
+                    var imported = encodedSamples
+                        ? AssembledTextureImporter.ImportGfxShaderTexture(resolved.Resource.File.FullPath,
+                            resolved.RequestedRelativePath, resolved.DdsHeader)
+                        : AssembledTextureImporter.ImportOrUpdate(resolved.Resource.File.FullPath,
+                            resolved.RequestedRelativePath, resolved.DdsHeader);
                     if (imported != null && imported.Texture != null)
                         texture = imported.Texture;
                     else if (warnings != null && imported != null &&
@@ -720,6 +722,7 @@ namespace SilverEcho.ForsakenWorld.Editor
         private static GfxElementDriver AttachGrid(
             GfxElementPlan el,
             GameObject elementGo,
+            GameDataIndex index,
             GfxTextureResolver texResolver,
             bool gfx2d,
             List<string> warnings)
@@ -729,7 +732,66 @@ namespace SilverEcho.ForsakenWorld.Editor
                 el.Properties, el.GridAnimations, el.SystemId, el.Index);
             var texture = ResolveElementTexture(gp.TexFile, el.SystemId, texResolver, warnings);
             grid.Configure(gp, texture, gfx2d, warnings);
+            var shaderFile = GfxPropertyValues.Get(el.Properties, "ShaderFile");
+            if (!string.IsNullOrWhiteSpace(shaderFile))
+                BindGridShader(grid, el, shaderFile, index, texResolver, warnings);
             return grid;
+        }
+
+        private static void BindGridShader(GfxGridDriver grid, GfxElementPlan el, string shaderFile,
+            GameDataIndex index, GfxTextureResolver texResolver, List<string> warnings)
+        {
+            var path = shaderFile.Replace('\\', '/').Trim();
+            if (!path.StartsWith("shaders/", StringComparison.OrdinalIgnoreCase))
+                path = "shaders/" + path;
+            try
+            {
+                var descriptor = index?.ResolveShaderSource(path);
+                if (descriptor != null)
+                {
+                    foreach (var line in File.ReadLines(descriptor))
+                    {
+                        var tokens = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (tokens.Length < 2 || !tokens[0].Equals("pixelshader", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        var program = index.ResolveShaderSource(tokens[1].Trim('"'));
+                        if (program != null &&
+                            Path.GetFileName(program).Equals("dissolve_edgealpha.txt", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var mask = ResolveElementTexture(GfxPropertyValues.Get(el.Properties, "ShaderTex"),
+                                el.SystemId, texResolver, warnings, encodedSamples: true);
+                            if (mask == null)
+                            {
+                                warnings.Add("GFX ID " + el.SystemId + " dissolve mask missing: " + shaderFile);
+                                return;
+                            }
+                            var threshold = new GfxGridPixelConstant();
+                            var edge = new GfxGridPixelConstant();
+                            if (el.SourceElement != null)
+                            {
+                                foreach (var constant in el.SourceElement.PixelShaderConstants)
+                                {
+                                    switch (GfxPropertyValues.Int(constant.Properties, "PSConstIndex", -1))
+                                    {
+                                        case 0: threshold = GfxGridPixelConstant.From(constant); break;
+                                        case 1: edge = GfxGridPixelConstant.From(constant); break;
+                                    }
+                                }
+                            }
+                            var diffuse = ResolveElementTexture(grid.Params.TexFile, el.SystemId,
+                                texResolver, warnings, encodedSamples: true);
+                            grid.ConfigureDissolve(diffuse, mask, threshold, edge);
+                            return;
+                        }
+                        break;
+                    }
+                }
+                warnings.Add("GFX ID " + el.SystemId + " pixel shader unavailable: " + shaderFile);
+            }
+            catch (IOException ex)
+            {
+                warnings.Add("GFX ID " + el.SystemId + " pixel shader load: " + ex.Message);
+            }
         }
 
         private static GfxElementDriver AttachContainer(
@@ -760,7 +822,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                     subRoot.transform.localScale = Vector3.one;
                     if (built.Player != null)
                     {
-                        subSpeed = built.Player.PlaySpeed > 0f ? built.Player.PlaySpeed : 1f;
+                        subSpeed = GfxHeaderConfig.FromHeader(built.Plan.Header).PlaySpeed;
                         built.Player.enabled = false;
                         built.Player.Playing = false;
                         built.Player.HeaderControl = false;
@@ -891,7 +953,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                             string.IsNullOrEmpty(resolved.RequestedRelativePath)
                                 ? resolved.Resource.File.RelativePath
                                 : resolved.RequestedRelativePath,
-                            false, textures);
+                            false, textures, resolved.DdsHeader);
                 }
 
                 if (element.SystemId != "170")

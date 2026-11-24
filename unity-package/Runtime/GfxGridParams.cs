@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace SilverEcho.ForsakenWorld
 {
@@ -28,6 +29,7 @@ namespace SilverEcho.ForsakenWorld
         public float ZOffset;
         public string TexFile = string.Empty;
         public bool Is2D;
+        public GfxSpriteParamsSerial RenderSettings;
 
         public int VertCount => Math.Max(0, W) * Math.Max(0, H);
         public bool HasAnimation =>
@@ -57,10 +59,14 @@ namespace SilverEcho.ForsakenWorld
             p.RotFromView = GfxPropertyValues.Bool(properties, "RotFromView", false);
             p.ZOffset = GfxPropertyValues.Float(properties, "fZOffset", 0f);
             p.TexFile = GfxPropertyValues.Get(properties, "TexFile", string.Empty);
+            var render = GfxSpriteParams.FromProperties(properties, systemId, index);
+            // Grid reverses and exchanges the absolute coordinates after
+            // resolving the base atlas rectangle.
+            render.UReverse = render.VReverse = render.UvExchange = false;
+            p.RenderSettings = GfxSpriteParamsSerial.FromParams(render);
 
             var n = p.VertCount;
             p.Positions = new float[n * 3];
-            p.Colors = new float[n * 4];
             for (var i = 0; i < n; i++)
             {
                 var key = i == 0 ? "GridVector_1" : "GridVector_" + (i + 1);
@@ -75,26 +81,34 @@ namespace SilverEcho.ForsakenWorld
                 p.Positions[o] = parts.Length > 0 ? GfxPropertyValues.ParseFloat(parts[0], 0f) : 0f;
                 p.Positions[o + 1] = parts.Length > 1 ? GfxPropertyValues.ParseFloat(parts[1], 0f) : 0f;
                 p.Positions[o + 2] = parts.Length > 2 ? GfxPropertyValues.ParseFloat(parts[2], 0f) : 0f;
-
-                var colorKey = i == 0 ? "dwColor" : "dwColor_" + (i + 1);
-                // Godot: first dwColor, then dwColor_2.. — Unity tracker numbers first as dwColor or dwColor_1
-                var col = GfxPropertyValues.ArgbColor(properties, colorKey, null);
-                if (col == null || (i == 0 && !properties.ContainsKey(colorKey)))
-                {
-                    if (properties.ContainsKey("dwColor_1"))
-                        col = GfxPropertyValues.ArgbColor(properties, "dwColor_1", GfxMath.ColorWhite());
-                    else
-                        col = GfxPropertyValues.ArgbColor(properties, "dwColor", GfxMath.ColorWhite());
-                }
-                var co = i * 4;
-                p.Colors[co] = col[0];
-                p.Colors[co + 1] = col[1];
-                p.Colors[co + 2] = col[2];
-                p.Colors[co + 3] = col[3];
             }
 
+            p.Colors = ReadVertexColors(properties, n);
             ReadAnimation(properties, gridAnimations, p);
             return p;
+        }
+
+        internal static float[] ReadVertexColors(IDictionary<string, string> properties, int count)
+        {
+            var colors = new float[count * 4];
+            for (var i = 0; i < count; i++)
+            {
+                var key = i == 0 ? "dwColor" : "dwColor_" + (i + 1);
+                var raw = GfxPropertyValues.Get(properties, key).Trim();
+                if (i == 0 && raw.Length == 0)
+                    raw = GfxPropertyValues.Get(properties, "dwColor_1").Trim();
+                if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                    raw = raw.Substring(2);
+                // A3DGridDecalEx serializes vertex colors with %x, without zero padding.
+                if (!uint.TryParse(raw, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var argb))
+                    argb = uint.MaxValue;
+                var offset = i * 4;
+                colors[offset] = ((argb >> 16) & 0xff) / 255f;
+                colors[offset + 1] = ((argb >> 8) & 0xff) / 255f;
+                colors[offset + 2] = (argb & 0xff) / 255f;
+                colors[offset + 3] = (argb >> 24) / 255f;
+            }
+            return colors;
         }
 
         private static void ReadAnimation(
@@ -156,6 +170,77 @@ namespace SilverEcho.ForsakenWorld
 
             p.KeyTimes = times;
             p.AnimData = data;
+        }
+    }
+
+    [Serializable]
+    internal sealed class GfxGridPixelConstant
+    {
+        public float Initial;
+        public int LoopCount;
+        public int[] Intervals = Array.Empty<int>();
+        public float[] Values = Array.Empty<float>();
+
+        internal static GfxGridPixelConstant From(GfxPixelShaderConstant source)
+        {
+            var result = new GfxGridPixelConstant
+            {
+                Initial = ReadRed(source.Properties),
+                LoopCount = GfxPropertyValues.Int(source.Properties, "PSLoopCount"),
+                Intervals = new int[source.Targets.Count],
+                Values = new float[source.Targets.Count]
+            };
+            for (int i = 0; i < result.Intervals.Length; ++i)
+            {
+                result.Intervals[i] = GfxPropertyValues.Int(source.Targets[i], "PSInterval");
+                result.Values[i] = ReadRed(source.Targets[i]);
+            }
+            return result;
+        }
+
+        private static float ReadRed(IDictionary<string, string> properties)
+        {
+            var value = GfxPropertyValues.Get(properties, "PSConstValue");
+            int separator = value.IndexOf(',');
+            return GfxPropertyValues.ParseFloat(separator < 0 ? value : value.Substring(0, separator));
+        }
+
+        internal float Evaluate(float timeMs)
+        {
+            if (Intervals.Length == 0)
+                return Initial;
+            float total = 0f;
+            foreach (int interval in Intervals)
+            {
+                if (interval == 0)
+                {
+                    total = 0f;
+                    break;
+                }
+                total += Math.Abs((float)interval);
+            }
+            if (total > 0f)
+            {
+                if (LoopCount >= 0 && timeMs >= LoopCount * total)
+                    return Values[Values.Length - 1];
+                timeMs %= total;
+            }
+
+            float from = Initial;
+            float elapsed = timeMs;
+            for (int i = 0; i < Intervals.Length; i++)
+            {
+                int interval = Intervals[i];
+                float to = Values[i];
+                if (interval == 0)
+                    return from + to * elapsed * .001f;
+                float duration = Math.Abs((float)interval);
+                if (timeMs <= duration)
+                    return interval < 0 ? from : GfxMath.Lerp(from, to, timeMs / duration);
+                timeMs -= duration;
+                from = to;
+            }
+            return from;
         }
     }
 }

@@ -236,8 +236,12 @@ namespace SilverEcho.ForsakenWorld.Editor
                 Resolve(node, Beside(node.File, sub.Name + ".t2lm"));
                 Resolve(node, Beside(node.File, sub.Name + ".t2lm1"), optional: true);
             }
+            var texturePackages = TerrainTextureBuilder.FindTexturePackageFolders();
             foreach (var texture in terrain.Textures)
             {
+                if (TerrainTextureBuilder.FindPackedTexture(texture, texturePackages) != null ||
+                    TerrainTextureBuilder.FindProjectTexture(texture) != null)
+                    continue;
                 var file = TerrainAssetImporter.ResolveTexture(Index, node.File.RelativePath, texture);
                 if (file != null) Add(node, file); else node.Warnings.Add("Ground texture not found: " + texture);
             }

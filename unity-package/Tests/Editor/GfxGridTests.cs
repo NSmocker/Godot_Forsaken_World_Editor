@@ -98,6 +98,135 @@ namespace SilverEcho.ForsakenWorld.Tests
         }
 
         [Test]
+        public void GridUsesParentAlphaAndHalfStrengthForWarp()
+        {
+            var doc = new GfxParser().Parse(Grid3d);
+            var e = doc.Elements[0];
+            var p = GfxGridParams.FromElement(e.Properties, null, "210", 0);
+            var color = GfxMath.ColorWhite();
+            Assert.IsTrue(GfxGridEval.Evaluate(p, 0f, color, .01f).Hidden);
+            var warp = GfxGridEval.Evaluate(p, 0f, color, .25f, true);
+            Assert.IsFalse(warp.Hidden);
+            Assert.AreEqual(.125f, warp.Colors[3], 0.000001f);
+        }
+
+        [Test]
+        public void GridAppliesAtlasBeforeExchangingAxes()
+        {
+            var doc = new GfxParser().Parse(Grid3d);
+            var p = GfxGridParams.FromElement(doc.Elements[0].Properties, null, "210", 0);
+            p.UVExchg = true;
+            p.UReverse = true;
+            var mesh = GfxGridMesh.Build(p, p.Positions, p.Colors, new GfxSpriteUvState
+            {
+                ScaleU = .5f, ScaleV = .25f, OffsetU = .5f, OffsetV = .25f
+            }).Mesh;
+            try
+            {
+                Assert.AreEqual(new Vector2(.25f, 0f), mesh.uv[0]);
+                Assert.AreEqual(new Vector2(.25f, .5f), mesh.uv[1]);
+            }
+            finally
+            {
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void GridVertexColorUsesUnpaddedHexAndPreservesZeroAlpha()
+        {
+            var source = new GfxParser().Parse(Grid3d
+                .Replace("dwColor: ffffffff", "dwColor: ffffff")
+                .Replace("dwColor_2: ffffffff", "dwColor_2: 32301020")).Elements[0];
+            var p = GfxGridParams.FromElement(source.Properties, null, "210", 0);
+
+            Assert.That(p.Colors[0], Is.EqualTo(1f));
+            Assert.That(p.Colors[3], Is.Zero);
+            Assert.That(p.Colors[4], Is.EqualTo(48f / 255f));
+            Assert.That(p.Colors[7], Is.EqualTo(50f / 255f));
+            var warp = GfxGridEval.Evaluate(p, 0f, GfxMath.ColorWhite(), .5f, true);
+            Assert.That(warp.Colors[3], Is.Zero);
+            Assert.That(warp.Colors[7], Is.EqualTo(50f / 1020f));
+        }
+
+        [Test]
+        public void RuntimeGridCopiesReuseRegularSlotsAndRegisterTheirOwnShaderSlots()
+        {
+            var root = new GameObject("slot order");
+            var shader = Shader.Find(GfxTrailMaterialFactory.ShaderName);
+            var plain = new Material(shader);
+            var pixelShader = new Material(shader);
+            var later = new Material(shader);
+            pixelShader.SetFloat("_GfxDissolve", 1f);
+            later.SetFloat("_DstBlend", 1f);
+            try
+            {
+                var authored = AddRenderer(root.transform, plain);
+                var emitter = new GameObject("emitter", typeof(GfxDummyParticlesDriver));
+                emitter.transform.SetParent(root.transform, false);
+                var ordinaryCopy = AddRenderer(emitter.transform, plain);
+                var shaderCopy = AddRenderer(emitter.transform, pixelShader);
+                var laterElement = AddRenderer(root.transform, later);
+                var order = new GfxRenderSlotOrder();
+
+                order.RegisterInitial(root.transform);
+                order.Apply(root.transform);
+
+                Assert.That(authored.sortingOrder, Is.LessThan(ordinaryCopy.sortingOrder));
+                Assert.That(ordinaryCopy.sortingOrder, Is.LessThan(laterElement.sortingOrder));
+                Assert.That(laterElement.sortingOrder, Is.LessThan(shaderCopy.sortingOrder));
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(plain);
+                Object.DestroyImmediate(pixelShader);
+                Object.DestroyImmediate(later);
+            }
+
+            static MeshRenderer AddRenderer(Transform parent, Material material)
+            {
+                var renderer = new GameObject("element", typeof(MeshRenderer)).GetComponent<MeshRenderer>();
+                renderer.transform.SetParent(parent, false);
+                renderer.sharedMaterial = material;
+                return renderer;
+            }
+        }
+
+        [Test]
+        public void PixelConstantHoldsInterpolatesAndStopsAfterAuthoredLoops()
+        {
+            var constant = new GfxGridPixelConstant
+            {
+                Initial = .25f,
+                LoopCount = 2,
+                Intervals = new[] { -100, 200 },
+                Values = new[] { .5f, 1f }
+            };
+
+            Assert.That(constant.Evaluate(100f), Is.EqualTo(.25f));
+            Assert.That(constant.Evaluate(200f), Is.EqualTo(.75f));
+            Assert.That(constant.Evaluate(300f), Is.EqualTo(.25f));
+            Assert.That(constant.Evaluate(500f), Is.EqualTo(.75f));
+            Assert.That(constant.Evaluate(600f), Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void PixelConstantSlopeUsesTotalClockAfterEarlierTargets()
+        {
+            var constant = new GfxGridPixelConstant
+            {
+                Initial = 0f,
+                LoopCount = 1,
+                Intervals = new[] { 100, 0 },
+                Values = new[] { .25f, 2f }
+            };
+
+            Assert.That(constant.Evaluate(100f), Is.EqualTo(.25f));
+            Assert.That(constant.Evaluate(350f), Is.EqualTo(.95f).Within(1e-6f));
+        }
+
+        [Test]
         public void RegistryPorts210And211()
         {
             GfxElementRegistry.ClearPortedForTests();

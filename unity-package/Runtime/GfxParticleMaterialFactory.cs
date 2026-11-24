@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace SilverEcho.ForsakenWorld
 {
@@ -50,6 +51,8 @@ namespace SilverEcho.ForsakenWorld
                     mat.SetTexture("_BaseMap", texture);
                 if (mat.HasProperty("_MainTex"))
                     mat.SetTexture("_MainTex", texture);
+                if (mat.HasProperty("_WarpNormalIsSRGB"))
+                    mat.SetFloat("_WarpNormalIsSRGB", GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat) ? 1f : 0f);
             }
 
             if (mat.HasProperty("_BaseColor"))

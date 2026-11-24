@@ -14,6 +14,8 @@ namespace SilverEcho.ForsakenWorld
     {
         public const string ShaderName = "Forsaken World/Angelica Gfx Sprite";
         public const string HdrpShaderName = AngelicaRenderPipeline.HdrpGfxSprite;
+        private static readonly int WarpDecalId = Shader.PropertyToID("_GfxWarpDecal");
+        private static readonly int WarpTextureSrgbId = Shader.PropertyToID("_WarpNormalIsSRGB");
 
         [SerializeField] private GfxSpriteParamsSerial paramsSerial = new GfxSpriteParamsSerial();
         [SerializeField] private bool visualActive = true;
@@ -37,6 +39,7 @@ namespace SilverEcho.ForsakenWorld
         private GfxSpriteTexturePlayback texturePlayback;
         private GfxKeypointColorPlayback colorPlayback;
         private float lastPlaybackTime;
+        private float warpAlpha;
 
         public GfxSpriteParams Params
         {
@@ -52,6 +55,8 @@ namespace SilverEcho.ForsakenWorld
                     cachedParams.TexAnimMaxTime = Math.Max(0, GfxPropertyValues.Int(source.Properties, "TexAnimMaxTime", cachedParams.TexAnimMaxTime));
                     cachedParams.ResetLoopEnd = GfxPropertyValues.Int(source.Properties, "ResetLoopEnd", cachedParams.ResetLoopEnd ? 1 : 0) != 0;
                     cachedParams.RenderLayer = GfxPropertyValues.Int(source.Properties, "RenderLayer", cachedParams.RenderLayer);
+                    cachedParams.NoWidthScale = GfxPropertyValues.Bool(source.Properties, "NoScale_1", cachedParams.NoWidthScale);
+                    cachedParams.NoHeightScale = GfxPropertyValues.Bool(source.Properties, "NoScale_2", cachedParams.NoHeightScale);
                 }
                 var player = GetComponentInParent<GfxPlayer>();
                 var version = GfxHeaderConfig.FileVersion(player != null ? player.HeaderDictionary() : null);
@@ -328,7 +333,9 @@ namespace SilverEcho.ForsakenWorld
             }
 
             var s = Math.Max(0f, state.Scale);
-            transform.localScale = new Vector3(s, s, s);
+            var screenDecal = p.SystemId == "101";
+            transform.localScale = new Vector3(screenDecal && p.NoWidthScale ? 1f : s,
+                screenDecal && p.NoHeightScale ? 1f : s, s);
 
             EnsureComponents();
             if (runtimeMaterial == null)
@@ -350,6 +357,7 @@ namespace SilverEcho.ForsakenWorld
 
             var col = state.Color ?? GfxMath.ColorWhite();
             var a = GfxMath.Clamp(col[3] * alpha * p.MixAlphaScale, 0f, 1f);
+            warpAlpha = a;
             var color = new Color(col[0], col[1], col[2], a);
             if (propertyBlock == null) propertyBlock = new MaterialPropertyBlock();
             meshRenderer.GetPropertyBlock(propertyBlock);
@@ -371,6 +379,39 @@ namespace SilverEcho.ForsakenWorld
                     new Vector4(uv.ScaleU, uv.ScaleV, uv.OffsetU, uv.OffsetV));
             }
             meshRenderer.SetPropertyBlock(propertyBlock);
+        }
+
+        private void OnWillRenderObject()
+        {
+            var camera = Camera.current;
+            if (camera == null || meshRenderer == null || !Params.Warp || Params.SystemId != "101")
+                return;
+
+            var scale = transform.lossyScale;
+            var halfExtents = new Vector2(Params.Width * Mathf.Abs(scale.x), Params.Height * Mathf.Abs(scale.y));
+            var strength = ProjectWarpDecal(camera, transform.position, halfExtents, warpAlpha);
+            propertyBlock ??= new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(propertyBlock);
+            propertyBlock.SetVector(WarpDecalId, new Vector4(strength.x, strength.y, 1f, 0f));
+            var material = meshRenderer.sharedMaterial;
+            var texture = material != null && material.HasProperty("_BaseMap") ? material.GetTexture("_BaseMap") : null;
+            propertyBlock.SetFloat(WarpTextureSrgbId, texture != null &&
+                UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat) ? 1f : 0f);
+            meshRenderer.SetPropertyBlock(propertyBlock);
+        }
+
+        internal static Vector2 ProjectWarpDecal(Camera camera, Vector3 worldPosition, Vector2 halfExtents, float alpha)
+        {
+            var center = camera.WorldToViewportPoint(worldPosition);
+            if (center.z <= camera.nearClipPlane || center.z >= camera.farClipPlane)
+                return -Vector2.one;
+
+            // A3DDecalEx::Fill_Verts_2D uses a horizontally projected unit vector for
+            // both extents, then DrawToBuffer divides by each viewport dimension.
+            var unit = camera.WorldToViewportPoint(worldPosition + camera.transform.right).x - center.x;
+            var aspect = (float)camera.scaledPixelWidth / Mathf.Max(1, camera.scaledPixelHeight);
+            return GfxRuntimeParticleBatch.ScreenWarpStrength(
+                new Vector2(unit * halfExtents.x, unit * halfExtents.y * aspect), alpha);
         }
 
         private void SetVisualActive(bool active)
@@ -452,6 +493,8 @@ namespace SilverEcho.ForsakenWorld
         public bool VReverse;
         public bool UvExchange;
         public bool RotFromView;
+        public bool NoWidthScale;
+        public bool NoHeightScale;
         public bool Warp;
         public bool ZEnable = true;
         public int Priority;
@@ -483,6 +526,8 @@ namespace SilverEcho.ForsakenWorld
                 VReverse = VReverse,
                 UvExchange = UvExchange,
                 RotFromView = RotFromView,
+                NoWidthScale = NoWidthScale,
+                NoHeightScale = NoHeightScale,
                 Warp = Warp,
                 ZEnable = ZEnable,
                 Priority = Priority,
@@ -518,6 +563,8 @@ namespace SilverEcho.ForsakenWorld
                 VReverse = p.VReverse,
                 UvExchange = p.UvExchange,
                 RotFromView = p.RotFromView,
+                NoWidthScale = p.NoWidthScale,
+                NoHeightScale = p.NoHeightScale,
                 Warp = p.Warp,
                 ZEnable = p.ZEnable,
                 Priority = p.Priority,
