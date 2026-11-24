@@ -368,6 +368,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             if (direct && TerrainMaskImages.UsesDirectLayers(previousMaterial))
             {
                 AngelicaTerrainLayerBindings.Apply(previousMaterial);
+                TerrainDetailTextureCache.Queue(previousMaterial);
                 return previousMaterial;
             }
 
@@ -466,6 +467,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 mat.SetFloat("_Brightness", 1f);
                 if (direct) AngelicaTerrainLayerBindings.Apply(mat);
                 var saved = Save(mat, materialPath);
+                if (direct) TerrainDetailTextureCache.Queue(saved);
                 mat = null;
                 return saved;
             }
@@ -495,6 +497,11 @@ namespace SilverEcho.ForsakenWorld.Editor
             CopyFloat(source, destination, "_HasRoughness" + sourceSuffix, "_HasRoughness" + destinationSuffix);
             CopyFloat(source, destination, "_NormalStrength" + sourceSuffix, "_NormalStrength" + destinationSuffix);
             CopyFloat(source, destination, "_RoughnessStrength" + sourceSuffix, "_RoughnessStrength" + destinationSuffix);
+            CopyTexture(source, destination, "_ParallaxHeight" + sourceSuffix, "_ParallaxHeight" + destinationSuffix);
+            CopyFloat(source, destination, "_UseParallax" + sourceSuffix, "_UseParallax" + destinationSuffix);
+            CopyFloat(source, destination, "_ParallaxDepth" + sourceSuffix, "_ParallaxDepth" + destinationSuffix);
+            CopyFloat(source, destination, "_ParallaxSteps" + sourceSuffix, "_ParallaxSteps" + destinationSuffix);
+            CopyFloat(source, destination, "_ParallaxFadeMip" + sourceSuffix, "_ParallaxFadeMip" + destinationSuffix);
             if (copyAlbedo && source.HasProperty("_LayerMapping" + sourceSuffix) &&
                 destination.HasProperty("_LayerMapping" + destinationSuffix))
                 destination.SetVector("_LayerMapping" + destinationSuffix,

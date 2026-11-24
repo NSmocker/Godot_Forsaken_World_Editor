@@ -347,6 +347,7 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
             EditorUtility.SetDirty(material);
             AssetDatabase.SaveAssetIfDirty(material);
+            TerrainDetailTextureCache.Queue(material);
             return true;
         }
 

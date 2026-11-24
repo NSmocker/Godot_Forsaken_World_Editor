@@ -26,24 +26,34 @@ namespace SilverEcho.ForsakenWorld.Editor
             bool direct = TerrainMaskImages.UsesDirectLayers(editor.target as Material);
             bool hdrp = editor.target is Material terrain && terrain.shader.name == TerrainAssetImporter.HdrpShaderName;
 
+            EditorGUI.BeginChangeCheck();
             EditorGUILayout.LabelField("Terrain Layers", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Imported layers", sourceCount.ToString());
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(layerCount <= 1))
             {
                 if (GUILayout.Button("− Remove Last", GUILayout.Height(24)))
+                {
+                    editor.RegisterPropertyChangeUndo("Remove Terrain Layer");
                     countProperty.floatValue = --layerCount;
+                    GUI.changed = true;
+                }
             }
             using (new EditorGUI.DisabledScope(layerCount >= MaxLayers))
             {
                 if (GUILayout.Button("+ Add Layer", GUILayout.Height(24)))
+                {
+                    editor.RegisterPropertyChangeUndo("Add Terrain Layer");
                     countProperty.floatValue = ++layerCount;
+                    GUI.changed = true;
+                }
             }
             EditorGUILayout.EndHorizontal();
             EditorGUI.BeginChangeCheck();
             int sliderCount = EditorGUILayout.IntSlider("Active layers", layerCount, 1, MaxLayers);
             if (EditorGUI.EndChangeCheck())
             {
+                editor.RegisterPropertyChangeUndo("Change Terrain Layer Count");
                 layerCount = sliderCount;
                 countProperty.floatValue = layerCount;
             }
@@ -51,7 +61,7 @@ namespace SilverEcho.ForsakenWorld.Editor
                 "Layer 0 is the opaque base and has no mask. Each other layer shows its grayscale PNG mask. White is full coverage, black is none. Editing that PNG or replacing the slot updates the landscape.",
                 MessageType.Info);
             EditorGUILayout.HelpBox(
-                "Import Normal maps as Texture Type: Normal Map. Import grayscale Roughness maps with sRGB disabled.",
+                "Import Normal maps as Texture Type: Normal Map. Disable sRGB for Roughness and Parallax Height maps.",
                 MessageType.None);
 
             if (!direct)
@@ -61,11 +71,16 @@ namespace SilverEcho.ForsakenWorld.Editor
                         TerrainMaskImages.BindExisting(bound);
             }
             for (int i = 0; i < layerCount; i++)
-                DrawLayer(editor, properties, i, sourceCount, direct, !hdrp || i == 0);
+                DrawLayer(editor, properties, i, sourceCount, direct);
 
+            bool layersChanged = EditorGUI.EndChangeCheck();
             if (hdrp)
                 foreach (var target in editor.targets)
-                    AngelicaTerrainLayerBindings.Apply(target as Material);
+                {
+                    var targetMaterial = target as Material;
+                    AngelicaTerrainLayerBindings.Apply(targetMaterial);
+                    if (layersChanged) TerrainDetailTextureCache.Queue(targetMaterial, edited: true);
+                }
 
             EditorGUILayout.Space(4);
             DrawProperty(editor, properties, "_UseLightmap", "Use daytime lightmap");
@@ -84,10 +99,14 @@ namespace SilverEcho.ForsakenWorld.Editor
             }
         }
 
-        public override void ValidateMaterial(Material material) => AngelicaTerrainLayerBindings.Apply(material);
+        public override void ValidateMaterial(Material material)
+        {
+            AngelicaTerrainLayerBindings.Apply(material);
+            TerrainDetailTextureCache.Queue(material);
+        }
 
         private static void DrawLayer(MaterialEditor editor, MaterialProperty[] properties, int index, int sourceCount,
-            bool direct, bool showDetailMaps)
+            bool direct)
         {
             string key = "SilverEcho.TerrainLayer." + index;
             bool expanded = SessionState.GetBool(key, index == 0);
@@ -106,19 +125,34 @@ namespace SilverEcho.ForsakenWorld.Editor
                     if (albedo != null)
                         editor.TextureScaleOffsetProperty(albedo);
                 }
-                if (showDetailMaps)
-                {
-                    DrawTexture(editor, properties, "_Normal" + index, "Normal Map", "_HasNormal" + index);
-                    DrawRange(editor, properties, "_NormalStrength" + index, "Normal Strength");
-                    DrawTexture(editor, properties, "_Roughness" + index, "Roughness Map", "_HasRoughness" + index);
-                    DrawRange(editor, properties, "_RoughnessStrength" + index, "Roughness Strength");
-                }
+                DrawTexture(editor, properties, "_Normal" + index, "Normal Map", "_HasNormal" + index);
+                DrawRange(editor, properties, "_NormalStrength" + index, "Normal Strength");
+                DrawTexture(editor, properties, "_Roughness" + index, "Roughness Map", "_HasRoughness" + index);
+                DrawRange(editor, properties, "_RoughnessStrength" + index, "Roughness Strength");
+                DrawParallax(editor, properties, index);
                 if (direct || index >= sourceCount)
                     DrawMapping(editor, properties, index, direct ? "Projection Scale" : "UV Scale");
                 else
                     EditorGUILayout.LabelField("Projection", "Imported from terrain data");
             }
             EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawParallax(MaterialEditor editor, MaterialProperty[] properties, int index)
+        {
+            var useParallax = FindProperty("_UseParallax" + index, properties, false);
+            if (useParallax == null) return;
+
+            editor.ShaderProperty(useParallax, new GUIContent("Use Parallax Displacement",
+                "Ray marches the height map per pixel. Use a low depth and enable only on layers that need it."));
+            DrawTexture(editor, properties, "_ParallaxHeight" + index, "Parallax Height Map");
+            if (useParallax.floatValue <= 0.5f && !useParallax.hasMixedValue) return;
+
+            EditorGUI.indentLevel++;
+            DrawRange(editor, properties, "_ParallaxDepth" + index, "Depth (cm)");
+            DrawProperty(editor, properties, "_ParallaxSteps" + index, "Max Steps");
+            DrawRange(editor, properties, "_ParallaxFadeMip" + index, "Mip Fade Start");
+            EditorGUI.indentLevel--;
         }
 
         private static void DrawLayerMask(MaterialEditor editor, MaterialProperty[] properties, int index)

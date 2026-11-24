@@ -12,7 +12,9 @@ TEXTURE2D(_Layer0); TEXTURE2D(_Layer1); TEXTURE2D(_Layer2); TEXTURE2D(_Layer3);
 TEXTURE2D(_Layer4); TEXTURE2D(_Layer5); TEXTURE2D(_Layer6); TEXTURE2D(_Layer7);
 TEXTURE2D(_Layer8); TEXTURE2D(_Layer9); TEXTURE2D(_Layer10); TEXTURE2D(_Layer11);
 TEXTURE2D(_Layer12); TEXTURE2D(_Layer13); TEXTURE2D(_Layer14); TEXTURE2D(_Layer15);
+#if !defined(ANGELICA_TERRAIN_DETAIL_ARRAY) && !defined(ANGELICA_TERRAIN_PARALLAX)
 TEXTURE2D(_Normal0); TEXTURE2D(_Roughness0);
+#endif
 // Layer count changes texture bindings, so keep separate compiled variants.
 #if defined(ANGELICA_TERRAIN_WIDE)
 #define ANGELICA_TERRAIN_LAYER_LIMIT 16
@@ -50,8 +52,63 @@ TEXTURE2D(_NightLightmap);
     float4 _Layer13_ST;
     float4 _Layer14_ST;
     float4 _Layer15_ST;
+#if defined(ANGELICA_TERRAIN_DETAIL_ARRAY) || defined(ANGELICA_TERRAIN_PARALLAX)
+
+TEXTURE2D_ARRAY(_TerrainDetails);
+float4 _TerrainDetailSlices0, _TerrainDetailSlices1, _TerrainDetailSlices2, _TerrainDetailSlices3;
+float _NormalStrength0, _RoughnessStrength0;
+float _NormalStrength1, _RoughnessStrength1;
+float _NormalStrength2, _RoughnessStrength2;
+float _NormalStrength3, _RoughnessStrength3;
+float _NormalStrength4, _RoughnessStrength4;
+float _NormalStrength5, _RoughnessStrength5;
+float _NormalStrength6, _RoughnessStrength6;
+float _NormalStrength7, _RoughnessStrength7;
+float _NormalStrength8, _RoughnessStrength8;
+float _NormalStrength9, _RoughnessStrength9;
+float _NormalStrength10, _RoughnessStrength10;
+float _NormalStrength11, _RoughnessStrength11;
+float _NormalStrength12, _RoughnessStrength12;
+float _NormalStrength13, _RoughnessStrength13;
+float _NormalStrength14, _RoughnessStrength14;
+float _NormalStrength15, _RoughnessStrength15;
+
+float GetDetailSlice(int layer)
+{
+    if (layer < 4) return _TerrainDetailSlices0[layer];
+    if (layer < 8) return _TerrainDetailSlices1[layer - 4];
+    if (layer < 12) return _TerrainDetailSlices2[layer - 8];
+    return _TerrainDetailSlices3[layer - 12];
+}
+
+float2 GetDetailStrength(int layer)
+{
+    switch (layer)
+    {
+        case 0: return float2(_NormalStrength0, _RoughnessStrength0);
+        case 1: return float2(_NormalStrength1, _RoughnessStrength1);
+        case 2: return float2(_NormalStrength2, _RoughnessStrength2);
+        case 3: return float2(_NormalStrength3, _RoughnessStrength3);
+        case 4: return float2(_NormalStrength4, _RoughnessStrength4);
+        case 5: return float2(_NormalStrength5, _RoughnessStrength5);
+        case 6: return float2(_NormalStrength6, _RoughnessStrength6);
+        case 7: return float2(_NormalStrength7, _RoughnessStrength7);
+        case 8: return float2(_NormalStrength8, _RoughnessStrength8);
+        case 9: return float2(_NormalStrength9, _RoughnessStrength9);
+        case 10: return float2(_NormalStrength10, _RoughnessStrength10);
+        case 11: return float2(_NormalStrength11, _RoughnessStrength11);
+        case 12: return float2(_NormalStrength12, _RoughnessStrength12);
+        case 13: return float2(_NormalStrength13, _RoughnessStrength13);
+        case 14: return float2(_NormalStrength14, _RoughnessStrength14);
+        case 15: return float2(_NormalStrength15, _RoughnessStrength15);
+    }
+    return 0.0;
+}
+#else
     float _NormalStrength0, _RoughnessStrength0;
-    float _HasNormal0, _HasRoughness0, _HasAlbedo0;
+    float _HasNormal0, _HasRoughness0;
+#endif
+    float _HasAlbedo0;
     float _HasAlbedo1;
     float _HasAlbedo2;
     float _HasAlbedo3;
@@ -219,6 +276,15 @@ float SampleOverlay(int layer, float2 uv)
     return mask.b;
 }
 
+float2 ProjectLayerUV(float3 position, int axis)
+{
+    return axis == 0 ? position.zy : (axis == 1 ? position.xz : position.xy);
+}
+
+#if defined(ANGELICA_TERRAIN_PARALLAX)
+#include "AngelicaTerrainParallax.hlsl"
+#endif
+
 struct AngelicaTerrainSurface
 {
     float3 albedo;
@@ -228,7 +294,7 @@ struct AngelicaTerrainSurface
     bool hasLightmap;
 };
 
-AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV, float3 geometricNormal)
+AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV, float3 geometricNormal, float3 viewWS)
 {
     AngelicaTerrainSurface surface;
     surface.albedo = 0.0;
@@ -237,6 +303,10 @@ AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV
     surface.lightmap = 1.0;
     surface.hasLightmap = false;
     float roughness = 1.0;
+#if defined(ANGELICA_TERRAIN_PARALLAX)
+    float facing = saturate(dot(viewWS, geometricNormal));
+    float3 tangentViewOS = TransformWorldToObjectDir(viewWS - geometricNormal * facing, false);
+#endif
     float2 maskDx = ddx(splatUV);
     float2 maskDy = ddy(splatUV);
 #if defined(ANGELICA_TERRAIN_WIDE)
@@ -251,19 +321,19 @@ AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV
         bool packedLayer = importedLayer && !directLayers;
         float4 p = packedLayer ? LOAD_TEXTURE2D(_LayerParams, int2(i, 0)) : GetLayerMapping(i);
         int axis = packedLayer ? (int)round(p.w) : (int)round(p.z);
-        float2 uv = packedLayer
-            ? (p.w < 0.5 ? float2(positionOS.z, positionOS.y - _MinHeight) :
-                (p.w < 1.5 ? positionOS.xz : float2(positionOS.x, positionOS.y - _MinHeight)))
-            : (axis == 0 ? float2(positionOS.z, positionOS.y - _MinHeight) :
-                (axis == 1 ? positionOS.xz : float2(positionOS.x, positionOS.y - _MinHeight)));
+        float2 uv = ProjectLayerUV(positionOS - float3(0.0, _MinHeight, 0.0), axis);
         int slot = packedLayer ? (int)p.x : i;
         int layerBit = 1 << slot;
-        uv *= packedLayer ? p.yz : p.xy;
-        if (((int)_FlipLayers & layerBit) != 0) uv.y = -uv.y;
+        float2 uvScale = packedLayer ? p.yz : p.xy;
+        if (((int)_FlipLayers & layerBit) != 0) uvScale.y = -uvScale.y;
+        uv *= uvScale;
         if (directLayers)
         {
             float4 textureTransform = GetLayerTextureTransform(slot);
             uv = uv * textureTransform.xy + textureTransform.zw;
+#if defined(ANGELICA_TERRAIN_PARALLAX)
+            uvScale *= textureTransform.xy;
+#endif
         }
         float2 layerDx = ddx(uv);
         float2 layerDy = ddy(uv);
@@ -279,10 +349,50 @@ AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV
             else
                 mask = GetHasAlbedo(i) > 0.5 ? layer.a : 0.0;
         }
+#if defined(ANGELICA_TERRAIN_DETAIL_ARRAY) || defined(ANGELICA_TERRAIN_PARALLAX)
+        float slice = GetDetailSlice(i);
+#endif
+#if defined(ANGELICA_TERRAIN_PARALLAX)
+        uint heightChannels = GetHeightChannels(i);
+        // Keep mask coverage in the original coordinates, including albedo-alpha masks.
+        UNITY_BRANCH if (heightChannels != 0u && slice > 0.0 && mask > 0.0)
+        {
+            float2 parallaxOffset = EvaluateParallaxOffset(i, slice - 1.0, axis, uvScale, uv,
+                layerDx, layerDy, tangentViewOS, facing);
+            if (any(parallaxOffset != 0.0))
+            {
+                uv += parallaxOffset;
+                layer = SampleLayer(slot, uv, layerDx, layerDy);
+            }
+        }
+#endif
         surface.albedo = lerp(surface.albedo, layer.rgb, mask);
 
-        // The base layer keeps its separately authored detail maps. The color
-        // overlays consume only their own source albedo and mask bindings.
+#if defined(ANGELICA_TERRAIN_DETAIL_ARRAY) || defined(ANGELICA_TERRAIN_PARALLAX)
+        if (slice > 0.0 && mask > 0.0)
+        {
+            float4 detail = SAMPLE_TEXTURE2D_ARRAY_GRAD(_TerrainDetails, sampler_TrilinearRepeat, uv,
+                slice - 1.0, layerDx, layerDy);
+            uint channels = (uint)round(detail.a * 3.0);
+#if defined(ANGELICA_TERRAIN_PARALLAX)
+            if (heightChannels != 0u) channels = heightChannels;
+#endif
+            float2 strength = GetDetailStrength(i);
+            if ((channels & 1u) != 0 && strength.x > 0.0)
+            {
+                float2 xy = detail.rg * 2.0 - 1.0;
+                float3 tangentNormal = float3(xy * strength.x, sqrt(saturate(1.0 - dot(xy, xy))));
+                float3 layerNormal = ProjectLayerNormal(tangentNormal, axis, geometricNormal);
+                surface.normalWS = normalize(lerp(surface.normalWS, layerNormal, mask));
+            }
+            if ((channels & 2u) != 0 && strength.y > 0.0)
+            {
+                float layerRoughness = lerp(1.0, detail.b, saturate(strength.y));
+                roughness = lerp(roughness, layerRoughness, mask);
+            }
+        }
+#else
+        // Keep the original direct base-layer path for materials without overlay details.
         if (i == 0)
         {
             float normalStrength = saturate(_NormalStrength0 * 0.5) * _HasNormal0;
@@ -300,6 +410,7 @@ AngelicaTerrainSurface EvaluateAngelicaTerrain(float3 positionOS, float2 splatUV
                 roughness = lerp(1.0, saturate(roughnessSample), roughnessStrength);
             }
         }
+#endif
     }
 
     surface.perceptualSmoothness = 1.0 - saturate(roughness);
@@ -339,7 +450,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     // positionRWS and the world-to-object matrix are both camera-relative in HDRP.
     // Adding the camera position first makes layer UVs slide when the view moves.
     float3 positionOS = TransformWorldToObject(input.positionRWS);
-    AngelicaTerrainSurface terrain = EvaluateAngelicaTerrain(positionOS, input.texCoord0.xy, geometricNormal);
+    AngelicaTerrainSurface terrain = EvaluateAngelicaTerrain(positionOS, input.texCoord0.xy, geometricNormal, V);
 
     ZERO_INITIALIZE(SurfaceData, surfaceData);
     surfaceData.materialFeatures = MATERIALFEATUREFLAGS_LIT_STANDARD;
